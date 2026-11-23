@@ -80,7 +80,11 @@ import {
   wildsLootDb,
 } from "./vitals";
 import { type WildsEffects, type WildsPeer, WildsPvpRuntime } from "./wilds";
-import { type WildsLootPeer, WildsLootRuntime } from "./wilds-loot";
+import {
+  type HuntSaved,
+  type WildsLootPeer,
+  WildsLootRuntime,
+} from "./wilds-loot";
 
 export type Env = {
   TOWN_ROOM: DurableObjectNamespace<TownRoom>;
@@ -129,6 +133,8 @@ const CAST_OP = 3;
 const FRESH_TICKET_MS = 2 * 60_000;
 /** The hibernation tag a watcher's socket is accepted with. */
 const WATCH_TAG = "watch";
+/** Where a Wilds room keeps its Hunt Crystal over a sleep (see HuntStore). */
+const HUNT_KEY = "hunt";
 
 /** Survives hibernation on the socket itself. */
 type Attachment = {
@@ -1230,12 +1236,14 @@ export class TownRoom extends DurableObject<Env> {
     this.broadcast({ t: "look", player: playerOf(target) });
   }
 
-  /** Whether a fighter is playing music, for the in-tune bonus. The boss
-   * room and the Tower care; elsewhere it's dropped. Faster than a person
+  /** Whether a herzie is playing music: in a fight, for the in-tune bonus
+   * (the boss room and the Tower care); on the Wilds, for the Hunt Crystal
+   * (it fills with listening). Elsewhere it's dropped. Faster than a person
    * presses play and pause is a strike. */
   private onTune(s: Session, on: unknown, now: number) {
     const p = s.player;
-    if (!p || !this.fight) return;
+    const loot = this.fight ? null : this.lootHere(s.att);
+    if (!p || (!this.fight && !loot)) return;
     const playing = parseTune(on);
     if (playing === null) {
       this.strike(s);
@@ -1246,7 +1254,12 @@ export class TownRoom extends DurableObject<Env> {
       return;
     }
     s.tunedAt = now;
-    this.fight.tune(p.uid, playing, now);
+    if (this.fight) this.fight.tune(p.uid, playing, now);
+    else if (loot) {
+      loot.tune(p.uid, playing, now);
+      // Filling: watched every tick (it overflows into a cache on one).
+      if (loot.live) this.startTicking();
+    }
   }
 
   /** A Bard's lute stance: heal bolts or attacks. Only a fight cares;
@@ -1387,6 +1400,10 @@ export class TownRoom extends DurableObject<Env> {
       },
       here: () => this.lootPeers(),
       emit: (o) => this.dispatch(o),
+      store: {
+        load: () => this.ctx.storage.kv.get<HuntSaved>(HUNT_KEY),
+        save: (h) => this.ctx.storage.kv.put(HUNT_KEY, h),
+      },
     });
     return this.loot;
   }

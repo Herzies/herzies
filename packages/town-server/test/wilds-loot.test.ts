@@ -1,12 +1,12 @@
 import type { LootDrop, ServerMessage } from "@herzies/shared/town-net";
 import {
-  WILDS_CACHE_EVERY_MS,
-  WILDS_CACHE_FIRST_MS,
+  huntRate,
   WILDS_CACHE_HOLD_MS,
   WILDS_CACHE_HOLD_RADIUS,
   WILDS_DROP,
-  wildsCacheAt,
+  WILDS_HUNT_FILL_MS,
   wildsCacheId,
+  wildsCacheSpot,
 } from "@herzies/shared/wilds-loot";
 import { describe, expect, it, vi } from "vitest";
 import type { Outbound } from "../src/fight";
@@ -17,6 +17,7 @@ import type {
 } from "../src/vitals";
 import {
   HOLD_RETRY_MS,
+  type HuntSaved,
   type WildsLootPeer,
   WildsLootRuntime,
 } from "../src/wilds-loot";
@@ -30,6 +31,8 @@ const SHARD = 3;
 const T = START + 10_000;
 /** Where b fell. */
 const FELL = { x: 30, z: 0 };
+/** When a crystal listened full from T turns up its cache. */
+const AT = T + WILDS_HUNT_FILL_MS;
 
 type Msg<K extends ServerMessage["t"]> = Extract<ServerMessage, { t: K }>;
 
@@ -57,8 +60,9 @@ function deferred<V>() {
 }
 
 /** A Wilds room's loot, with a stubbed database (every call fails unless
- * a test says otherwise), herzies placed by hand, and its own clock. */
-function wildsLoot() {
+ * a test says otherwise), herzies placed by hand, its own clock, and a
+ * store for the crystal (`saved`, shared with another room if given). */
+function wildsLoot(saved: { h?: HuntSaved } = {}) {
   const out: Outbound[] = [];
   const peers = new Map<string, WildsLootPeer>();
   const clock = { now: T };
@@ -77,6 +81,12 @@ function wildsLoot() {
     emit: (o) => out.push(o),
     clock: () => clock.now,
     newId: () => `drop-${++n}`,
+    store: {
+      load: () => saved.h,
+      save: (h) => {
+        saved.h = h;
+      },
+    },
   });
   const put = (
     uid: string,
@@ -112,7 +122,15 @@ function wildsLoot() {
     }
     return asked;
   };
-  return { loot, db, out, peers, clock, put, dropped, ticks };
+  /** Someone in the camp listens the crystal full, and stops: the first
+   * cache turns up at AT. */
+  const huntOut = () => {
+    put("z", 9, { x: -73, z: 0.5 });
+    loot.tune("z", true, T);
+    loot.step(AT);
+    loot.tune("z", false, AT);
+  };
+  return { loot, db, out, peers, clock, put, dropped, ticks, huntOut, saved };
 }
 
 describe("the Wilds' loot: a takedown's drop", () => {
@@ -319,37 +337,166 @@ describe("the Wilds' loot: a takedown's drop", () => {
   });
 });
 
-describe("the Wilds' loot: caches", () => {
-  const AT = START + WILDS_CACHE_FIRST_MS + 1_000;
-  const spot = wildsCacheAt(EVENT, START, END, AT);
-  const id = wildsCacheId(EVENT, 0, SHARD);
+describe("the Wilds' loot: the Hunt Crystal", () => {
+  const FULL = T + WILDS_HUNT_FILL_MS;
 
-  it("turns one up a minute in, and the next every 5 min", () => {
+  it("fills with one herzie listening, and brings out a cache when full", () => {
     const w = wildsLoot();
     w.put("a", 1, { x: 0, z: 0 });
-    w.loot.step(START + WILDS_CACHE_FIRST_MS - 1);
-    expect(w.out).toEqual([]);
-    w.loot.step(AT);
-    expect(spot).not.toBeNull();
-    expect(said(w.out, "wildsCache")).toEqual([
-      { t: "wildsCache", cache: { id, x: spot?.x, z: spot?.z } },
+    w.loot.step(T);
+    // Dull, and nobody's listening.
+    expect(said(w.out, "wildsHunt")).toEqual([
+      {
+        t: "wildsHunt",
+        hunt: { charge: 0, rate: 0, at: T, listeners: 0 },
+      },
     ]);
-    // Said once.
-    w.loot.step(AT + 1_000);
+    expect(w.loot.live).toBe(false);
+    w.loot.tune("a", true, T);
+    expect(said(w.out, "wildsHunt").at(-1)?.hunt).toEqual({
+      charge: 0,
+      rate: huntRate(1),
+      at: T,
+      listeners: 1,
+    });
+    // Filling keeps the room awake, and isn't told as it fills.
+    expect(w.loot.live).toBe(true);
+    w.loot.step(FULL - 1);
+    expect(said(w.out, "wildsHunt")).toHaveLength(2);
+    expect(said(w.out, "wildsCache")).toEqual([]);
+    // Five minutes alone: full, and a cache turns up.
+    w.loot.step(FULL);
+    const spot = wildsCacheSpot(EVENT, 0);
+    expect(said(w.out, "wildsCache")).toEqual([
+      {
+        t: "wildsCache",
+        cache: { id: wildsCacheId(EVENT, FULL, SHARD), ...spot },
+      },
+    ]);
+    // It stays full while the hunt's on, however much more is played.
+    expect(said(w.out, "wildsHunt").at(-1)?.hunt).toEqual({
+      charge: 1,
+      rate: 0,
+      at: FULL,
+      listeners: 1,
+    });
+    w.loot.step(FULL + 60_000);
     expect(said(w.out, "wildsCache")).toHaveLength(1);
-    // Unopened, the next takes its place.
-    w.loot.step(AT + WILDS_CACHE_EVERY_MS);
-    expect(said(w.out, "wildsCache")[1].cache?.id).toBe(
-      wildsCacheId(EVENT, 1, SHARD),
-    );
-    // And when the event ends it runs out.
+    expect(w.loot.snapshot(FULL + 60_000).hunt?.charge).toBe(1);
+    expect(w.loot.live).toBe(false);
+  });
+
+  it("fills quicker the more listen, and keeps its charge when nobody does", () => {
+    const w = wildsLoot();
+    w.put("a", 1, { x: 0, z: 0 });
+    w.put("b", 2, { x: 5, z: 0 });
+    w.loot.tune("a", true, T);
+    w.loot.tune("b", true, T);
+    expect(said(w.out, "wildsHunt").at(-1)?.hunt?.rate).toBe(huntRate(2));
+    expect(huntRate(2)).toBeGreaterThan(huntRate(1));
+    // b stops a minute in; a leaves a minute after.
+    w.loot.tune("b", false, T + 60_000);
+    const once = huntRate(2) * 60_000;
+    expect(said(w.out, "wildsHunt").at(-1)?.hunt?.charge).toBeCloseTo(once, 4);
+    w.loot.leave("a");
+    w.peers.delete("a");
+    w.loot.step(T + 120_000);
+    const twice = once + huntRate(1) * 60_000;
+    expect(said(w.out, "wildsHunt").at(-1)?.hunt).toMatchObject({
+      rate: 0,
+      listeners: 0,
+    });
+    expect(w.loot.snapshot(T + 120_000).hunt?.charge).toBeCloseTo(twice, 4);
+    // Kept, with nobody listening (and nothing to stay awake for).
+    expect(w.loot.snapshot(T + 600_000).hunt?.charge).toBeCloseTo(twice, 4);
+    expect(w.loot.live).toBe(false);
+  });
+
+  it("counts only herzies here with music on and a ticket for the event", () => {
+    const w = wildsLoot();
+    w.put("a", 1, { x: 0, z: 0 });
+    w.peers.set("old", { id: 3, name: "Old", x: 0, z: 0, down: false });
+    w.loot.claimFor("old", { event: "old", startsAt: 0, endsAt: END });
+    w.loot.tune("old", true, T);
+    // Said it's playing, but isn't here any more.
+    w.loot.tune("gone", true, T);
+    expect(said(w.out, "wildsHunt").at(-1)?.hunt?.listeners).toBe(0);
+    w.loot.tune("a", true, T);
+    expect(said(w.out, "wildsHunt").at(-1)?.hunt?.listeners).toBe(1);
+  });
+
+  it("goes dull once its cache is opened, and the next turns up elsewhere", async () => {
+    const w = wildsLoot();
+    w.put("a", 1, { x: 0, z: 0 });
+    w.loot.tune("a", true, T);
+    w.loot.step(FULL);
+    const first = wildsCacheSpot(EVENT, 0);
+    // a walks over and holds it out.
+    w.put("a", 1, first);
+    w.db.cache.mockResolvedValueOnce({ opened: true, drops: [] });
+    const asked = await w.ticks(FULL, FULL + 2 * WILDS_CACHE_HOLD_MS);
+    expect(asked).toBe(FULL + 100 + WILDS_CACHE_HOLD_MS);
+    expect(said(w.out, "wildsHunt").at(-1)?.hunt).toEqual({
+      charge: 0,
+      rate: huntRate(1),
+      at: asked,
+      listeners: 1,
+    });
+    // Still listening: full again five minutes on, somewhere else.
+    const again = (asked ?? 0) + WILDS_HUNT_FILL_MS + 1_000;
+    w.loot.step(again);
+    const next = said(w.out, "wildsCache").at(-1)?.cache;
+    expect(next).toEqual({
+      id: wildsCacheId(EVENT, again, SHARD),
+      ...wildsCacheSpot(EVENT, 1),
+    });
+    expect(wildsCacheSpot(EVENT, 1)).not.toEqual(first);
+  });
+
+  it("is gone with the event, and its cache with it", () => {
+    const w = wildsLoot();
+    w.huntOut();
     w.loot.step(END);
-    expect(said(w.out, "wildsCache")[2]).toEqual({
+    expect(said(w.out, "wildsCache").at(-1)).toEqual({
       t: "wildsCache",
       cache: null,
     });
+    expect(said(w.out, "wildsHunt").at(-1)).toEqual({
+      t: "wildsHunt",
+      hunt: null,
+    });
+    expect(w.loot.snapshot(END).hunt).toBeNull();
   });
 
+  it("keeps its charge and its cache over a sleep, for the same event", () => {
+    const store: { h?: HuntSaved } = {};
+    const w = wildsLoot(store);
+    w.huntOut();
+    const cache = w.loot.snapshot(AT).cache;
+    expect(cache).not.toBeNull();
+    // The room wakes: a fresh runtime, the same storage.
+    const woke = wildsLoot(store);
+    woke.put("a", 1, { x: 0, z: 0 });
+    woke.loot.step(AT + 60_000);
+    expect(woke.loot.snapshot(AT + 60_000)).toMatchObject({
+      cache,
+      hunt: { charge: 1, rate: 0 },
+    });
+    // A new event's crystal starts dull.
+    const later = wildsLoot(store);
+    later.loot.claimFor("a", { event: "next", startsAt: T, endsAt: END });
+    later.peers.set("a", { id: 1, name: "a", x: 0, z: 0, down: false });
+    later.loot.step(T + 1);
+    expect(later.loot.snapshot(T + 1)).toMatchObject({
+      cache: null,
+      hunt: { charge: 0 },
+    });
+  });
+});
+
+describe("the Wilds' loot: caches", () => {
+  const id = wildsCacheId(EVENT, AT, SHARD);
+  const spot = wildsCacheSpot(EVENT, 0);
   const at = { x: spot?.x ?? 0, z: spot?.z ?? 0 };
   /** In the ring, a step from its edge (not on the chest). */
   const near = { x: at.x + WILDS_CACHE_HOLD_RADIUS - 1, z: at.z };
@@ -362,6 +509,7 @@ describe("the Wilds' loot: caches", () => {
 
   it("opens for a herzie who holds it alone for 10 s, once", async () => {
     const w = wildsLoot();
+    w.huntOut();
     w.put("a", 1, near);
     w.loot.step(AT);
     expect(said(w.out, "wildsHold")).toEqual([
@@ -406,6 +554,7 @@ describe("the Wilds' loot: caches", () => {
 
   it("starts a herzie over who steps out of the ring", async () => {
     const w = wildsLoot();
+    w.huntOut();
     w.put("a", 1, near);
     w.loot.step(AT);
     await w.ticks(AT, AT + 6_000);
@@ -438,6 +587,7 @@ describe("the Wilds' loot: caches", () => {
 
   it("pauses everyone's hold while it's contested, and goes on after", async () => {
     const w = wildsLoot();
+    w.huntOut();
     w.put("a", 1, near);
     w.loot.step(AT);
     await w.ticks(AT, AT + 4_000);
@@ -479,6 +629,7 @@ describe("the Wilds' loot: caches", () => {
 
   it("starts a herzie over who goes down", async () => {
     const w = wildsLoot();
+    w.huntOut();
     w.put("a", 1, near);
     w.loot.step(AT);
     await w.ticks(AT, AT + 8_000);
@@ -494,6 +645,7 @@ describe("the Wilds' loot: caches", () => {
 
   it("keeps the cache out when the database doesn't answer, and asks again", async () => {
     const w = wildsLoot();
+    w.huntOut();
     w.put("a", 1, near);
     w.loot.step(AT);
     const first = AT + WILDS_CACHE_HOLD_MS;
@@ -511,6 +663,7 @@ describe("the Wilds' loot: caches", () => {
 
   it("takes the database's word when someone got there first", async () => {
     const w = wildsLoot();
+    w.huntOut();
     w.put("a", 1, near);
     w.loot.step(AT);
     w.db.cache.mockResolvedValueOnce({ opened: false, drops: [] });
@@ -525,6 +678,7 @@ describe("the Wilds' loot: caches", () => {
 
   it("holds nothing for a herzie out of the ring", async () => {
     const w = wildsLoot();
+    w.huntOut();
     w.put("a", 1, out);
     w.loot.step(AT);
     expect(await w.ticks(AT, AT + 30_000)).toBeNull();
@@ -569,20 +723,20 @@ describe("the Wilds' loot: who's here", () => {
 });
 
 describe("the Wilds' loot: a newcomer's snapshot", () => {
-  it("holds what lies about and the cache that's out", async () => {
+  it("holds what lies about, the cache that's out and the crystal", async () => {
     const w = wildsLoot();
+    w.huntOut();
+    w.clock.now = AT;
     await w.dropped();
-    const at = START + WILDS_CACHE_FIRST_MS;
-    w.loot.step(at);
-    const spot = wildsCacheAt(EVENT, START, END, at);
-    const snap = w.loot.snapshot(at);
+    const snap = w.loot.snapshot(AT);
     expect(snap).toEqual({
       t: "wildsLoot",
       drops: [said(w.out, "wildsDrop")[0].drop],
-      cache: { id: wildsCacheId(EVENT, 0, SHARD), x: spot?.x, z: spot?.z },
+      cache: { id: wildsCacheId(EVENT, AT, SHARD), ...wildsCacheSpot(EVENT, 0) },
       hold: null,
+      hunt: { charge: 1, rate: 0, at: AT, listeners: 0 },
     });
     // A drop past its life isn't shown, even before the sweep returns it.
-    expect(w.loot.snapshot(T + WILDS_DROP.lifeMs).drops).toEqual([]);
+    expect(w.loot.snapshot(AT + WILDS_DROP.lifeMs).drops).toEqual([]);
   });
 });

@@ -499,7 +499,8 @@ export class TownConnection {
     this.sendJson({ t: "skill", skill, seq, yaw, pitch });
   }
 
-  /** In the boss room or the Tower: whether you're playing music. */
+  /** In the boss room, the Tower or on the Wilds: whether you're playing
+   * music. */
   sendTune(on: boolean) {
     if (this.status !== "online") return;
     this.sendJson({ t: "tune", on });

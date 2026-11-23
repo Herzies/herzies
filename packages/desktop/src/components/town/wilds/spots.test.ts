@@ -13,6 +13,7 @@ import {
 } from "../map";
 import { TOWN_MAPS_LOCAL } from "../maps";
 import { CRAFTING_STATION, craftingStationsOf } from "./craftingSpot";
+import { HUNT_CRYSTAL, huntCrystalsOf } from "./HuntCrystal";
 
 const wilds = TOWN_MAPS_LOCAL.get("wilds") as TownMap;
 
@@ -75,5 +76,13 @@ describe("the Wilds' loot spots", () => {
     expect(inWildsSafeCamp(x, z)).toBe(true);
     for (const s of craftingStationsOf(wilds))
       expect(Math.hypot(s.x - x, s.z - z)).toBeGreaterThan(3);
+  });
+
+  it("stands one Hunt Crystal on open ground in the camp", () => {
+    const crystals = huntCrystalsOf(wilds);
+    expect(crystals).toHaveLength(1);
+    const { x, z } = crystals[0];
+    expect(openGround(wilds, x, z, HUNT_CRYSTAL)).toEqual([]);
+    expect(inWildsSafeCamp(x, z)).toBe(true);
   });
 });

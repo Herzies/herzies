@@ -1,16 +1,12 @@
 import { WILDS_SAFE_CAMP, type WildsService } from "@herzies/shared/wilds";
-import {
-  WILDS_CACHE_EVERY_MS,
-  WILDS_CACHE_FIRST_MS,
-} from "@herzies/shared/wilds-loot";
 import { clock, sailingTime } from "../airship/status";
 import { compassFrom } from "./loot";
 
 /**
  * What Madas says, in the Wilds' safe camp: he's lost his wits to gold, but
- * he always knows where the cache is and when the next turns up. Pure (the
- * cache's times from the event's window, as the room keeps them), so it's
- * tested without a world; his panel works them out again every second.
+ * he always knows where the cache is, and how near the Hunt Crystal is to
+ * bringing out the next. Pure, so it's tested without a world; his panel
+ * works them out again every second.
  */
 
 /** What he says whatever's going on. */
@@ -23,28 +19,21 @@ export const MADAS_FLAVOUR_LINES = [
   "You've a lovely shine about you. Stand still a moment. Stiller.",
 ] as const;
 
-/** When the next cache turns up after `now`, for the Wilds open on
- * `service` (as wildsCacheAt counts them). Null: none before they close. */
-export function nextCacheAt(service: WildsService, now: number): number | null {
-  const first = service.startsAt + WILDS_CACHE_FIRST_MS;
-  const at =
-    now < first
-      ? first
-      : first +
-        (Math.floor((now - first) / WILDS_CACHE_EVERY_MS) + 1) *
-          WILDS_CACHE_EVERY_MS;
-  return at < service.endsAt ? at : null;
-}
+/** The Hunt Crystal as he sees it: how full it is now (0 to 1), how fast
+ * it's filling (a ms) and how many are listening. */
+export type MadasHunt = { charge: number; rate: number; listeners: number };
 
 /**
  * His lines at `now`: with the Wilds open on `service` (null: they aren't),
- * the next opening at `upcoming` (null: none planned), and the cache out now
- * where the room says (null: none, or you're not on the Wilds to hear it).
+ * the next opening at `upcoming` (null: none planned), the cache out now
+ * where the room says, and the Hunt Crystal (each null: none, or you're not
+ * on the Wilds to see it).
  */
 export function madasLines(
   service: WildsService | null,
   upcoming: number | null,
   cache: { x: number; z: number } | null,
+  hunt: MadasHunt | null,
   now: number,
 ): string[] {
   const open = service && now >= service.startsAt && now < service.endsAt;
@@ -63,12 +52,28 @@ export function madasLines(
       `There's one out now, ${compassFrom(WILDS_SAFE_CAMP, cache)}! Glinting! Calling me!`,
       "Go on, then. Hold it ten seconds and it's yours. Bring it back and we'll split it. Ninety, ten.",
     );
+  } else if (hunt) {
+    const gold = Math.floor(hunt.charge * 100);
+    if (hunt.listeners === 0 || hunt.rate <= 0)
+      lines.push(
+        gold === 0
+          ? "See the crystal? Grey as a gravestone. It wants music. Play it something! Anything!"
+          : `The crystal's ${gold}% gold and nobody's playing it a note. It's going to sulk. I'm going to sulk.`,
+      );
+    else {
+      const who =
+        hunt.listeners === 1
+          ? "One of you's playing"
+          : `${hunt.listeners} of you are playing`;
+      lines.push(
+        `The crystal's ${gold}% gold. ${who}. More! Louder! More of you!`,
+        `At this rate it's full in ${clock((1 - hunt.charge) / hunt.rate)}, and then the hunt's on. I can feel it in my teeth.`,
+      );
+    }
+  } else {
+    lines.push(
+      "The crystal in the camp: play it music and it turns to gold, and when it's all gold, the hunt's on.",
+    );
   }
-  const next = nextCacheAt(service, now);
-  lines.push(
-    next === null
-      ? "No more caches before they shut. Not one. I checked. I checked twice."
-      : `The next one turns up in ${clock(next - now)}. I can feel it in my teeth.`,
-  );
   return [...lines, ...MADAS_FLAVOUR_LINES];
 }

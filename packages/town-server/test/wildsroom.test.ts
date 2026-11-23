@@ -5,7 +5,8 @@
  * still down; one back on a new socket (a hidden window shown again) only
  * has what's left of its protection. No duels here. The room keeps its own
  * clock, so this waits out the real protection (5 s). And its loot: a
- * newcomer's snapshot of the cache that's out (its shard's own), the room
+ * newcomer's snapshot of the cache that's out (its shard's own, kept over
+ * a sleep), the crystal hearing who's playing music, the room
  * seeing who's holding it, and what's refused without a database (no
  * TOWN_VITALS_URL in tests).
  */
@@ -16,12 +17,9 @@ import {
   signTownTicket,
   TOWN_PROTOCOL,
 } from "@herzies/shared/town-net";
-import {
-  WILDS_CACHE_FIRST_MS,
-  wildsCacheAt,
-  wildsCacheId,
-} from "@herzies/shared/wilds-loot";
+import { wildsCacheId, wildsCacheSpot } from "@herzies/shared/wilds-loot";
 import { WILDS_PVP, wildsMaxHp } from "@herzies/shared/wilds-pvp";
+import { env, runInDurableObject } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { realTicket } from "./herzies";
@@ -167,19 +165,43 @@ describe("the Wilds' free-for-all in a room", () => {
     const now = Date.now();
     const claim = {
       event: "room-loot-event",
-      startsAt: now - WILDS_CACHE_FIRST_MS - 30_000,
+      startsAt: now - 30_000,
       endsAt: now + 60 * 60_000,
     };
-    const spot = wildsCacheAt(claim.event, claim.startsAt, claim.endsAt, now);
-    if (!spot) throw new Error("no cache out");
-    const cache = { id: wildsCacheId(claim.event, 0, 2), x: spot.x, z: spot.z };
+    // The crystal was listened full before the room last slept: its cache
+    // is out (kept in the room's storage).
+    const spot = wildsCacheSpot(claim.event, 0);
+    const cache = { id: wildsCacheId(claim.event, now - 1_000, 2), ...spot };
+    const rooms = (env as unknown as { TOWN_ROOM: DurableObjectNamespace })
+      .TOWN_ROOM;
+    await runInDurableObject(
+      rooms.get(rooms.idFromName("wilds:2")),
+      (_room: unknown, state: DurableObjectState) => {
+        state.storage.kv.put("hunt", {
+          event: claim.event,
+          charge: 1,
+          k: 1,
+          cache,
+        });
+      },
+    );
     const a = await join(2, "loot-a", spot.x, spot.z, claim);
     expect(await a.next("wildsLoot")).toEqual({
       t: "wildsLoot",
       drops: [],
       cache,
       hold: null,
+      hunt: expect.objectContaining({ charge: 1, rate: 0, listeners: 0 }),
     });
+    // Playing music on the Wilds: counted (the crystal's full, so it
+    // doesn't fill on).
+    send(a.ws, { t: "tune", on: true });
+    expect(await a.next("wildsHunt", (m) => m.hunt?.listeners === 1)).toEqual(
+      {
+        t: "wildsHunt",
+        hunt: expect.objectContaining({ charge: 1, rate: 0 }),
+      },
+    );
     // Standing by it: the room sees a holding it, and says so.
     expect(await a.next("wildsHold")).toMatchObject({
       id: cache.id,

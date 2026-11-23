@@ -18,6 +18,7 @@ import type {
   WildsCacheHold,
   WildsCacheView,
   WildsGroundDrop,
+  WildsHunt,
   WildsLootRefusal,
 } from "./wilds-loot.js";
 
@@ -738,9 +739,9 @@ export type ClientMessage =
   /** In the Tower, on a cleared floor: on to the next one. The room puts
    * you back at the map's spawn (the west end). */
   | { t: "next" }
-  /** In the boss room or the Tower: whether you're playing music (the boss
-   * hates it, any of it; the Tower pays the same bonus). Sent when it
-   * changes. */
+  /** In the boss room, the Tower or on the Wilds: whether you're playing
+   * music (the boss hates it, any of it; the Tower pays the same bonus;
+   * the Wilds' Hunt Crystal fills with it). Sent when it changes. */
   | { t: "tune"; on: boolean }
   /** A Bard's lute: its basic attack heals the ally it's aimed at (true)
    * or hurts (false). Sent on every switch and every arrival. */
@@ -1153,14 +1154,21 @@ export type ServerMessage =
       logged?: true;
     }
   /** The Wilds' loot as it lies (to a newcomer, after `welcome`): the
-   * cards dropped by herzies taken down, the cache that's out, and who's
-   * holding it (null: nobody). */
+   * cards dropped by herzies taken down, the cache that's out, who's
+   * holding it (null: nobody), and the Hunt Crystal (null, or absent from
+   * an older room: no event on). */
   | {
       t: "wildsLoot";
       drops: WildsGroundDrop[];
       cache: WildsCacheView | null;
       hold: WildsCacheHold | null;
+      hunt?: WildsHunt | null;
     }
+  /** The Hunt Crystal's charge or rate changed: someone started or
+   * stopped listening, it filled (its cache's `wildsCache` comes with it),
+   * it went dull again once the cache was opened, or the event began or
+   * ended (null). To the whole room. */
+  | { t: "wildsHunt"; hunt: WildsHunt | null }
   /** A herzie taken down on the Wilds (entity `from`) dropped a card where
    * it fell (to the whole room). */
   | { t: "wildsDrop"; drop: WildsGroundDrop; from: number }

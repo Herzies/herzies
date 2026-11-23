@@ -110,6 +110,7 @@ import { SonicVFX } from "./vfx/SonicVFX";
 import { StunVFX } from "./vfx/StunVFX";
 import { mapId, World } from "./World";
 import { CraftingStation } from "./wilds/CraftingStation";
+import { HuntCrystals } from "./wilds/HuntCrystal";
 import {
   CRAFTING_KEY,
   craftingNear,
@@ -359,8 +360,10 @@ export default function TownCanvas(props: TownCanvasProps) {
                 <SafeCamp map={map} />
               </>
             )}
-            {/* Crafting Stations, wherever they're painted. */}
+            {/* Crafting Stations and Hunt Crystals, wherever they're
+                painted. */}
             <CraftingStation map={map} />
+            <HuntCrystals map={map} />
             {/* What drops while you listen, around you (see HomeDrops). */}
             {props.homeDrops && !map.combat && !map.ship && (
               <HomeDrops map={map} />

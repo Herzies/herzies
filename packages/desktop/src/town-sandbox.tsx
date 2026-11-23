@@ -137,6 +137,7 @@ import { weatherOverride } from "./components/town/weather";
 import { CRAFTING_KEY } from "./components/town/wilds/craftingSpot";
 import {
   handleWildsLootMessage,
+  huntNow,
   wildsLoot,
 } from "./components/town/wilds/loot";
 import { handleWildsMessage } from "./components/town/wilds/store";
@@ -571,9 +572,12 @@ Object.assign(window, { townNet: net, townSave, townLive, fleet });
 // left one someone else's for a minute yet), as the room would tell them.
 // E by a card you may take asks for it (it goes nowhere without a room).
 // The room's hold on the cache is faked here: stand in the ring 10 s and
-// it opens, and another turns up a moment later; `&hold=rival` has
-// someone else in it already, 3 s in, who stays (contested while you're
-// in too, theirs in a few seconds if you step out).
+// it opens; `&hold=rival` has someone else in it already, 3 s in, who
+// stays (contested while you're in too, theirs in a few seconds if you
+// step out). So is the Hunt Crystal: as if one herzie were listening, it
+// fills in `&hunt=` seconds (3 by default) once a cache is opened, and the
+// next turns up when it's full; with `&hunt=` given, it starts dull, with
+// no cache out yet.
 if (params.get("loot") === "1") {
   const ctx = {
     toLocal: (t: number) => t,
@@ -590,6 +594,17 @@ if (params.get("loot") === "1") {
   });
   const t = performance.now();
   const spot = at(Number(params.get("cacheAt") ?? 4), 0);
+  const fillMs = Number(params.get("hunt") ?? 3) * 1000;
+  const dull = params.has("hunt");
+  /** The crystal from empty at `now`, one listening. */
+  const filling = (now: number) =>
+    handleWildsLootMessage(
+      {
+        t: "wildsHunt",
+        hunt: { charge: 0, rate: 1 / fillMs, at: now, listeners: 1 },
+      },
+      ctx,
+    );
   handleWildsLootMessage(
     {
       t: "wildsLoot",
@@ -613,8 +628,11 @@ if (params.get("loot") === "1") {
           expiresAt: t + 120_000,
         },
       ],
-      cache: { id: "sandbox-cache-0", ...spot },
+      cache: dull ? null : { id: "sandbox-cache-0", ...spot },
       hold: null,
+      hunt: dull
+        ? { charge: 0, rate: 1 / fillMs, at: t, listeners: 1 }
+        : { charge: 1, rate: 0, at: t, listeners: 1 },
     },
     ctx,
   );
@@ -629,7 +647,22 @@ if (params.get("loot") === "1") {
     const dt = now - last;
     last = now;
     const c = wildsLoot.cache;
-    if (!c) return;
+    if (!c) {
+      // Full: the hunt's on.
+      if (huntNow(now) < 1) return;
+      handleWildsLootMessage(
+        {
+          t: "wildsHunt",
+          hunt: { charge: 1, rate: 0, at: now, listeners: 1 },
+        },
+        ctx,
+      );
+      handleWildsLootMessage(
+        { t: "wildsCache", cache: { id: `sandbox-cache-${++k}`, ...spot } },
+        ctx,
+      );
+      return;
+    }
     const inside =
       Math.hypot(townSave.x - c.x, townSave.z - c.z) <= WILDS_CACHE_HOLD_RADIUS;
     mine = inside ? mine : null;
@@ -663,14 +696,7 @@ if (params.get("loot") === "1") {
     mine = null;
     rival = rivalIn ? 3_000 : null;
     told = "";
-    setTimeout(
-      () =>
-        handleWildsLootMessage(
-          { t: "wildsCache", cache: { id: `sandbox-cache-${++k}`, ...spot } },
-          ctx,
-        ),
-      3_000,
-    );
+    filling(now);
   }, 100);
 }
 // `?map=tower&chest=1`: floor 10 cleared, its chest standing. The room's

@@ -1,10 +1,12 @@
 import { getItem } from "@herzies/shared";
 import type { ServerMessage } from "@herzies/shared/town-net";
 import {
+  huntCharge,
   WILDS_CACHE_HOLD_MS,
   WILDS_DROP,
   type WildsCacheHold,
   type WildsCacheView,
+  type WildsHunt,
 } from "@herzies/shared/wilds-loot";
 import { useSyncExternalStore } from "react";
 import { notify } from "../../../lib/notices";
@@ -13,10 +15,10 @@ import { pushLootLog } from "../combat/lootFeed";
 
 /**
  * The Wilds' loot as the client holds it: the cards lying where herzies
- * were taken down, the cache that's out, and who's holding it. Written by
- * {@link handleWildsLootMessage} from the socket; read by the frame loop
- * (WildsLoot.tsx draws it) and through {@link useWildsLoot} (the HUD's
- * CacheHud).
+ * were taken down, the Hunt Crystal, the cache that's out, and who's
+ * holding it. Written by {@link handleWildsLootMessage} from the socket;
+ * read by the frame loop (WildsLoot.tsx and HuntCrystal.tsx draw it) and
+ * through {@link useWildsLoot} (the HUD's CacheHud).
  *
  * A card stays where it lies until you choose to take it: standing within
  * reach of one you may take, the prompt offers it ({@link cardInReach};
@@ -56,6 +58,10 @@ export type GroundCard = {
 /** The cache that's out, and when it was seen (performance.now() ms). */
 export type CacheSpot = WildsCacheView & { at: number };
 
+/** The Hunt Crystal as the room last told it, `at` on this machine's
+ * clock (see {@link huntNow}). */
+export type HuntMeter = WildsHunt;
+
 /** Who's holding the cache, as the room last told it (see
  * WildsCacheHold), `at` on this machine's clock. */
 export type CacheHold = WildsCacheHold;
@@ -80,6 +86,11 @@ export const wildsLoot = {
   cache: null as CacheSpot | null,
   /** Who's holding the cache out (null: nobody). */
   hold: null as CacheHold | null,
+  /** The Hunt Crystal (null: no event on, or not on the Wilds). */
+  hunt: null as HuntMeter | null,
+  /** When a cache last turned up while you were there (performance.now()
+   * ms): the crystal's burst. Not one that was out when you came. */
+  huntOnAt: Number.NEGATIVE_INFINITY,
 };
 
 /** Cards asked for and not answered: not asked again until then
@@ -159,6 +170,13 @@ export function heldBy(id: number | null, now: number): number | null {
         ? x.ms
         : Math.min(WILDS_CACHE_HOLD_MS, x.ms + Math.max(0, now - h.at));
   return null;
+}
+
+/** How full the Hunt Crystal is at `now` (performance.now() ms), 0 to 1,
+ * counted on from what the room last said. */
+export function huntNow(now: number): number {
+  const h = wildsLoot.hunt;
+  return h ? huntCharge(h, now) : 0;
 }
 
 /** The furthest anyone but `you` has held the cache at `now` (ms). Null:
@@ -250,6 +268,10 @@ function setCache(c: WildsCacheView | null, now: number) {
     c === null ? null : was?.id === c.id ? was : { ...c, at: now };
 }
 
+function setHunt(h: WildsHunt | null | undefined, ctx: WildsLootContext) {
+  wildsLoot.hunt = h ? { ...h, at: ctx.toLocal(h.at) } : null;
+}
+
 /** Who's holding the cache, from the room's word: its time made ours. */
 function setHold(h: WildsCacheHold | null, ctx: WildsLootContext) {
   wildsLoot.hold =
@@ -277,13 +299,21 @@ export function handleWildsLootMessage(
       const fresh = m.cache !== null && m.cache.id !== wildsLoot.cache?.id;
       setCache(m.cache, now);
       setHold(m.cache && m.hold, ctx);
+      setHunt(m.hunt, ctx);
       if (fresh && m.cache)
-        notify(`There's a cache out ${compassFrom(ctx.me(), m.cache)}`, {
-          kind: "info",
-        });
+        notify(
+          `The hunt is on: a cache is out ${compassFrom(ctx.me(), m.cache)}`,
+          {
+            kind: "info",
+          },
+        );
       emit();
       return true;
     }
+    case "wildsHunt":
+      setHunt(m.hunt, ctx);
+      emit();
+      return true;
     case "wildsDrop":
       wildsLoot.drops.set(m.drop.id, cardOf(m.drop, ctx, now));
       emit();
@@ -296,10 +326,13 @@ export function handleWildsLootMessage(
     case "wildsCache": {
       const was = wildsLoot.cache;
       if (m.cache) {
-        if (m.cache.id !== was?.id)
-          notify(`A cache turned up ${compassFrom(ctx.me(), m.cache)}`, {
-            kind: "info",
-          });
+        if (m.cache.id !== was?.id) {
+          wildsLoot.huntOnAt = now;
+          notify(
+            `The Hunt Crystal is full! The hunt is on: a cache turned up ${compassFrom(ctx.me(), m.cache)}`,
+            { kind: "success" },
+          );
+        }
       } else if (m.by !== undefined) {
         // Opened: by you (its loot's on its way), or by someone else.
         if (m.by === ctx.you())
@@ -393,6 +426,8 @@ export function resetWildsLoot(): void {
   wildsLoot.drops.clear();
   wildsLoot.cache = null;
   wildsLoot.hold = null;
+  wildsLoot.hunt = null;
+  wildsLoot.huntOnAt = Number.NEGATIVE_INFINITY;
   warnedAt = Number.NEGATIVE_INFINITY;
   holds.clear();
   emit();

@@ -5,7 +5,7 @@
 /**
  * What there is to get on the Wilds, besides a fight: its bits (crafting
  * materials found nowhere else), the instruments made from them, tuning an
- * instrument with them, the caches that turn up every few minutes, the
+ * instrument with them, the caches that listening there brings out, the
  * listening bonus for being there, and what a herzie drops when it's taken
  * down. Pure rules and numbers, shared by the Wilds room (which decides
  * who's near what), the database's edge functions (which grant and take)
@@ -143,10 +143,39 @@ export function canAfford(
 
 // --- Caches -------------------------------------------------------------------
 
-/** A cache turns up this often while the Wilds are open (ms), the first
- * this long after it opens; each waits till it's opened or the next. */
-export const WILDS_CACHE_EVERY_MS = 5 * 60_000;
-export const WILDS_CACHE_FIRST_MS = 60_000;
+/**
+ * A cache isn't on a timer: listening brings it out. Every herzie on the
+ * Wilds with music playing charges the room's Hunt Crystal (each shard has
+ * its own); once it's full a cache turns up, and the crystal stays full
+ * (the hunt is on) till someone opens it, then starts again from dull.
+ * Alone it takes WILDS_HUNT_FILL_MS; more listening fills it quicker, by
+ * the square root of how many (two: ~3½ min, four: 2½, nine: ~1⅔). It
+ * keeps its charge while nobody's listening, and starts dull each event.
+ */
+export const WILDS_HUNT_FILL_MS = 5 * 60_000;
+
+/** How fast the crystal fills with `listeners` playing music (charge a ms,
+ * 1 being full). */
+export function huntRate(listeners: number): number {
+  return listeners > 0 ? Math.sqrt(listeners) / WILDS_HUNT_FILL_MS : 0;
+}
+
+/** The Hunt Crystal, as the room tells it: its charge (0 dull, 1 full) at
+ * `at` (server ms), filling at `rate` a ms from then (0: nobody's
+ * listening, or the hunt's on), and how many are listening. */
+export type WildsHunt = {
+  charge: number;
+  rate: number;
+  at: number;
+  listeners: number;
+};
+
+/** The crystal's charge at `now` (same clock as `h.at`), counted on from
+ * what the room said. */
+export function huntCharge(h: WildsHunt, now: number): number {
+  return Math.min(1, h.charge + h.rate * Math.max(0, now - h.at));
+}
+
 /**
  * A cache isn't opened, it's held: it opens for the first herzie to stay
  * on their feet within WILDS_CACHE_HOLD_RADIUS of it (world units) for
@@ -176,31 +205,25 @@ export const WILDS_CACHE_SPOTS: readonly { x: number; z: number }[] = [
   { x: 38.5, z: -27.5 },
 ];
 
-/** The cache that's out on the Wilds at `now`, for an event running
- * `startsAt`–`endsAt` (ms): its number, where, and when it turned up.
- * Null before the first and after the event ends. Each shard of the room
- * has its own (see wildsCacheId). */
-export function wildsCacheAt(
+/** Where the `k`th cache of an event turns up (0 the first): a different
+ * spot each time, in an order of the event's own. */
+export function wildsCacheSpot(
   event: string,
-  startsAt: number,
-  endsAt: number,
-  now: number,
-): { k: number; x: number; z: number; at: number } | null {
-  if (now >= endsAt) return null;
-  const since = now - startsAt - WILDS_CACHE_FIRST_MS;
-  if (since < 0) return null;
-  const k = Math.floor(since / WILDS_CACHE_EVERY_MS);
-  const at = startsAt + WILDS_CACHE_FIRST_MS + k * WILDS_CACHE_EVERY_MS;
-  // A different spot each time, in an order of the event's own.
+  k: number,
+): { x: number; z: number } {
   const n = WILDS_CACHE_SPOTS.length;
   const spot = WILDS_CACHE_SPOTS[(hash(event) + k * 7) % n];
-  return { k, x: spot.x, z: spot.z, at };
+  return { x: spot.x, z: spot.z };
 }
 
-/** A cache's id: one per event, number and shard (what opening it once
- * hangs on). */
-export function wildsCacheId(event: string, k: number, shard: number): string {
-  return `${event}:${k}:${shard}`;
+/** A cache's id: one per event, shard and the moment it turned up (server
+ * ms), what opening it once hangs on. */
+export function wildsCacheId(
+  event: string,
+  at: number,
+  shard: number,
+): string {
+  return `${event}:${at}:${shard}`;
 }
 
 /** What's in a cache: a handful of bits, and now and then a Power Die or a

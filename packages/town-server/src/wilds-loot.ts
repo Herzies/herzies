@@ -1,19 +1,21 @@
 /**
  * The Wilds' loot, as a Wilds room keeps it (see shared wilds-loot.ts):
- * the card a herzie taken down drops where it fell, and the cache that
- * turns up every few minutes while the "wilds" event runs.
+ * the card a herzie taken down drops where it fell, the Hunt Crystal that
+ * listening fills while the "wilds" event runs, and the cache it brings
+ * out once it's full.
  *
  * The database holds what's real: a dropped card sits in escrow there from
  * the moment it falls, and a cache is opened once, by id. The room judges
  * who may reach for a drop (in reach, on their feet, the killer's moment
- * alone with it, one take at a time) and who holds the cache (it watches
- * who stands in its ring, and opens it for the first to hold it out),
- * tells everyone what's lying about and who's holding what, and gives
- * unclaimed drops back to their owners when their time is up. Nothing
- * here survives a room going to sleep, and nothing needs to: the database
- * gives back a drop nobody returned once its life is over, and refuses a
- * cache that was opened already (a hold cut short by a sleep just starts
- * over).
+ * alone with it, one take at a time), who's listening (each says so; see
+ * `tune`) and who holds the cache (it watches who stands in its ring, and
+ * opens it for the first to hold it out), tells everyone what's lying
+ * about, how full the crystal is and who's holding what, and gives
+ * unclaimed drops back to their owners when their time is up. Drops don't
+ * survive a room going to sleep, and needn't: the database gives back a
+ * drop nobody returned once its life is over. The crystal and the cache
+ * out do (see HuntStore); a room with anyone listening doesn't sleep, and
+ * a hold cut short by a sleep just starts over.
  *
  * Like the free-for-all it's pure: the room injects the database, who's
  * where, a clock and ids, and relays what it emits. Calls that ask the
@@ -24,15 +26,18 @@ import type {
   TownTicketPayload,
 } from "@herzies/shared/town-net";
 import {
+  huntCharge,
+  huntRate,
   WILDS_CACHE_HOLD_MS,
   WILDS_CACHE_HOLD_RADIUS,
   WILDS_DROP,
   type WildsCacheHold,
   type WildsCacheView,
   type WildsGroundDrop,
+  type WildsHunt,
   type WildsLootRefusal,
-  wildsCacheAt,
   wildsCacheId,
+  wildsCacheSpot,
 } from "@herzies/shared/wilds-loot";
 import type { Outbound } from "./fight";
 import { all, round, to } from "./pvp";
@@ -52,14 +57,31 @@ export type WildsLootPeer = {
   down: boolean;
 };
 
+/** What's kept of the Hunt Crystal over a room's sleep (a room only
+ * sleeps with nobody listening, so it isn't filling): the event it's for,
+ * its charge, how many caches it has brought out, and the one out. */
+export type HuntSaved = {
+  event: string;
+  charge: number;
+  k: number;
+  cache: WildsCacheView | null;
+};
+
+/** Where the room keeps HuntSaved (its Durable Object's storage). */
+export type HuntStore = {
+  load: () => HuntSaved | undefined;
+  save: (h: HuntSaved) => void;
+};
+
 /** What the room gives the loot. */
 export type WildsLootDeps = {
-  /** This room's shard (each has its own caches). */
+  /** This room's shard (each has its own crystal and caches). */
   shard: number;
   db: WildsLootDb;
   /** The herzie `uid` here, or null if it isn't. */
   peer: (uid: string) => WildsLootPeer | null;
-  /** Every herzie here, by user id (who might be holding the cache). */
+  /** Every herzie here, by user id (who might be holding the cache, or
+   * listening). */
   here: () => Iterable<[uid: string, peer: WildsLootPeer]>;
   /** Tell whom what (relayed by the room, now or when the database
    * answers). */
@@ -68,6 +90,8 @@ export type WildsLootDeps = {
   clock?: () => number;
   /** A fresh drop id. */
   newId?: () => string;
+  /** Where the crystal's kept over a sleep (none: it isn't). */
+  store?: HuntStore;
 };
 
 /** Room-side slack on reach (world units): the room's idea of where you
@@ -104,6 +128,18 @@ type Unasked = {
 
 type Cache = WildsCacheView & { event: string };
 
+/** The Hunt Crystal: the event it's for, its charge at `at` (server ms)
+ * and how fast it has filled since, how many were listening then, and how
+ * many caches it has brought out this event (where the next turns up). */
+type Hunt = {
+  event: string;
+  charge: number;
+  rate: number;
+  at: number;
+  listeners: number;
+  k: number;
+};
+
 /** A herzie holding the cache: its entity id, how long it has held (ms),
  * the step it stepped into the ring and the step it was last seen in it. */
 type Holder = { id: number; ms: number; since: number; seen: number };
@@ -119,10 +155,14 @@ export class WildsLootRuntime {
   /** Drops with a take, or a return, in flight. */
   private taking = new Set<string>();
   private returning = new Set<string>();
-  /** The cache out now (announced), and those opened (or found opened). */
+  /** The cache out now (announced), and the one being opened. */
   private cache: Cache | null = null;
-  private opened = new Set<string>();
   private opening: string | null = null;
+  /** The Hunt Crystal (null: no event on); who's said they're playing
+   * music, by user id; and what a sleep left, till the event's back. */
+  private hunt: Hunt | null = null;
+  private tuned = new Set<string>();
+  private saved: HuntSaved | undefined;
   /** Who's holding the cache out, by user id; whether it's contested;
    * when the holds last counted (server ms); a change not told yet, and
    * when they were last told; and the steps counted, to see who's gone. */
@@ -140,6 +180,7 @@ export class WildsLootRuntime {
   constructor(private readonly deps: WildsLootDeps) {
     this.clock = deps.clock ?? Date.now;
     this.newId = deps.newId ?? (() => crypto.randomUUID());
+    this.saved = deps.store?.load();
   }
 
   /** The event the loot is for (null: no "wilds" event claimed yet). */
@@ -149,14 +190,16 @@ export class WildsLootRuntime {
 
   /** Something to keep the room awake for: drops lying about (lost to a
    * sleep otherwise, and only given back lazily), a database call still
-   * out, or someone holding the cache (it's watched every tick). */
+   * out, someone holding the cache (it's watched every tick), or the
+   * crystal filling (it overflows into a cache on a tick). */
   get live(): boolean {
     return (
       this.drops.size > 0 ||
       this.unasked.size > 0 ||
       this.inFlight > 0 ||
       this.holds.size > 0 ||
-      this.holdUntold
+      this.holdUntold ||
+      (this.hunt?.rate ?? 0) > 0
     );
   }
 
@@ -172,16 +215,22 @@ export class WildsLootRuntime {
     }
     this.claims.set(uid, c);
     const was = this.claim;
-    if (!was || c.event === was.event) this.claim = c;
-    else if (c.startsAt > was.startsAt) {
+    if (!was || c.event === was.event || c.startsAt > was.startsAt)
       this.claim = c;
-      this.opened.clear();
-    }
   }
 
   /** `uid` left the room. */
   leave(uid: string): void {
     this.claims.delete(uid);
+    this.tuned.delete(uid);
+  }
+
+  /** Whether `uid` is playing music (said when it changes, and on each
+   * arrival): listening on the Wilds fills the crystal. */
+  tune(uid: string, playing: boolean, now: number): void {
+    if (playing) this.tuned.add(uid);
+    else this.tuned.delete(uid);
+    this.fill(now);
   }
 
   /** Who's on the Wilds for the room's event, while it's on: every herzie
@@ -204,30 +253,20 @@ export class WildsLootRuntime {
       drops,
       cache: this.cache && cacheView(this.cache),
       hold: this.cache && this.holds.size ? this.holdView(this.heldAt) : null,
+      hunt: this.huntView(now),
     };
   }
 
   // --- The clock.
 
-  /** The cache: a new one turned up (everyone's told), or the one out ran
-   * out (the event ended, or the next took its place); and who's holding
-   * it (see `hold`). Cheap: the room runs it every tick and every sweep.
-   * Returns the cache's opening, if a hold just ran out and asked the
-   * database (resolved once it has answered). */
+  /** The crystal: filled on by whoever's listening, a cache turned up
+   * when it's full (everyone's told), or a new event's (or none) and the
+   * cache out gone with the last; and who's holding the cache (see
+   * `hold`). Cheap: the room runs it every tick and every sweep. Returns
+   * the cache's opening, if a hold just ran out and asked the database
+   * (resolved once it has answered). */
   step(now: number): Promise<void> | undefined {
-    const e = this.claim;
-    const c = e ? wildsCacheAt(e.event, e.startsAt, e.endsAt, now) : null;
-    let next: Cache | null = null;
-    if (e && c) {
-      const id = wildsCacheId(e.event, c.k, this.deps.shard);
-      if (!this.opened.has(id)) next = { id, x: c.x, z: c.z, event: e.event };
-    }
-    if ((next?.id ?? null) !== (this.cache?.id ?? null)) {
-      this.cache = next;
-      // A new cache's ring starts empty (its `wildsCache` says so).
-      this.letGo();
-      this.deps.emit(all({ t: "wildsCache", cache: next && cacheView(next) }));
-    }
+    this.fill(now);
     const dt = Math.min(HOLD_STEP_MAX_MS, Math.max(0, now - this.heldAt));
     this.heldAt = now;
     return this.cache ? this.hold(this.cache, dt, now) : undefined;
@@ -390,6 +429,104 @@ export class WildsLootRuntime {
     }
   }
 
+  // --- The Hunt Crystal.
+
+  /**
+   * The crystal at `now`: filled on at the rate it had since it was last
+   * looked at, a cache brought out once it's full, and its rate set by
+   * who's listening now (none while its cache is out). Each herzie here
+   * playing music, with a ticket for the event, counts. A new event's
+   * crystal starts dull (or as a sleep left it), with nothing out; there's
+   * none between events. Everyone's told of each change (`told`: there's
+   * one already), and it's kept for a sleep.
+   */
+  private fill(now: number, told = false): void {
+    const e = this.claim;
+    const event = e && now >= e.startsAt && now < e.endsAt ? e.event : null;
+    if ((this.hunt?.event ?? null) !== event) {
+      const saved = this.saved?.event === event ? this.saved : undefined;
+      this.saved = undefined;
+      this.hunt =
+        event === null
+          ? null
+          : {
+              event,
+              charge: saved?.charge ?? 0,
+              rate: 0,
+              at: now,
+              listeners: 0,
+              k: saved?.k ?? 0,
+            };
+      this.setCache(saved?.cache && event ? { ...saved.cache, event } : null);
+      told = true;
+    }
+    const h = this.hunt;
+    if (h) {
+      if (!this.cache)
+        h.charge = Math.min(1, h.charge + h.rate * Math.max(0, now - h.at));
+      h.at = Math.max(h.at, now);
+      if (!this.cache && h.charge >= 1) {
+        const spot = wildsCacheSpot(h.event, h.k++);
+        this.setCache({
+          id: wildsCacheId(h.event, h.at, this.deps.shard),
+          ...spot,
+          event: h.event,
+        });
+        told = true;
+      }
+      let listeners = 0;
+      for (const [uid] of this.deps.here())
+        if (this.tuned.has(uid) && this.claims.get(uid)?.event === h.event)
+          listeners++;
+      const rate = this.cache ? 0 : huntRate(listeners);
+      if (listeners !== h.listeners || rate !== h.rate) {
+        h.listeners = listeners;
+        h.rate = rate;
+        told = true;
+      }
+    }
+    if (!told) return;
+    this.deps.emit(all({ t: "wildsHunt", hunt: this.huntView(now) }));
+    if (h)
+      this.deps.store?.save({
+        event: h.event,
+        charge: h.charge,
+        k: h.k,
+        cache: this.cache && cacheView(this.cache),
+      });
+  }
+
+  /** The cache out was opened (or found opened): the crystal starts again
+   * from dull, as of when it was last looked at. */
+  private spend(): void {
+    const h = this.hunt;
+    if (!h) return;
+    h.charge = 0;
+    this.fill(h.at, true);
+  }
+
+  /** The crystal as the room tells it, at `now`. */
+  private huntView(now: number): WildsHunt | null {
+    const h = this.hunt;
+    if (!h) return null;
+    const at = Math.max(h.at, now);
+    return {
+      charge: Math.round(huntCharge(h, at) * 1e4) / 1e4,
+      rate: h.rate,
+      at,
+      listeners: h.listeners,
+    };
+  }
+
+  /** The cache out is now `next` (null: none): everyone's told, and a new
+   * one's ring starts empty (its `wildsCache` says so). */
+  private setCache(next: Cache | null): void {
+    if ((next?.id ?? null) === (this.cache?.id ?? null)) return;
+    this.cache = next;
+    this.letGo();
+    this.deps.emit(all({ t: "wildsCache", cache: next && cacheView(next) }));
+  }
+
   // --- Caches.
 
   /**
@@ -487,7 +624,6 @@ export class WildsLootRuntime {
       }
       return refuse("not-yet");
     }
-    this.opened.add(c.id);
     if (current) {
       this.cache = null;
       this.letGo();
@@ -509,6 +645,8 @@ export class WildsLootRuntime {
       if (current) this.deps.emit(all({ t: "wildsCache", cache: null }));
       refuse("gone");
     }
+    // Its hunt's over: the crystal goes dull, and fills again from there.
+    if (current) this.spend();
   }
 }
 

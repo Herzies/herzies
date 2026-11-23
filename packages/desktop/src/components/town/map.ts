@@ -85,6 +85,9 @@ export const OBJECTS = {
   // A workbench that opens the crafting window (see wilds/craftingSpot.ts).
   // Faces the middle of the island unless turned.
   W: { name: "Crafting station", color: "#e0a458" },
+  // The Wilds' meter for its next cache: listening fills it (see
+  // wilds/HuntCrystal.tsx).
+  G: { name: "Hunt crystal", color: "#ffc61a" },
 } as const;
 export type ObjectChar = keyof typeof OBJECTS;
 

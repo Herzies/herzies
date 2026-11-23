@@ -120,7 +120,7 @@ describe("the Wilds' loot on the client", () => {
     me.x = 0;
     me.z = 40;
     recv({ t: "wildsCache", cache: { id: "c1", x: 30, z: 10 } });
-    expect(noticed.at(-1)).toBe("A cache turned up to the north-east");
+    expect(noticed.at(-1)).toMatch(/cache turned up to the north-east$/);
     // Someone else steps up (server 1 000 → here 6 000): said, counted on.
     recv({
       t: "wildsHold",
@@ -211,7 +211,7 @@ describe("the Wilds' loot on the client", () => {
       cache: { id: "c1", x: 0, z: -30 },
       hold: { holders: [{ id: 2, ms: 3_000 }], contested: false, at: 0 },
     });
-    expect(noticed.at(-1)).toBe("There's a cache out to the north");
+    expect(noticed.at(-1)).toMatch(/cache is out to the north$/);
     // Said at server 0 (here 5 000): not counted on before it was said.
     expect(heldByOthers(1, now)).toBe(3_000);
     map = "home";

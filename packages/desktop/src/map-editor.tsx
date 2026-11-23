@@ -62,6 +62,7 @@ import {
   CRAFTING_STATION,
   craftingFacing,
 } from "./components/town/wilds/craftingSpot";
+import { HUNT_CRYSTAL } from "./components/town/wilds/HuntCrystal";
 
 // The Crystal is drawn here even while the server has it off.
 showCrystalAlways();
@@ -113,6 +114,7 @@ const PALETTE: Paint[] = [
       "I",
       "X",
       "W",
+      "G",
     ] as const
   ).map((ch) => ({
     layer: "objects" as const,
@@ -125,9 +127,9 @@ const PALETTE: Paint[] = [
  * K (shop, "kiosk"), C (cave), H (auction house, "hall"), U (bush), L (lamp post), N (bench), T
  * (market stand), I (bulletin board, "info"), Y (training dummy), O
  * (portal), Q (Crystal), Z (barrel), / (pots), ; (the Tower), ' (the
- * Sky dock: it faces out of the island, the ship moored past its pier)
- * and \ (a Crafting station, "workbench"). Clear of the 3D preview's keys
- * (WASD, arrows, E) and the tools' (B, R, F, M, P). */
+ * Sky dock: it faces out of the island, the ship moored past its pier),
+ * \ (a Crafting station, "workbench") and ` (a Hunt crystal). Clear of
+ * the 3D preview's keys (WASD, arrows, E) and the tools' (B, R, F, M, P). */
 const KEYS = [
   ..."1234567890-",
   "k",
@@ -147,6 +149,7 @@ const KEYS = [
   ";",
   "'",
   "\\",
+  "`",
   "x",
 ];
 type Tool = "brush" | "rect" | "fill" | "move";
@@ -453,6 +456,13 @@ function drawMap(
         } else if (o === CRAFTING_STATION) {
           // A workbench: a long plank.
           ctx.rect(cx - zoom * 0.42, cy - zoom * 0.2, zoom * 0.84, zoom * 0.4);
+        } else if (o === HUNT_CRYSTAL) {
+          // A gem: a diamond, taller than wide.
+          ctx.moveTo(cx, cy - zoom * 0.45);
+          ctx.lineTo(cx + zoom * 0.28, cy);
+          ctx.lineTo(cx, cy + zoom * 0.45);
+          ctx.lineTo(cx - zoom * 0.28, cy);
+          ctx.closePath();
         } else if (o === "D") {
           // A post with a round head: a dummy.
           ctx.rect(cx - zoom * 0.08, cy - zoom * 0.1, zoom * 0.16, zoom * 0.5);
