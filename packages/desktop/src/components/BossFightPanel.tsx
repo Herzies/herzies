@@ -173,6 +173,7 @@ export function BossFightPanel({
         >
           <HerzieView
             onStage={onStage}
+            bleed
             userId={`boss:${event.id}`}
             stage={3}
             // Sized for the face-on pose specifically. Head-on the boss is

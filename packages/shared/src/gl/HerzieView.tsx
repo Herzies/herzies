@@ -140,6 +140,10 @@ export type HerzieViewProps = {
   /** How far the camera looks down, in degrees. Default: the usual slight
    * tilt (DEFAULT_CAMERA_TILT_DEG). */
   tilt?: number;
+  /** Drawn past its box, out to its stage's bleed box (an NPC window's
+   * edges; see HerzieStage.setBleed), framed just the same: its pipe's
+   * smoke or a dance isn't cut off at the box. Default false. */
+  bleed?: boolean;
 };
 
 /**
@@ -178,6 +182,7 @@ export function HerzieView({
   scenery,
   distance = 1,
   tilt = DEFAULT_CAMERA_TILT_DEG,
+  bleed = false,
 }: HerzieViewProps) {
   const box = useRef<HTMLDivElement>(null);
   const width = Math.ceil(cols * size * 0.6);
@@ -225,6 +230,7 @@ export function HerzieView({
     spinSpeed,
     distance,
     tilt,
+    bleed,
   });
   live.current = {
     paused,
@@ -243,6 +249,7 @@ export function HerzieView({
     spinSpeed,
     distance,
     tilt,
+    bleed,
   };
 
   /** The turn, in the old renderer's units (added to DEFAULT_Y_ANGLE). */
@@ -283,6 +290,9 @@ export function HerzieView({
       element,
       scene,
       camera: cam,
+      get bleed() {
+        return live.current.bleed;
+      },
       idle() {
         const l = live.current;
         const s = spin.current;

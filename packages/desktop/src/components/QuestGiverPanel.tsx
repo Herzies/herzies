@@ -179,6 +179,7 @@ export function QuestGiverPanel({
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
           <HerzieView
             onStage={onStage}
+            bleed
             userId={giver.seed}
             stage={giver.stage}
             zoom={0.8}

@@ -111,6 +111,7 @@ export function TowerGuardPanel({
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
           <HerzieView
             onStage={onStage}
+            bleed
             userId={TOWER_GUARD_SEED}
             stage={TOWER_GUARD_STAGE}
             zoom={0.8}

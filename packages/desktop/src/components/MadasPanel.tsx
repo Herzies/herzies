@@ -33,6 +33,7 @@ export function MadasPanel({ paused }: { paused: boolean }) {
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
           <HerzieView
             onStage={onStage}
+            bleed
             userId={MADAS_SEED}
             stage={MADAS_STAGE}
             zoom={0.8}
