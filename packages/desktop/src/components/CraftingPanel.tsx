@@ -15,7 +15,7 @@ import {
   WILDS_RECIPES,
   type WildsRecipe,
 } from "@herzies/shared";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { notify } from "../lib/notices";
 import { cn } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
@@ -26,7 +26,6 @@ import ItemInspectOverlay, {
 import { List } from "./List";
 import { TabButton } from "./TabButton";
 import { Tooltip } from "./Tooltip";
-import { setCraftingTalk } from "./town/wilds/craftingSpot";
 
 /** A card to open Inspect on: which, at what tuning, and (for one shown
  * with its icon) the INSPECT_ORIGIN_ATTR key the card grows out of. */
@@ -47,8 +46,7 @@ const TABS: { id: Tab; name: string }[] = [
  * and bits, yours first; Tune tunes any instrument you have with bits.
  * Titled like any visitor's window: the name, the tabs, then each thing
  * to do with its cost and its one button; your bits at the foot, as a
- * stall shows your coins. While it's open, the bench is awake: its eyes
- * open and follow you (see CraftingStation.tsx).
+ * stall shows your coins.
  *
  * Every card named here — what a recipe makes and what from, each bit in a
  * cost, the instruments to tune, your bits — opens Inspect on a click, as a
@@ -72,10 +70,6 @@ export function CraftingPanel({
   onLog?: (message: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>("craft");
-  useEffect(() => {
-    setCraftingTalk(true);
-    return () => setCraftingTalk(false);
-  }, []);
   /** The recipe or unit an answer is on its way for. */
   const [busy, setBusy] = useState<string | null>(null);
   const [inspecting, setInspecting] = useState<Inspecting | null>(null);
