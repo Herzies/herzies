@@ -326,6 +326,7 @@ export class TownRoom extends DurableObject<Env> {
         t: "welcome",
         you: TOWN_WATCHER_ID,
         players: players.flatMap((p) => watchedOf(p) ?? []),
+        now: Date.now(),
       } satisfies ServerMessage),
     );
     if (players.length) {
@@ -601,6 +602,7 @@ export class TownRoom extends DurableObject<Env> {
       t: "welcome",
       you: id,
       players: others.map(playerOf),
+      now,
       fight: this.fight?.state(now, t.uid),
       ...(running.length ? { duels: running } : {}),
     });

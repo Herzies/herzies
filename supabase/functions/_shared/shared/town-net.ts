@@ -930,11 +930,15 @@ export type BossPlace = {
 
 export type ServerMessage =
   /** Accepted: your entity id and everyone else here. A full snapshot
-   * follows. `duels`: those running in the room (to draw their rings). */
+   * follows. `now`: the server's clock as it sent this, so times it
+   * schedules (a shield, a cache opening) read right before any snapshot
+   * (none come while you're alone); older servers left it out. `duels`:
+   * those running in the room (to draw their rings). */
   | {
       t: "welcome";
       you: number;
       players: TownPlayer[];
+      now?: number;
       fight?: FightState;
       duels?: DuelState[];
     }

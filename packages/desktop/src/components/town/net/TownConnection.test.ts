@@ -116,6 +116,18 @@ describe("TownConnection", () => {
     expect([...conn.remotes.keys()]).toEqual([3]);
   });
 
+  it("sets its clock by the welcome, before any snapshot", async () => {
+    const { conn } = setup();
+    conn.start();
+    await settle();
+    latest().open();
+    const clock = vi.spyOn(performance, "now").mockReturnValue(1_000);
+    latest().json({ t: "welcome", you: 1, players: [], now: 1.8e12 });
+    clock.mockRestore();
+    // A shield the server ends 5 s on is 5 s on here too.
+    expect(conn.clock.toLocal(1.8e12 + 5_000)).toBe(6_000);
+  });
+
   it("sends movement only when it changes", async () => {
     const { conn, here } = setup();
     conn.start();

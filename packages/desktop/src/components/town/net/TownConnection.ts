@@ -440,7 +440,11 @@ export class TownConnection {
         this.attempt = 0;
         this.remotes.clear();
         for (const p of m.players) this.addRemote(p);
-        if (m.fight) this.clock.observe(m.fight.now, performance.now());
+        // Set the clock before anything it times: a lone herzie gets no
+        // snapshots to set it by, and an unset clock read the Wilds'
+        // shield (in server time) as some 57 years off.
+        if (m.now !== undefined) this.clock.observe(m.now, performance.now());
+        else if (m.fight) this.clock.observe(m.fight.now, performance.now());
         this.opts.onMessage?.(m);
         this.setStatus("online");
         this.emit();
