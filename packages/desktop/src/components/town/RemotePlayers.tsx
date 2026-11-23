@@ -17,7 +17,7 @@ import {
 import { HerzieModel, ICE_SPEED } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { type RefObject, useEffect, useMemo, useRef } from "react";
 import {
   type Group,
   type Object3D,
@@ -85,6 +85,17 @@ const labels = {
 };
 /** How often the nearest are worked out again (ms). */
 const RANK_MS = 250;
+
+/** Each herzie's name tag, by entity id: where E opens its menu. */
+const tags = new Map<number, RefObject<HTMLButtonElement | null>>();
+
+/** E by herzie `id`: its menu, as a click on its name would open it, just
+ * under the name (or mid-screen, with no name drawn to put it by). */
+export function openPlayerMenuByName(id: number): void {
+  const r = tags.get(id)?.current?.getBoundingClientRect();
+  if (r && r.width > 0) openPlayerMenu(id, r.left, r.bottom + 2);
+  else openPlayerMenu(id, window.innerWidth / 2, window.innerHeight / 2);
+}
 
 /** Out of the dummies' list. */
 function dropTarget(t: DummyState) {
@@ -295,6 +306,10 @@ function RemoteHerzie({
   useEffect(() => () => void entityAt.delete(remote.id), [remote.id]);
 
   const tag = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    tags.set(remote.id, tag);
+    return () => void tags.delete(remote.id);
+  }, [remote.id]);
   const tagAnchor = useRef<Group>(null);
   const afk = useRef(false);
   const bubbleBox = useRef<HTMLDivElement>(null);

@@ -559,7 +559,9 @@ export function TownWorld({
           )}
         >
           {typeof bench === "object"
-            ? `Pick up ${bench.name}`
+            ? "herzie" in bench
+              ? `Interact with ${bench.name}`
+              : `Pick up ${bench.name}`
             : bench === "sit"
               ? "Sit down"
               : bench === "read"

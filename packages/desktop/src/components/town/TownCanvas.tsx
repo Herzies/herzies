@@ -43,12 +43,15 @@ import { Combat, leaveCombat } from "./combat/Combat";
 import { CombatOverlay } from "./combat/DamageNumbers";
 import { LootDrops } from "./combat/LootDrops";
 import { Mobs } from "./combat/Mobs";
+import { entityAt } from "./combat/skills";
+import { combat } from "./combat/state";
 import { Telegraphs } from "./combat/Telegraphs";
 import { getCrystal } from "./crystalState";
 import type { Hour } from "./DayCycle";
 import { driftClouds } from "./depth";
 import { youDown } from "./downed";
 import { DuelScene } from "./duel/DuelScene";
+import { closePlayerMenu, duel } from "./duel/store";
 import { drawn } from "./fps";
 import { isMouth, usePortalOpen } from "./gates";
 import { HomeDrops } from "./HomeDrops";
@@ -73,7 +76,7 @@ import {
   walkedThrough,
   warp,
 } from "./portal";
-import { RemotePlayers } from "./RemotePlayers";
+import { openPlayerMenuByName, RemotePlayers } from "./RemotePlayers";
 import type { Season } from "./Seasons";
 import { sfxDoor, sfxPortal } from "./sfx";
 import "./shadows";
@@ -86,6 +89,7 @@ import {
 } from "./pixelSize";
 import {
   goToMap,
+  HERZIE_REACH,
   mapById,
   TALK_RANGE,
   type TownRuntime,
@@ -152,8 +156,8 @@ export type TownCanvasProps = {
   onNearChange: (spot: TownSpot | null) => void;
   /** What E would do at a bench or board right now — sit on one nearby,
    * stand up off it, read the bulletin board, the Crystal, the Crafting
-   * Station or the Hunt Crystal on the Wilds — when that changes (null:
-   * nothing). */
+   * Station, the Hunt Crystal on the Wilds or another herzie's menu — when
+   * that changes (null: nothing). */
   onBenchChange?: (prompt: BenchPrompt | null) => void;
   /** The island a portal nearby leads to (E steps in), when that changes
    * (null: none near). */
@@ -195,7 +199,8 @@ export type TownCanvasProps = {
 
 /** What E would do where you stand, besides talking or a portal. On the
  * Wilds, `pickup`: take the card lying in reach (its drop id, and its name
- * to show). */
+ * to show). `herzie`: open the menu of another herzie close by (its entity
+ * id, and its name to show). */
 export type BenchPrompt =
   | "sit"
   | "stand"
@@ -204,7 +209,8 @@ export type BenchPrompt =
   | "upgrade"
   | "crafting"
   | "hunt"
-  | { pickup: string; name: string };
+  | { pickup: string; name: string }
+  | { herzie: number; name: string };
 
 /**
  * The 3D Town: react-three-fiber for the scene and its lifecycle, Rapier
@@ -500,6 +506,8 @@ function Systems({
   const hunt = useRef(false);
   /** The card on the Wilds E would pick up, if any. */
   const pickup = useRef<GroundCard | null>(null);
+  /** The other herzie E would open the menu of, if any (an entity id). */
+  const herzie = useRef<number | null>(null);
   // A shut portal (a sealed cave, the Tower out of season, a floor not
   // yet cleared): nothing to see, step into or be prompted by.
   const isOpen = usePortalOpen();
@@ -535,7 +543,8 @@ function Systems({
 
   /** E (or a click on the prompt): talk to whoever's near; else step into
    * the portal nearby; else stand up; else pick up the card in reach (the
-   * Wilds); else read the board nearby; else sit on the bench nearby.
+   * Wilds); else read the board nearby; else sit on the bench nearby; else
+   * open the menu of the herzie nearby (E again shuts it).
    * Knocked out, talking's all it can do: it lies where it fell. */
   const interact = () => {
     const card = near.current?.card;
@@ -564,6 +573,10 @@ function Systems({
       leaveCombat();
       onOpen(HUNT_CRYSTAL_KEY);
     } else if (seat.current) townLive.seat = seat.current;
+    else if (herzie.current !== null) {
+      if (duel.menu?.id === herzie.current) closePlayerMenu();
+      else openPlayerMenuByName(herzie.current);
+    }
   };
   const enter = (p: Portal) => {
     if (warp.active) return;
@@ -746,11 +759,39 @@ function Systems({
       }
       seat.current = seatNear(benches, townSave.x, townSave.z, sitting.taken);
     }
+    // Another herzie close by, with nothing else here for E. Not in combat
+    // mode: its menu takes the number keys, the skills' keys there.
+    herzie.current = null;
+    if (
+      net &&
+      !combat.on &&
+      !closest &&
+      !portal.current &&
+      !townLive.seat &&
+      !pickup.current &&
+      !crystal.current &&
+      !board.current &&
+      !crafting.current &&
+      !hunt.current &&
+      !seat.current
+    ) {
+      let reach = HERZIE_REACH;
+      for (const id of net.remotes.keys()) {
+        const at = entityAt.get(id);
+        if (!at) continue;
+        const d = Math.hypot(townSave.x - at.x, townSave.z - at.z);
+        if (d < reach) {
+          reach = d;
+          herzie.current = id;
+        }
+      }
+    }
     if (townLive.benchPressed) {
       townLive.benchPressed = false;
       if (!closest) interact();
     }
     const lying = pickup.current;
+    const other = herzie.current;
     // Knocked out: no "E to…" (see interact).
     const next = youDown()
       ? null
@@ -772,18 +813,31 @@ function Systems({
                   ? "hunt"
                   : seat.current
                     ? "sit"
-                    : null;
+                    : other !== null
+                      ? "herzie"
+                      : null;
     const was = prompt.current;
     const same =
       next === "pickup"
-        ? typeof was === "object" && was?.pickup === lying?.id
-        : next === was;
+        ? typeof was === "object" && was !== null && "pickup" in was
+          ? was.pickup === lying?.id
+          : false
+        : next === "herzie"
+          ? typeof was === "object" && was !== null && "herzie" in was
+            ? was.herzie === other
+            : false
+          : next === was;
     if (!same) {
+      const name = other === null ? undefined : net?.remotes.get(other)?.name;
       const shown: BenchPrompt | null =
-        next === "pickup" && lying
-          ? { pickup: lying.id, name: cardName(lying.item, lying.level) }
-          : next === "pickup"
-            ? null
+        next === "pickup"
+          ? lying
+            ? { pickup: lying.id, name: cardName(lying.item, lying.level) }
+            : null
+          : next === "herzie"
+            ? other !== null && name !== undefined
+              ? { herzie: other, name }
+              : null
             : next;
       prompt.current = shown;
       onBenchChange?.(shown);
