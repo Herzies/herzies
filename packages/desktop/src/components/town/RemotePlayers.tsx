@@ -74,7 +74,7 @@ import type { RemotePlayer, TownConnection } from "./net/TownConnection";
 import { useTownNetVersion } from "./net/townNet";
 import { townSave, useTownRuntime } from "./runtime";
 import { sfxRimshotSlam } from "./sfx";
-import { titleName, WORN_TITLE_COLOUR } from "./TitleLine";
+import { titleName } from "./TitleLine";
 import { wildsBarOf, wildsDown, wildsFoe } from "./wilds/store";
 
 /** What every label reads: the herzie the pointer's on, and the nearest
@@ -653,8 +653,8 @@ function RemoteHerzie({
               {title ? (
                 <div
                   ref={titleLine}
-                  className="pointer-events-none whitespace-nowrap text-[9px] font-medium leading-tight"
-                  style={{ color: WORN_TITLE_COLOUR, textShadow: NAME_SHADOW }}
+                  className="pointer-events-none whitespace-nowrap text-[9px] font-medium leading-tight text-white"
+                  style={{ textShadow: NAME_SHADOW }}
                 >
                   {title}
                 </div>

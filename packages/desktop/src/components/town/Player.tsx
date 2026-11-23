@@ -34,7 +34,7 @@ import { SEAT_Y } from "./Benches";
 import type { ChatBubble } from "./chatBubbles";
 import { discField } from "./combat/discs";
 import { shoveFromBoss } from "./combat/fight";
-import { combat } from "./combat/state";
+import { combat, useCombat } from "./combat/state";
 import { applyDowned, youDown } from "./downed";
 import { fighterPace, poseFighter } from "./duel/fx";
 import { duel, duelHeld } from "./duel/store";
@@ -57,7 +57,7 @@ import { NAME_SHADOW } from "./nameFade";
 import { AFK_MS, townNet } from "./net/townNet";
 import { warp, warpAmount } from "./portal";
 import { arriving, townLive, townSave, useTownRuntime } from "./runtime";
-import { titleName, WORN_TITLE_COLOUR } from "./TitleLine";
+import { titleName } from "./TitleLine";
 import { wildsHeld } from "./wilds/store";
 
 /** The player's herzie as it last was: a new Player (another island's
@@ -752,6 +752,8 @@ export function Player({
   });
 
   const wornTitle = titleName(title);
+  // Aiming, they'd sit right where you're looking: off till you're done.
+  const aimed = useCombat();
 
   // Aboard, what's drawn rides on the ship: kept where the body is, in the
   // deck's frame (the body is at the scene's origin, in the deck's own
@@ -774,19 +776,20 @@ export function Player({
       <HomeShadow radius={Math.max(0.5, herzie.height * 0.42)} />
       {/* The title you wear and your own name under it, as everyone
           else's reads (RemotePlayers) — always full: you're never far from
-          yourself. What you just said stacks over them. */}
+          yourself, and gone while you aim. What you just said stacks over
+          them. */}
       <Html position={[0, herzie.height + 0.3, 0]} zIndexRange={[19, 0]}>
         <div className="pointer-events-none flex -translate-x-1/2 -translate-y-full flex-col items-center">
           {bubble ? <HeadBubble key={bubble.key} bubble={bubble} /> : null}
-          {wornTitle ? (
+          {wornTitle && !aimed ? (
             <div
-              className="whitespace-nowrap text-[9px] font-medium leading-tight"
-              style={{ color: WORN_TITLE_COLOUR, textShadow: NAME_SHADOW }}
+              className="whitespace-nowrap text-[9px] font-medium leading-tight text-white"
+              style={{ textShadow: NAME_SHADOW }}
             >
               {wornTitle}
             </div>
           ) : null}
-          {name ? (
+          {name && !aimed ? (
             <div
               className="whitespace-nowrap text-[11px] font-medium leading-tight text-white"
               style={{ textShadow: NAME_SHADOW }}
