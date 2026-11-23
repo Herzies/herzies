@@ -14,7 +14,7 @@ import {
   healTarget,
   meleeReaches,
 } from "@herzies/shared/combat";
-import { HerzieModel } from "@herzies/shared/gl";
+import { HerzieModel, ICE_SPEED } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
@@ -67,8 +67,8 @@ import {
 } from "./duel/store";
 import { footprints, Trail } from "./footprints";
 import { HeadBubble } from "./HeadBubble";
-import { groundY, petWalkable, type TownMap, worldRadius } from "./map";
-import { ICE_SPEED, onIce } from "./movement";
+import { groundY, type TownMap, worldRadius } from "./map";
+import { onIce, petFooting } from "./movement";
 import { NAME_SHADOW, nearestIds, REMOTE_LABEL, remoteLabel } from "./nameFade";
 import type { RemotePlayer, TownConnection } from "./net/TownConnection";
 import { useTownNetVersion } from "./net/townNet";
@@ -253,10 +253,15 @@ function RemoteHerzie({
     herzie.setFrame(frame);
   }, [herzie, frame]);
   useEffect(() => {
-    // Its cat spirit (if it has one) walks the same ground, round water —
-    // or, on a deck, inside the rail.
+    // Its cat spirit (if it has one) walks the same ground, round water
+    // (or out on it, frozen over, where its feet slip) — or, on a deck,
+    // inside the rail.
     herzie.groundAt = (x, z) => groundY(map, x, z);
-    herzie.walkable = map.ship ? onDeck : petWalkable(map, worldRadius(map));
+    const footing = map.ship
+      ? null
+      : petFooting(map, worldRadius(map), () => seasonNow.look.ice);
+    herzie.walkable = footing?.walkable ?? onDeck;
+    herzie.icy = footing?.icy ?? null;
   }, [herzie, map]);
   useEffect(() => {
     herzie.root.visible = false;

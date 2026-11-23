@@ -44,11 +44,12 @@ import { keepAtHome } from "./HomeLayer";
 import { HomeShadow } from "./HomeShadow";
 import { homeMode } from "./homeMode";
 import type { TownInput } from "./input";
-import { groundY, petWalkable, type TownMap } from "./map";
+import { groundY, type TownMap } from "./map";
 import {
   ICE_GRIP,
   type Mover,
   onIce,
+  petFooting,
   stepMover,
   walkAzimuth,
 } from "./movement";
@@ -293,13 +294,18 @@ export function Player({
     herzie.setFrame(frame);
   }, [herzie, frame]);
   useEffect(() => {
-    // Its cat spirit (if it has one) walks the same ground, round water —
-    // or, on a deck, inside the rail.
+    // Its cat spirit (if it has one) walks the same ground, round water
+    // (or out on it, frozen over, where its feet slip) — or, on a deck,
+    // inside the rail.
     herzie.groundAt = (x, z) => groundY(map, x, z);
-    const walkable = map.ship ? onDeck : petWalkable(map, reach);
+    const footing = map.ship
+      ? null
+      : petFooting(map, reach, () => seasonNow.look.ice);
+    const walkable = footing?.walkable ?? onDeck;
     herzie.walkable = walkable;
-    // Whether it can walk straight there: dry all the way, and nothing
-    // solid (a wall, a tree, a stall) at a cat's height.
+    herzie.icy = footing?.icy ?? null;
+    // Whether it can walk straight there: on its footing all the way, and
+    // nothing solid (a wall, a tree, a stall) at a cat's height.
     const clear = (ax: number, az: number, bx: number, bz: number) => {
       const dx = bx - ax;
       const dz = bz - az;

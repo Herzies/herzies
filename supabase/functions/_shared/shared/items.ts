@@ -1509,7 +1509,7 @@ export const BOSS_LOOT_EXCLUDED_ITEM_IDS = ["cd"];
 /** What a boss's random loot is drawn from, and how likely each is: every
  * item that drops from listening (not in NON_DROPPABLE_ITEM_IDS, no
  * seasonal window, not in BOSS_LOOT_EXCLUDED_ITEM_IDS), weighted per BOSS_LOOT_RARITY_BOOST. settle_boss_fight
- * rolls from a copy of this list (boss_loot_roll, last in 00151_class_set_drops.sql);
+ * rolls from a copy of this list (boss_loot_roll, last in 00158_sailors_starter_pack.sql);
  * items.test.ts checks the two agree, so a new droppable item needs adding
  * there too. */
 export function bossLootWeights(): { itemId: string; weight: number }[] {
@@ -3968,6 +3968,65 @@ function renderFangsFrame(yAngle: number): string[] {
   return renderIconCard(yAngle, "#E05050", "#8a3a3a", "#4a2020", fangsCardIcon);
 }
 
+/** The Sailor's Starter Pack: a white walrus moustache, drooping at the
+ * tips, and below it a briar pipe, its ember lit and smoke curling up. */
+function sailorsStarterPackCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // Smoke, rising from the bowl in three swelling puffs.
+  for (const [cx, cy, r] of [
+    [-0.31, -0.02, 0.03],
+    [-0.335, -0.11, 0.04],
+    [-0.31, -0.21, 0.045],
+  ] as const) {
+    const d = Math.hypot(ix - cx, iy - cy);
+    if (d < r)
+      return d < r * 0.55 && iy < cy
+        ? { bright: 0.95, color: "#F2EFEA" }
+        : { bright: 0.75, color: "#C9C5BF" };
+  }
+  // The moustache: thickest either side of its parting, drooping to tips.
+  const mx = ix - 0.05;
+  const a = Math.abs(mx) / 0.27;
+  if (a <= 1) {
+    const cy = -0.09 + 0.13 * a ** 2.4;
+    const th =
+      0.05 + 0.025 * Math.sin(Math.PI * Math.min(a / 0.9, 1)) - 0.035 * a ** 4;
+    const parting = Math.abs(mx) < 0.014 && iy < cy - th * 0.2;
+    if (Math.abs(iy - cy) < th && !parting)
+      return iy > cy + th * 0.45
+        ? { bright: 0.8, color: "#DAD5CC" }
+        : { bright: 1, color: "#F7F5F0" };
+  }
+  // The pipe: its ember, the bowl's rim, the bowl, a gold band, the stem.
+  if (ix > -0.35 && ix < -0.25) {
+    if (iy > 0.04 && iy < 0.065 && Math.abs(ix + 0.3) < 0.04)
+      return { bright: 1, color: "#FF7A2C" };
+    if (iy >= 0.065 && iy < 0.085) return { bright: 0.7, color: "#5A3520" };
+    const bottom = 0.2 - 0.03 * ((ix + 0.3) / 0.05) ** 2;
+    if (iy >= 0.085 && iy < bottom) return { bright: 0.85, color: "#8A552C" };
+  }
+  // The stem, from the bowl's side up to the mouth.
+  const t = (ix + 0.25) / 0.17;
+  if (t >= 0 && t <= 1) {
+    const sy = 0.15 - t * 0.1;
+    if (Math.abs(iy - sy) < 0.018)
+      return t < 0.12
+        ? { bright: 0.95, color: "#C9A24A" }
+        : { bright: 0.55, color: "#2A2422" };
+  }
+  return null;
+}
+
+function renderSailorsStarterPackFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#F2EFEA",
+    "#3E5A78",
+    "#14243A",
+    sailorsStarterPackCardIcon,
+  );
+}
+
 function ghostCardIcon(u: number, v: number): TexSample | null {
   const [ix, iy] = iconUV(u, v);
   const inHead = ix * ix + (iy + 0.08) ** 2 < 0.17 ** 2;
@@ -4193,6 +4252,7 @@ const fyllingsCapeFrames = generateFrames(renderFyllingsCapeFrame);
 const fyllingsMonocleFrames = generateFrames(renderFyllingsMonocleFrame);
 const fyllingsBlackFrames = generateFrames(renderFyllingsBlackFrame);
 const fangsFrames = generateFrames(renderFangsFrame);
+const sailorsStarterPackFrames = generateFrames(renderSailorsStarterPackFrame);
 const pumpkinSpiceFrames = generateFrames(renderPumpkinSpiceFrame);
 const ghostFrames = generateFrames(renderGhostFrame);
 const sleptwellFrames = generateFrames(renderSleptwellFrame);
@@ -5261,6 +5321,20 @@ export const ITEMS: ItemDef[] = [
     requiredClass: "percussionist",
     sellPrice: 500,
     stats: { def: 6, stamina: 4 },
+  },
+  // An old salt's moustache and pipe: the skipper's (npc-looks.ts), and
+  // anyone's who finds one. Drop-only.
+  {
+    id: "sailors-starter-pack",
+    name: "Sailor's Starter Pack",
+    description:
+      "A walrus moustache and a briar pipe. Sea legs sold separately",
+    rarity: "uncommon",
+    frames: sailorsStarterPackFrames,
+    equipable: true,
+    equipSlot: "face",
+    sellPrice: 100,
+    stats: { luck: 10 },
   },
 ];
 

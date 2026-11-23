@@ -35,10 +35,10 @@ describe("the Sky Dock", () => {
         );
   });
 
-  it("stands at the berth, in five draw calls, and disposes what it made", () => {
+  it("stands at the berth, in four draw calls, and disposes what it made", () => {
     for (const b of berths) {
       const dock = new DockModel(b);
-      dock.update(1 / 60, 100, { bell: 0.3, strikes: 2 });
+      dock.update({ bell: 0.3, strikes: 2 });
       expect(dock.root.position.x).toBeCloseTo(b.pierEnd.x);
       expect(dock.root.position.z).toBeCloseTo(b.pierEnd.z);
       const made = new Set<THREE.BufferGeometry | THREE.Material>();
@@ -50,7 +50,7 @@ describe("the Sky Dock", () => {
         made.add(mesh.geometry);
         for (const m of [mesh.material].flat()) made.add(m);
       });
-      expect(calls).toBe(5);
+      expect(calls).toBe(4);
       const gone = new Set<unknown>();
       for (const x of made)
         x.addEventListener("dispose", () => {

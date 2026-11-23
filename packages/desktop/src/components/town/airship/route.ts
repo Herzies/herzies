@@ -406,23 +406,29 @@ function dip(t: number): number {
 }
 
 /** How long the gangplank takes to run out or be drawn in (s). */
-const PLANK_MOVE_S = 1.5;
+export const PLANK_MOVE_S = 1.5;
 /** It's in this long before the ship casts off (s), so nobody's still
  * trying to climb a plank that's closed in the last seconds. It closes the
  * moment it starts coming in. */
 export const PLANK_IN_BY_S = 5;
+/** Laid up after its last run, it's in this long after the ship tied up
+ * (s): time for whoever's still aboard to be seen off down it (see
+ * boarding.ts's LAID_UP_GRACE_MS). */
+export const PLANK_LAID_UP_S = 20;
 
-/** How much the gangplank's run out, `since` the ship tied up and `until`
- * it casts off (null: it's laid up), at `t` (all seconds): out once it's
- * settled, in a little before it casts off. */
-function gangplankAt(t: number, since: number, until: number | null): number {
-  const out = smootherstep(clamp01((t - since - 1) / PLANK_MOVE_S));
-  const back =
+/** How much the gangplank's run out, `from` when it can be (the ship tied
+ * up, or a service opened with it lying there; null: never, it's laid
+ * up) and `until` the ship casts off (null: it's laid up), at `t` (all
+ * seconds): out once it's settled, in a little before it casts off — or,
+ * laid up after a run, once its last passengers are off. */
+function gangplankAt(t: number, from: number | null, until: number | null) {
+  if (from === null) return 0;
+  const out = smootherstep(clamp01((t - from - 1) / PLANK_MOVE_S));
+  const inFrom =
     until === null
-      ? 0
-      : smootherstep(
-          clamp01((t - (until - PLANK_IN_BY_S - PLANK_MOVE_S)) / PLANK_MOVE_S),
-        );
+      ? from + PLANK_LAID_UP_S
+      : until - PLANK_IN_BY_S - PLANK_MOVE_S;
+  const back = smootherstep(clamp01((t - inFrom) / PLANK_MOVE_S));
   return Math.min(out, 1 - back);
 }
 
@@ -474,7 +480,14 @@ export function shipPose(
     out.turnRate = 0;
     const since = st.since / 1000;
     const until = st.until === null ? null : st.until / 1000;
-    out.gangplank = gangplankAt(t, since, until);
+    // Lying here since before anyone remembers: its plank's stowed, unless
+    // a service has opened (it runs out then, for boarding).
+    const plankFrom = Number.isFinite(since)
+      ? since
+      : until !== null && service
+        ? service.startsAt / 1000
+        : null;
+    out.gangplank = gangplankAt(t, plankFrom, until);
     // Tied up (its lines out, its wings folded) all the while it lies
     // here: they're slipped and spread once it's lifted clear (below).
     out.moored = 1;

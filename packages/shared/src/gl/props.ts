@@ -1,8 +1,10 @@
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import {
+  type BeanieProp,
   type FeatherProp,
   featherVane,
+  type MoustacheProp,
   type PropModel,
   type ShoeProp,
   type TieProp,
@@ -23,6 +25,8 @@ export function buildPropModel(prop: PropModel, paint: Paint): THREE.Group {
   if (prop.kind === "shoe") return shoe(prop, paint);
   if (prop.kind === "necktie") return necktie(prop, paint);
   if (prop.kind === "feather") return feather(prop, paint);
+  if (prop.kind === "moustache") return moustache(prop, paint);
+  if (prop.kind === "beanie") return beanie(prop, paint);
   return boombox(prop.size, prop.mirrored ? -1 : 1, paint);
 }
 
@@ -308,7 +312,235 @@ function feather(prop: FeatherProp, paint: Paint): THREE.Group {
   return group;
 }
 
-/** Frees what a prop model built for itself alone (a feather's shapes). */
+/**
+ * A closed tube through `rings` (each the same number of points round,
+ * each a step on from the last), shut at either end by a point if given:
+ * wound to face out, its normals smoothed round and along it.
+ */
+function ringGeometry(
+  rings: THREE.Vector3[][],
+  start?: THREE.Vector3,
+  end?: THREE.Vector3,
+): THREE.BufferGeometry {
+  const sides = rings[0].length;
+  const position: number[] = [];
+  for (const ring of rings) for (const p of ring) position.push(p.x, p.y, p.z);
+  const startAt = position.length / 3;
+  if (start) position.push(start.x, start.y, start.z);
+  const endAt = position.length / 3;
+  if (end) position.push(end.x, end.y, end.z);
+  const index: number[] = [];
+  const at = (r: number, k: number) => r * sides + (k % sides);
+  for (let r = 0; r + 1 < rings.length; r++) {
+    for (let k = 0; k < sides; k++) {
+      const a = at(r, k);
+      const b = at(r, k + 1);
+      const c = at(r + 1, k);
+      const d = at(r + 1, k + 1);
+      index.push(a, c, b, b, c, d);
+    }
+  }
+  const last = rings.length - 1;
+  for (let k = 0; k < sides; k++) {
+    if (start) index.push(startAt, at(0, k), at(0, k + 1));
+    if (end) index.push(at(last, k), endAt, at(last, k + 1));
+  }
+  // Facing out, or the other way: judged by a side face against the way
+  // out from the middle of its rings.
+  const p = new THREE.Vector3(...position.slice(0, 3));
+  const q = new THREE.Vector3(...position.slice(sides * 3, sides * 3 + 3));
+  const s = new THREE.Vector3(...position.slice(3, 6));
+  const face = q.clone().sub(p).cross(s.clone().sub(p));
+  const mid = new THREE.Vector3();
+  for (const v of rings[0]) mid.add(v);
+  mid.divideScalar(sides);
+  if (face.dot(p.clone().sub(mid)) < 0) {
+    for (let i = 0; i < index.length; i += 3) {
+      const t = index[i + 1];
+      index[i + 1] = index[i + 2];
+      index[i + 2] = t;
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(position, 3));
+  g.setIndex(index);
+  g.computeVertexNormals();
+  return g;
+}
+
+/** Rings along a moustache, and round it. */
+const MOUSTACHE_ROWS = 64;
+const MOUSTACHE_SIDES = 20;
+/** Of its length, how much at either end is its (greyer) tips. */
+const MOUSTACHE_TIPS = 0.1;
+
+/**
+ * A walrus moustache: one tube along a smooth curve through `prop.spine`,
+ * as thick as `prop.radii` along it and drawn out to a point at either
+ * tip. Flattened against the face, it's combed into strands (shallow
+ * grooves running along it), parted in the middle (a dip in its top), and
+ * its lower edge hangs in tufts.
+ */
+function moustache(prop: MoustacheProp, paint: Paint): THREE.Group {
+  const group = new THREE.Group();
+  const curve = new THREE.CatmullRomCurve3(
+    prop.spine.map((p) => new THREE.Vector3(...p)),
+    false,
+    "centripetal",
+  );
+  const n = prop.spine.length - 1;
+  /** Between the given points, `t` (0..1) along: which, and how far on. */
+  const between = (t: number): [number, number] => {
+    const f = t * n;
+    const i = Math.min(Math.floor(f), n - 1);
+    return [i, f - i];
+  };
+  const radiusAt = (t: number) => {
+    const [i, u] = between(t);
+    return prop.radii[i] + (prop.radii[i + 1] - prop.radii[i]) * u;
+  };
+  const outAt = (t: number) => {
+    const [i, u] = between(t);
+    return new THREE.Vector3(...prop.normals[i])
+      .lerp(new THREE.Vector3(...prop.normals[i + 1]), u)
+      .normalize();
+  };
+  const rings: THREE.Vector3[][] = [];
+  const tangents: THREE.Vector3[] = [];
+  for (let r = 0; r <= MOUSTACHE_ROWS; r++) {
+    const t = r / MOUSTACHE_ROWS;
+    const spine = curve.getPoint(t);
+    const along = curve.getTangent(t);
+    tangents.push(along);
+    // Its frame: out of the face, and down it (y is down).
+    const out = outAt(t);
+    out.addScaledVector(along, -out.dot(along)).normalize();
+    const down = along.clone().cross(out).normalize();
+    if (down.y < 0) down.negate();
+    const radius = radiusAt(t);
+    // The parting: a dip in its top, at the middle.
+    const parting = 1 - 0.2 * Math.exp(-(((t - 0.5) / 0.03) ** 2));
+    // Tufts along its lower edge.
+    const tuft = 0.55 + 0.45 * Math.cos(t * Math.PI * 2 * 11);
+    const ring: THREE.Vector3[] = [];
+    for (let k = 0; k < MOUSTACHE_SIDES; k++) {
+      const a = (k / MOUSTACHE_SIDES) * Math.PI * 2;
+      const c = Math.cos(a);
+      const s = Math.sin(a);
+      // Strands: shallow grooves running its length.
+      const rho =
+        radius * (1 + 0.05 * Math.cos(a * 10)) * (s < 0 ? parting : 1);
+      const hang = s > 0 ? radius * 0.45 * s ** 3 * tuft : 0;
+      ring.push(
+        spine
+          .clone()
+          .addScaledVector(out, rho * c)
+          .addScaledVector(down, rho * s + hang),
+      );
+    }
+    rings.push(ring);
+  }
+  // Each tip drawn out to a point past its last ring.
+  const tipPoint = (r: number, way: number) =>
+    curve
+      .getPoint(r / MOUSTACHE_ROWS)
+      .addScaledVector(tangents[r], way * radiusAt(r / MOUSTACHE_ROWS) * 1.6);
+  const tip = Math.round(MOUSTACHE_TIPS * MOUSTACHE_ROWS);
+  const own = [
+    ringGeometry(rings.slice(0, tip + 1), tipPoint(0, -1)),
+    ringGeometry(rings.slice(tip, MOUSTACHE_ROWS - tip + 1)),
+    ringGeometry(
+      rings.slice(MOUSTACHE_ROWS - tip),
+      undefined,
+      tipPoint(MOUSTACHE_ROWS, 1),
+    ),
+  ];
+  for (const [i, geometry] of own.entries()) {
+    const mesh = new THREE.Mesh(
+      geometry,
+      paint(i === 1 ? prop.colors.hair : prop.colors.tips),
+    );
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+  group.userData.geometries = own;
+  return group;
+}
+
+/** Rings up a beanie's cuff and crown, and round it. */
+const BEANIE_CUFF_ROWS = 10;
+const BEANIE_CROWN_ROWS = 22;
+const BEANIE_SIDES = 96;
+/** Ribs round it (knit two, purl two). */
+const BEANIE_RIBS = 16;
+
+/**
+ * A knitted watch cap: a cuff turned up round the head, its edges rolled
+ * and ribbed (the ribs squared off, as knit ribs are), and above it the
+ * crown, smooth and a shade lighter, set in from the cuff's fold and
+ * rounded over to its top. Built about the cuff's lower edge (y down: it
+ * rises to −y).
+ */
+function beanie(prop: BeanieProp, paint: Paint): THREE.Group {
+  const group = new THREE.Group();
+  const R = prop.radius;
+  const ring = (height: number, radius: number, ribs: number) => {
+    const out: THREE.Vector3[] = [];
+    for (let k = 0; k < BEANIE_SIDES; k++) {
+      const a = (k / BEANIE_SIDES) * Math.PI * 2;
+      // −1..1, flat-topped: a rib, then the furrow beside it.
+      const c = Math.cos(a * BEANIE_RIBS);
+      const rib = c / (Math.abs(c) + 0.3);
+      const rho = radius * (1 + ribs * 0.5 * rib);
+      out.push(
+        new THREE.Vector3(rho * Math.cos(a), -height, rho * Math.sin(a)),
+      );
+    }
+    return out;
+  };
+  // The cuff: its lower and upper edges rolled in a little, fullest
+  // between them.
+  const cuffRings: THREE.Vector3[][] = [];
+  for (let r = 0; r <= BEANIE_CUFF_ROWS; r++) {
+    const u = r / BEANIE_CUFF_ROWS;
+    const roll = Math.sin(Math.PI * u) ** 0.35;
+    cuffRings.push(ring(u * prop.cuff, R * (0.97 + 0.08 * roll), 0.09));
+  }
+  // The crown: up from just inside the cuff's fold, rounded over.
+  const crownRings: THREE.Vector3[][] = [];
+  for (let r = 0; r <= BEANIE_CROWN_ROWS; r++) {
+    const u = (r / BEANIE_CROWN_ROWS) * 0.985;
+    const radius = R * 0.94 * (1 - u ** 2.6) ** 0.5;
+    crownRings.push(ring(prop.cuff + u * prop.crown, radius, 0));
+  }
+  const own = [
+    ringGeometry(
+      cuffRings,
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, -prop.cuff, 0),
+    ),
+    ringGeometry(
+      crownRings,
+      new THREE.Vector3(0, -prop.cuff, 0),
+      new THREE.Vector3(0, -(prop.cuff + prop.crown), 0),
+    ),
+  ];
+  for (const [i, geometry] of own.entries()) {
+    const mesh = new THREE.Mesh(
+      geometry,
+      paint(i === 0 ? prop.colors.cuff : prop.colors.crown, true),
+    );
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+  group.userData.geometries = own;
+  return group;
+}
+
+/** Frees what a prop model built for itself alone (a feather's shapes, a
+ * moustache's, a beanie's). */
 export function disposeProp(group: THREE.Group): void {
   const own = group.userData.geometries as THREE.BufferGeometry[] | undefined;
   for (const g of own ?? []) g.dispose();

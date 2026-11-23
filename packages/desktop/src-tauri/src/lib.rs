@@ -2667,7 +2667,7 @@ async fn events_watch_loop(app: AppHandle) {
             // The Wilds always say where the ship leaves from: an admin's
             // description wouldn't know.
             let body = if event.event_type == "wilds" {
-                "Blåmann is sailing: board her at the Sky Dock on the home island's east rim."
+                "Sofia III is sailing: board her at the Sky Dock on the home island's east rim."
             } else {
                 event
                     .description

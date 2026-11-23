@@ -1351,3 +1351,30 @@ describe("waving on one leg (stage 3)", () => {
     expect(sole(end, "leg-r")).toBeCloseTo(sole(end, "leg-l"), 5);
   });
 });
+
+describe("the Sailor's Starter Pack", () => {
+  it("sits on the face at every stage, its pipe smoking from bowl and stem", () => {
+    for (const stage of [1, 2, 3]) {
+      const bare = buildCreatureModel("pack-test", stage).spheres;
+      const head = bare
+        .filter((s) => s.part === "head")
+        .sort((a, b) => b.radius - a.radius)[0];
+      const eyeTop = Math.min(
+        ...bare.filter((s) => s.part === "eye").map((s) => s.center[1]),
+      );
+      const worn = buildCreatureModel("pack-test", stage, {
+        face: "sailors-starter-pack",
+      }).spheres.slice(bare.length);
+      expect(worn.length).toBeGreaterThan(10);
+      for (const s of worn) {
+        // On the head, in front of its middle (the face is −z) and under
+        // its eyes (y is down).
+        expect(s.part).toBe("head");
+        expect(s.center[2]).toBeLessThan(head.center[2]);
+        expect(s.center[1]).toBeGreaterThan(eyeTop);
+      }
+      expect(worn.filter((s) => s.smoke === "bowl")).toHaveLength(1);
+      expect(worn.filter((s) => s.smoke === "mouth")).toHaveLength(1);
+    }
+  });
+});

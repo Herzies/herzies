@@ -137,6 +137,7 @@ import {
   propBodyBox,
   type TieRibbon,
 } from "./props.js";
+import { PipeSmoke } from "./pipeSmoke.js";
 import { SetShimmer } from "./setShimmer.js";
 import { ShoeSparkles } from "./shoeSparkles.js";
 import {
@@ -1038,9 +1039,12 @@ export class HerzieModel {
   private readonly sparkles: ShoeSparkles | null = null;
   /** A full set's shimmer (setShimmer.ts); null without one. */
   private shimmer: SetShimmer | null = null;
-  /** A set shimmer is on: a paused view still needs drawing. */
+  /** Its pipe's smoke (pipeSmoke.ts); null without one. */
+  private smoke: PipeSmoke | null = null;
+  /** A set shimmer is on, or a pipe smoking: a paused view still needs
+   * drawing. */
   get glittering(): boolean {
-    return this.shimmer !== null;
+    return this.shimmer !== null || this.smoke !== null;
   }
   /** The floating companion, flying after the herzie; null when it has none,
    * or its scenery is anchored (then the companion stays put with it). */
@@ -1064,6 +1068,8 @@ export class HerzieModel {
    * (the Town sets these from its map; flat and everywhere without). */
   groundAt: ((x: number, z: number) => number) | null = null;
   walkable: ((x: number, z: number) => boolean) | null = null;
+  /** Where its cat's feet slip (ice; see CatHost.icy): nowhere without. */
+  icy: ((x: number, z: number) => boolean) | null = null;
   /** Whether its cat can walk straight from one point to another: nothing
    * in the way, no water (the Town asks its physics). Water only without. */
   pathClear:
@@ -1657,6 +1663,18 @@ export class HerzieModel {
       );
       this.root.add(this.sparkles.points);
     }
+    // A pipe (the Sailor's Starter Pack): smoke from its bowl, and what's
+    // blown out by its stem.
+    const bowl = this.meshes.find((_, i) => spheres[i].smoke === "bowl");
+    const mouth = this.meshes.find((_, i) => spheres[i].smoke === "mouth");
+    if (bowl && mouth) {
+      this.smoke = new PipeSmoke(
+        { bowl, mouth, facing: this.turn },
+        this.height,
+        this.root,
+      );
+      this.root.add(this.smoke.points);
+    }
     if (glass) this.layerOverGlass(spheres);
     // A full set's shimmer (ItemSet.shimmer), round the herzie itself.
     const shimmering = ITEM_SETS.find(
@@ -1873,6 +1891,7 @@ export class HerzieModel {
     this.stepCatAlong(dt, speed);
     this.sparkles?.update(dt);
     this.shimmer?.update(dt);
+    this.smoke?.update(dt);
   }
 
   /** Walks its cat on after it (or keeps it sat, pinned), and poses it. */
@@ -1895,6 +1914,7 @@ export class HerzieModel {
     host.afk = this.afk;
     host.groundAt = this.groundAt ?? undefined;
     host.walkable = this.walkable ?? undefined;
+    host.icy = this.icy ?? undefined;
     host.clear = this.pathClear ?? undefined;
     host.prop = this.propForCat();
     host.facing = this.homeFacing;
@@ -2391,6 +2411,8 @@ export class HerzieModel {
     this.worldVelocity.copy(from.worldVelocity);
     // Its set shimmer's sparkles, so equipping something doesn't blink them.
     if (this.shimmer && from.shimmer) this.shimmer.carryOver(from.shimmer);
+    // Its pipe's smoke, likewise.
+    if (this.smoke && from.smoke) this.smoke.carryOver(from.smoke);
     // Its companion, if it's the same kind: the new one takes over the old
     // one's state (where it is, its errand, its pose), keeping its own
     // build (its slot and clearance follow the new gear).
@@ -2450,6 +2472,7 @@ export class HerzieModel {
       at(c.pounceFrom);
       at(c.pounceTo);
       along(c.hostVelocity);
+      along(c.slide);
       c.heading += yaw;
       c.slotHeading += yaw;
     }
@@ -3539,6 +3562,7 @@ export class HerzieModel {
 
   setTint(grey: number, opacity: number): void {
     this.shimmer?.setOpacity(opacity * (1 - grey));
+    this.smoke?.setOpacity(opacity * (1 - grey));
     this.scheme.uGrey.value = grey;
     this.scheme.uOpacity.value = opacity;
     this.tintOpacity = opacity;
@@ -3634,9 +3658,12 @@ export class HerzieModel {
    * once, before it's drawn.
    */
   petrify(): void {
-    // A statue doesn't shimmer.
+    // A statue doesn't shimmer, nor smoke.
     this.shimmer?.dispose();
     this.shimmer = null;
+    this.smoke?.points.removeFromParent();
+    this.smoke?.dispose();
+    this.smoke = null;
     // Stone isn't see-through: glass goes solid.
     for (const m of this.glassMaterials) {
       delete m.defines.GLASS;
@@ -3682,6 +3709,7 @@ export class HerzieModel {
   dispose() {
     this.sparkles?.dispose();
     this.shimmer?.dispose();
+    this.smoke?.dispose();
     // Its cat's own (not its shaded ones, already in materials).
     this.cat?.model.dispose();
     for (const m of this.materials) m.dispose();

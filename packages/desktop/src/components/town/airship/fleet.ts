@@ -15,7 +15,7 @@ import { wildsService } from "./service";
 import { skyNow } from "./skyClock";
 
 /**
- * The sky ship (the fleet's just Blåmann), every frame: where it is in the
+ * The sky ship (the fleet's just Sofia III), every frame: where it is in the
  * sky, worked out once at the top of the frame (FleetClock) so the ship,
  * everyone on its deck and the camera all see the same moment.
  */

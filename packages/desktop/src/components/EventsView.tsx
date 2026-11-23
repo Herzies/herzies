@@ -26,6 +26,8 @@ import {
   NAKATA_NAME,
   PIP_KEY,
   PIP_NAME,
+  SKIPPER_KEY,
+  SKIPPER_NAME,
   type StatPoints,
   TOWER_GUARD_KEY,
   TOWER_GUARD_NAME,
@@ -65,6 +67,7 @@ import { MerchantPanel } from "./MerchantPanel";
 import { NakataPanel } from "./NakataPanel";
 import { OrphiezStage } from "./OrphiezStage";
 import { PIP, QuestGiverPanel } from "./QuestGiverPanel";
+import { SkipperPanel } from "./SkipperPanel";
 import { TabButton } from "./TabButton";
 import { TowerGuardPanel } from "./TowerGuardPanel";
 import type { EventCard } from "./TownScene";
@@ -883,6 +886,16 @@ function EventsViewImpl({
       openKey: NAKATA_KEY,
       detail: "Talks to cats",
     });
+    // And Blåmann, on the pier by the Sky Dock, who skippers Sofia III.
+    cards.push({
+      type: SKIPPER_KEY,
+      title: SKIPPER_NAME,
+      description: null,
+      status: "live",
+      at: null,
+      openKey: SKIPPER_KEY,
+      detail: "Skippers Sofia III",
+    });
     // Nearest in time first: what's on now, then what starts soonest, then
     // types with nothing on the calendar.
     const when = (c: EventCard) =>
@@ -1059,6 +1072,21 @@ function EventsViewImpl({
           backButton={back}
         >
           <NakataPanel equipped={equipped} paused={!active || !visible} />
+        </ScreenView>
+      );
+    }
+
+    if (selected === SKIPPER_KEY) {
+      return (
+        <ScreenView
+          inPanel={screenInPanel}
+          ownName
+          title={SKIPPER_NAME}
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+        >
+          <SkipperPanel paused={!active || !visible} />
         </ScreenView>
       );
     }

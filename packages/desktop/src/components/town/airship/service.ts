@@ -1,5 +1,6 @@
 import { WILDS_LEG_MS, type WildsService } from "@herzies/shared";
 import { useSyncExternalStore } from "react";
+import { PLANK_LAID_UP_S, PLANK_MOVE_S } from "./route";
 
 /**
  * The sky ship's service, as the events feed says (see EventsView): the
@@ -17,9 +18,14 @@ const listeners = new Set<() => void>();
 
 /** How long after a service ends the ship is still running: its last run
  * left home before the end, so it's back within half an interval and a
- * leg of it. */
+ * leg of it; and its gangplank's in once its last passengers are off. */
 function tailEnd(s: WildsService): number {
-  return s.endsAt + s.departEveryMs / 2 + WILDS_LEG_MS;
+  return (
+    s.endsAt +
+    s.departEveryMs / 2 +
+    WILDS_LEG_MS +
+    (PLANK_LAID_UP_S + PLANK_MOVE_S) * 1000
+  );
 }
 
 const same = (a: WildsService | null, b: WildsService | null) =>

@@ -11,7 +11,7 @@ const KIND: Record<string, string> = {
   treat_trader: "Treat trading",
   boss_fight: "Boss fight",
   tower: "The Tower",
-  wilds: "Blåmann sails from the Sky Dock",
+  wilds: "Sofia III sails from the Sky Dock",
   secret_track: "Secret track",
 };
 
@@ -184,18 +184,18 @@ function Note({
   );
 }
 
-/** "every 2 minutes", "every 100 s": how often Blåmann leaves each dock. */
+/** "every 2 minutes", "every 100 s": how often Sofia III leaves each dock. */
 function departsEvery(ms: number): string {
   const sec = Math.round(ms / 1000);
   if (sec % 60 === 0) return `every ${sec / 60} minutes`;
   return `every ${sec} s`;
 }
 
-/** An on-now Wilds note's second line: how often Blåmann goes, from the
+/** An on-now Wilds note's second line: how often Sofia III goes, from the
  * timetable it runs on. */
 function WildsKind() {
   const service = useWildsService();
   return service
-    ? `Blåmann leaves the Sky Dock ${departsEvery(service.departEveryMs)}`
+    ? `Sofia III leaves the Sky Dock ${departsEvery(service.departEveryMs)}`
     : KIND[WILDS_EVENT_TYPE];
 }

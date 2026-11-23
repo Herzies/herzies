@@ -5,6 +5,10 @@ import { IDLE_LOOP_FRAMES } from "../creature-renderer.js";
 export const IDLE_FPS = 20;
 /** Top walking speed, in world units a second. */
 export const WALK_SPEED = 4.5;
+/** On ice its legs go as fast as ever as it pushes off, but its feet
+ * slip: it gets this much of the way for them, at most. (A herzie's, and
+ * its cat's.) */
+export const ICE_SPEED = 0.6;
 /** Ground covered by one walk cycle (a left and a right step). The cycle
  * advances by distance travelled, so the feet keep pace with the ground at
  * any speed — including when a wall cuts the speed to nothing. */

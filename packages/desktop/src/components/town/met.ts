@@ -3,6 +3,7 @@ import {
   MEDEA_KEY,
   NAKATA_KEY,
   PIP_KEY,
+  SKIPPER_KEY,
   TOWER_GUARD_KEY,
 } from "@herzies/shared";
 import { useSyncExternalStore } from "react";
@@ -24,6 +25,7 @@ export const RESIDENTS: ReadonlySet<string> = new Set([
   MEDEA_KEY,
   NAKATA_KEY,
   PIP_KEY,
+  SKIPPER_KEY,
   TOWER_GUARD_KEY,
 ]);
 /** Enough for every visit in a long while; the oldest are forgotten. */

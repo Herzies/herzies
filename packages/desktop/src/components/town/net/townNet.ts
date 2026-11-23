@@ -107,7 +107,7 @@ export function townNet(): TownConnection {
     onRefused: (why) => {
       // The sky ship's deck too crowded to come aboard: back down on the pier.
       if (townSave.map === "airship") {
-        notify("Blåmann is full. Catch her next sailing!");
+        notify("Sofia III is full. Catch her next sailing!");
         turnedAway(townSave.ship);
         return;
       }

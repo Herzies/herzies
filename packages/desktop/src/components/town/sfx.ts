@@ -974,7 +974,7 @@ export function sfxDuelOut(): void {
 }
 
 // --- The sky ship ------------------------------------------------------------
-// Blåmann, to the Wilds: a bell and a horn to say she's going (heard
+// Sofia III, to the Wilds: a bell and a horn to say she's going (heard
 // from the dock as well as on board), the hull creaking and bumping, and
 // the ride itself — the engines' hum and the wind — while you're aboard.
 // Each takes a `volume` (0–1, how near it is, say), on top of the rest.

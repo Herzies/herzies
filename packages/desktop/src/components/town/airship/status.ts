@@ -27,6 +27,16 @@ export function clock(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
+/** When a sailing at `at` is, as the board puts it: the time, and the day
+ * too if it's more than a day off. */
+export function sailingTime(at: number, now: number): string {
+  return new Date(at).toLocaleString(undefined, {
+    weekday: at - now > 86_400_000 ? "short" : undefined,
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 const placeName = (dock: SkyDock) => mapById(dock).name;
 const toward = (dock: SkyDock) => (dock === "home" ? "Town" : placeName(dock));
 
@@ -41,7 +51,7 @@ export function aboardStatus(st: ShipState, now: number): DockStatus {
   }
   if (st.until === null) {
     return {
-      text: "Blåmann is laid up till the next sailing: please go ashore",
+      text: "Sofia III is laid up till the next sailing: please go ashore",
     };
   }
   return {
@@ -60,38 +70,34 @@ export function dockStatus(
   const to = toward(farEnd(dock));
   const st = docked?.state;
   if (st?.kind === "docked" && st.until !== null) {
-    return { text: `Blåmann to ${to} · departs in ${clock(st.until - now)}` };
+    return { text: `Sofia III to ${to} · departs in ${clock(st.until - now)}` };
   }
   const next = nextDeparture(service, dock, now);
   if (next) {
     return {
       text:
         next.dockedFrom > now
-          ? `Blåmann boards for ${to} in ${clock(next.dockedFrom - now)}`
-          : `Blåmann to ${to} · departs in ${clock(next.departsAt - now)}`,
+          ? `Sofia III boards for ${to} in ${clock(next.dockedFrom - now)}`
+          : `Sofia III to ${to} · departs in ${clock(next.departsAt - now)}`,
     };
   }
   if (service && now < service.endsAt + 600_000) {
     return {
       text:
         dock === "wilds"
-          ? "Blåmann has sailed home for the last time: you'll be taken back to Town"
-          : "Blåmann has made her last sailing for today",
+          ? "Sofia III has sailed home for the last time: you'll be taken back to Town"
+          : "Sofia III has made her last sailing for today",
     };
   }
   if (upcoming !== null) {
-    const at = new Date(upcoming);
-    const when = at.toLocaleString(undefined, {
-      weekday: upcoming - now > 86_400_000 ? "short" : undefined,
-      hour: "numeric",
-      minute: "2-digit",
-    });
-    return { text: `Blåmann sails to ${to} from ${when}` };
+    return {
+      text: `Sofia III sails to ${to} from ${sailingTime(upcoming, now)}`,
+    };
   }
   return {
     text:
       dock === "wilds"
-        ? "Blåmann isn't sailing now: you'll be taken back to Town"
-        : "Blåmann isn't sailing today",
+        ? "Sofia III isn't sailing now: you'll be taken back to Town"
+        : "Sofia III isn't sailing today",
   };
 }

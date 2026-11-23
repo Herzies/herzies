@@ -439,7 +439,7 @@ describe("wilds series", () => {
       title: "The Wilds",
       config: { departEverySec: WILDS_DEPART_DEFAULT_S },
     });
-    // Tomorrow's, for "Blåmann sails from…".
+    // Tomorrow's, for "Sofia III sails from…".
     expect(
       body.upcoming.find((e: { type: string }) => e.type === "wilds")?.id,
     ).toBe(rows[1].id);

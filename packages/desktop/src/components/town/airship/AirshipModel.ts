@@ -196,7 +196,7 @@ if ( vPlankSurface > 0.5 ) {
 }
 
 /** Live values for `fluttering` (one set per material). */
-export type Flutter = {
+type Flutter = {
   /** The time, wrapped (see `wrapTime`). */
   uFlapT: { value: number };
   /** 0 hanging limp – 1 streaming straight out. */
@@ -205,25 +205,22 @@ export type Flutter = {
   uFlutter: { value: number };
 };
 
-export const flutterUniforms = (): Flutter => ({
+const flutterUniforms = (): Flutter => ({
   uFlapT: { value: 0 },
   uStream: { value: 0 },
   uFlutter: { value: 0 },
 });
 
 /**
- * Make cloth flap: a flag, a pennant, a windsock. Each is modelled
- * streaming straight out along its local −z from an `anchor` (where it's
- * tied on), each vertex knowing how far `along` it is; the shader lets it
+ * Make cloth flap: a flag, a pennant. Each is modelled streaming straight
+ * out along its local −z from an `anchor` (where it's tied on), each
+ * vertex knowing how far `along` it is; the shader lets it
  * droop toward hanging as the wind drops (turned about x at its anchor)
  * and ripples it side to side, more toward the free end — two waves at
  * fixed frequencies whose strength rises with the wind, so it looks
  * quicker in a stronger wind without ever jumping.
  */
-export function fluttering<M extends THREE.Material>(
-  material: M,
-  u: Flutter,
-): M {
+function fluttering<M extends THREE.Material>(material: M, u: Flutter): M {
   const before = material.onBeforeCompile.bind(material);
   const key = material.customProgramCacheKey.bind(material);
   material.onBeforeCompile = (shader, renderer) => {
@@ -266,7 +263,7 @@ uniform float uFlutter;`,
 
 /** Give cloth its `anchor` and `along` (see `fluttering`): streaming
  * along −z from `anchor`. */
-export function cloth(
+function cloth(
   g: THREE.BufferGeometry,
   anchor: THREE.Vector3,
 ): THREE.BufferGeometry {
@@ -284,7 +281,7 @@ export function cloth(
 
 /** Shader time, wrapped every 10 minutes so a float32 never loses its
  * precision; every frequency the shaders use repeats in exactly that. */
-export function wrapTime(t: number): number {
+function wrapTime(t: number): number {
   return ((t % 600) + 600) % 600;
 }
 
@@ -532,9 +529,9 @@ export function lanternGlass(at: THREE.Matrix4[]): THREE.InstancedMesh {
 
 // --- The ship ------------------------------------------------------------------
 
-/** Blåmann's colours and name. */
+/** Sofia III's colours and name. */
 const LOOK = {
-  name: "BLÅMANN",
+  name: "SOFIA III",
   stripe: "#5b86c9",
   cream: "#eef0e4",
   accent: "#3d5f9e",
@@ -1731,7 +1728,7 @@ function flagsGeometry(look: typeof LOOK): THREE.BufferGeometry {
   return merge(parts);
 }
 
-/** The sky ship's model: Blåmann. */
+/** The sky ship's model: Sofia III. */
 export class AirshipModel {
   /** In the deck's frame (deck.ts): place and turn it to fly it. */
   readonly root = new THREE.Group();

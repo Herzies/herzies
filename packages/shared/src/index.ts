@@ -39,6 +39,7 @@ export * from "./Sky.js";
 export * from "./SpeechBubble.js";
 export * from "./scenery-renderer.js";
 export * from "./skills.js";
+export * from "./skipper.js";
 export * from "./stats.js";
 export * from "./thread-physics.js";
 export * from "./titles.js";

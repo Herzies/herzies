@@ -68,6 +68,9 @@ const WEARABLE_OPTIONS = [
   "fyllings-cape",
   "fyllings-monocle",
   "fyllings-black",
+  // The skipper's moustache and pipe, and his beanie (not an item yet).
+  "sailors-starter-pack",
+  "sailors-beanie",
   // The class sets, with their cloaks above.
   "troubadour-plume",
   "troubadour-ruff",
@@ -494,7 +497,8 @@ function toEquipped(ids: string[]): Equipped {
       id === "fyllings-fedora" ||
       id === "troubadour-plume" ||
       id === "groove-cap" ||
-      id === "drumhide-helm"
+      id === "drumhide-helm" ||
+      id === "sailors-beanie"
     )
       out.head = id;
     else if (id === "clouds" || id === "stars" || id === "blood-moon")
@@ -510,7 +514,12 @@ function toEquipped(ids: string[]): Equipped {
       id === "drumhide-gorget"
     )
       out.body = id;
-    else if (id === "fangs" || id === "ff-shades" || id === "fyllings-monocle")
+    else if (
+      id === "fangs" ||
+      id === "ff-shades" ||
+      id === "fyllings-monocle" ||
+      id === "sailors-starter-pack"
+    )
       out.face = id;
     else if (
       id === "pumpkin-spice" ||

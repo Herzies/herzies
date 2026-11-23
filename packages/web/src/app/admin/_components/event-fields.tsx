@@ -620,7 +620,7 @@ export function MerchantConfigFields({
 }
 
 // ---------------------------------------------------------------------------
-// The Wilds (the sky ship, Blåmann)
+// The Wilds (the sky ship, Sofia III)
 // ---------------------------------------------------------------------------
 
 /** How often the sky ship leaves each dock, as typed (seconds). */
@@ -686,7 +686,7 @@ export function WildsConfigFields({
       <p className="sm:col-span-2 text-xs text-text-dim">
         {problem
           ? `${WILDS_DEPART_MIN_S}–${WILDS_DEPART_MAX_S} seconds (default ${WILDS_DEPART_DEFAULT_S}).`
-          : `Blåmann, the sky ship, leaves each Sky Dock (home island and the Wilds) ${every(sec)}, half that after leaving the other. The flight takes ${WILDS_LEG_S} s each way, so she waits ${sec / 2 - WILDS_LEG_S} s at each dock for players to walk on and off.`}{" "}
+          : `Sofia III, the sky ship, leaves each Sky Dock (home island and the Wilds) ${every(sec)}, half that after leaving the other. The flight takes ${WILDS_LEG_S} s each way, so she waits ${sec / 2 - WILDS_LEG_S} s at each dock for players to walk on and off.`}{" "}
         She runs while the event is on; outside it she&apos;s laid up at home,
         and anyone left on the Wilds is sent back to Town.
       </p>

@@ -1,6 +1,6 @@
 /**
  * The Wilds: an island of free-for-all PvP east of Town, reached only by sky
- * ship. While a "wilds" event is on, the one sky ship, Blåmann, shuttles
+ * ship. While a "wilds" event is on, the one sky ship, Sofia III, shuttles
  * between the Sky Docks on the home island and on the Wilds: it leaves
  * each dock every `departEverySec`, half an interval after it left the
  * other.
@@ -31,7 +31,7 @@ export const WILDS_DEPART_DEFAULT_S = 120;
 export const WILDS_DEPART_MIN_S = 2 * (WILDS_LEG_S + WILDS_MIN_DOCKED_S);
 export const WILDS_DEPART_MAX_S = 1200;
 
-/** The ships in service: just Blåmann. Its passengers share the room
+/** The ships in service: just Sofia III. Its passengers share the room
  * `airship`, shard 0 (the ship's index). */
 export const SKY_SHIPS = 1;
 export type ShipIndex = 0;
@@ -136,7 +136,7 @@ function timetable(s: WildsService) {
   return { D, L, H, d, last, first };
 }
 
-/** Where ship `_ship` (there's only Blåmann) is at `now` (ms since the
+/** Where ship `_ship` (there's only Sofia III) is at `now` (ms since the
  * epoch), on `service` (null: none on or coming: laid up at home). */
 export function shipState(
   service: WildsService | null,

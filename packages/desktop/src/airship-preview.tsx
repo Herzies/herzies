@@ -31,7 +31,7 @@ import {
 type Orbit = React.ComponentRef<typeof OrbitControls>;
 
 /**
- * Dev only (`vite dev`, /airship-preview.html): the sky ship, Blåmann,
+ * Dev only (`vite dev`, /airship-preview.html): the sky ship, Sofia III,
  * and the Sky Dock on their own (airship/AirshipModel.ts, DockModel.ts),
  * to tune how they look and move. The ship is shown twice: moored at the
  * home island's dock, and flying alongside. Sliders drive both copies'
@@ -250,7 +250,7 @@ function Scene({ orbit }: { orbit: React.RefObject<Orbit | null> }) {
       bell,
       bellStrikes: strikes,
     });
-    dock.update(dt, t, { bell, strikes });
+    dock.update({ bell, strikes });
     for (const h of herzies) h.update(dt, 0);
 
     // The player (for the see-through dither): the herzie on deck.

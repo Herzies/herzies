@@ -92,7 +92,7 @@ const PRESETS: Record<
   wilds: {
     title: "The Wilds",
     description:
-      "Blåmann, the sky ship, sails from the Sky Dock for the Wilds. Anyone may fight anyone there.",
+      "Sofia III, the sky ship, sails from the Sky Dock for the Wilds. Anyone may fight anyone there.",
     days: 0,
     hours: 2,
     everyDays: 1,

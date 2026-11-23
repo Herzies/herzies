@@ -27,7 +27,7 @@ Decisions the user made:
   - Shard choice happens on the client and goes to the first room that fits (40 cap), so friends can land on different shards. That's fine for duels, since you can only challenge who you see. It also suits the Wilds: first-fit keeps players together on one shard until it's full.
 - **No terrain on the server.** It knows only `radius`/`spawn`, with no collision, elevation or line of sight. **v1 accepts no line-of-sight checks** (the duel ring and `stage` are flat). A coarse check using the Wilds `heights` grid is a later polish item.
 - **Tickets:** HMAC `TownTicketPayload` (`shared/src/town-net.ts:119`) already carries stats, level, class, skills and HP, so the server has everything it needs to judge PvP. `TOWN_PROTOCOL = 4` → bump to **5**.
-- **Wilds:** a rest map with benches and no combat flag. It has no portal: it's reached and left only by the sky ship, Blåmann (a "wilds" event runs her; she leaves each dock every `departEverySec`, 96–1200 s, default 120), and whoever's there when she won't call again is sent back to Town.
+- **Wilds:** a rest map with benches and no combat flag. It has no portal: it's reached and left only by the sky ship, Sofia III (a "wilds" event runs her; she leaves each dock every `departEverySec`, 96–1200 s, default 120), and whoever's there when she won't call again is sent back to Town.
 - **Move guard.** `rules.ts` checks speed and edges against `TOWN_MAPS` (`wilds: radius 83, spawn -66.5,0.5`; the camp and Sky Dock are on its west rim, facing Town).
 - **Stats.** `statsOf` (`fight.ts:2255`) builds them from the signed ticket `st`. That's where PvP normalization goes.
 - **Patterns to copy:**

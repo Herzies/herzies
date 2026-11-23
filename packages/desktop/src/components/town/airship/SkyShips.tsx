@@ -14,7 +14,7 @@ import { emptyPose } from "./route";
 import { setListener, shipBells, stepShipSounds } from "./shipSounds";
 
 /**
- * The sky ship, Blåmann, wherever the timetable has it, drawn from any
+ * The sky ship, Sofia III, wherever the timetable has it, drawn from any
  * island (and around you when you're aboard). It's a group whose matrix
  * carries its deck's frame into the scene's — set once a frame, before
  * physics and the camera, from the same moment for everything — with the

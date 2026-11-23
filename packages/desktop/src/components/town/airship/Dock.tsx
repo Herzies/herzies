@@ -20,12 +20,12 @@ export function Dock({ map }: { map: TownMap }) {
     () => ({ bell: Number.POSITIVE_INFINITY, strikes: 0 }),
     [],
   );
-  useFrame((_, dt) => {
+  useFrame(() => {
     if (!model) return;
     const rung = dock ? dockBells[dock] : null;
     bell.bell = rung ? (fleet.now - rung.at) / 1000 : Number.POSITIVE_INFINITY;
     bell.strikes = rung ? rung.strikes : 0;
-    model.update(dt, fleet.now / 1000, bell);
+    model.update(bell);
   });
   return model ? <primitive object={model.root} /> : null;
 }

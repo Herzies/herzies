@@ -422,6 +422,19 @@ describe("seasonal drop windows", () => {
     }
   });
 
+  it("makes the Sailor's Starter Pack an uncommon face piece, +10 luck, drop-only", () => {
+    const item = getItem("sailors-starter-pack");
+    expect(item?.name).toBe("Sailor's Starter Pack");
+    expect(item?.rarity).toBe("uncommon");
+    expect(item?.equipSlot).toBe("face");
+    expect(getHerzieStats({ face: "sailors-starter-pack" }).luck).toBe(10);
+    expect(NON_DROPPABLE_ITEM_IDS).not.toContain("sailors-starter-pack");
+    expect(bossLootWeights()).toContainEqual({
+      itemId: "sailors-starter-pack",
+      weight: 225,
+    });
+  });
+
   it("adds the Fabulous Fabian set's +10 luck only with all six worn", () => {
     const full = {
       head: "fabulous-fabian",
@@ -1860,9 +1873,9 @@ describe("boss loot", () => {
       new URL(`../../../supabase/migrations/${name}`, import.meta.url),
       "utf8",
     );
-  // settle_boss_fight lives in 00114; the roll was last replaced in 00151.
+  // settle_boss_fight lives in 00114; the roll was last replaced in 00158.
   const sql = migration("00114_boss_bonus_loot.sql");
-  const rollSql = migration("00151_class_set_drops.sql");
+  const rollSql = migration("00158_sailors_starter_pack.sql");
 
   it("rolls from the same weights as bossLootWeights", () => {
     const roll = rollSql.slice(

@@ -1,4 +1,4 @@
-import { WILDS_LEG_MS, type WildsService } from "@herzies/shared";
+import { shipState, WILDS_LEG_MS, type WildsService } from "@herzies/shared";
 import { describe, expect, it } from "vitest";
 import { islandRadius } from "../map";
 import { mapById } from "../maps";
@@ -8,6 +8,8 @@ import {
   emptyPose,
   type Leg,
   PLANK_IN_BY_S,
+  PLANK_LAID_UP_S,
+  PLANK_MOVE_S,
   runAlong,
   sampleLeg,
   shipPose,
@@ -131,11 +133,31 @@ describe("shipPose", () => {
   });
   it("runs its gangplank out only while tied up", () => {
     const p = emptyPose();
-    shipPose(route, service, 0, S + 1000, p);
+    shipPose(route, service, 0, S + 3000, p);
     expect(p.gangplank).toBe(1);
     shipPose(route, service, 0, departs - 500, p);
     expect(p.gangplank).toBeLessThan(1);
     shipPose(route, service, 0, departs + 5000, p);
+    expect(p.gangplank).toBe(0);
+  });
+  it("keeps its gangplank in while it's laid up, but to see passengers off", () => {
+    const p = emptyPose();
+    shipPose(route, null, 0, S, p);
+    expect(p.gangplank).toBe(0);
+    shipPose(route, service, 0, S - 1000, p);
+    expect(p.gangplank).toBe(0);
+    // Home from its last run: out for its passengers, then in.
+    const back = shipState(service, 0, service.endsAt + 120_000);
+    if (back.kind !== "docked" || back.until !== null) throw back;
+    shipPose(route, service, 0, back.since + 10_000, p);
+    expect(p.gangplank).toBe(1);
+    shipPose(
+      route,
+      service,
+      0,
+      back.since + (PLANK_LAID_UP_S + PLANK_MOVE_S) * 1000,
+      p,
+    );
     expect(p.gangplank).toBe(0);
   });
   it("has its gangplank in before the last seconds are counted down", () => {

@@ -38,7 +38,7 @@
 // (Settings > Debug), `take()` has the server take
 // the oldest back (a spirit's sweep), and `?ground=boombox` gives the
 // herzie a ground accessory to fade in at Home.
-// `?wilds=20` runs Blåmann to the Wilds, its first run leaving home in
+// `?wilds=20` runs Sofia III to the Wilds, its first run leaving home in
 // 20 s (`&every=` seconds between departures from each dock, default
 // 120); `&dock=1` starts you at the end of the home Sky Dock's pier.
 // `?map=wilds&loot=1` puts a cache and two dropped cards in front of you
@@ -284,6 +284,7 @@ const spots: TownSpot[] = [
   ["medea", "Medea"],
   ["market", "Plutus"],
   ["nakata", "Nakata"],
+  ["skipper", "Blåmann"],
 ]
   // Only those the map has a spot for (the boss lives in its cave now).
   .filter(([type]) => SPOTS[type])

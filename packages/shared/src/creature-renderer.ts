@@ -283,6 +283,10 @@ export interface Sphere {
   /** Where the Evasive Pair's sparkles come from: a wing tip (the trail)
    * or a foot (footfalls). See gl/shoeSparkles.ts. */
   sparkle?: "wing" | "foot";
+  /** Where the Sailor's Starter Pack's smoke comes from: the ember in the
+   * pipe's bowl (its wisps and puffs) or the stem at the mouth (what's
+   * blown out). See gl/pipeSmoke.ts. */
+  smoke?: "bowl" | "mouth";
   /** Part of a prop the 3D renderer draws as a model of its own (see
    * gl/props.ts) rather than as these spheres, which only the ray caster
    * draws. Every sphere of the prop shares the one object. */
@@ -290,7 +294,43 @@ export interface Sphere {
 }
 
 /** A prop drawn as a model in 3D (see Sphere.prop). */
-export type PropModel = BoomboxProp | ShoeProp | TieProp | FeatherProp;
+export type PropModel =
+  | BoomboxProp
+  | ShoeProp
+  | TieProp
+  | FeatherProp
+  | MoustacheProp
+  | BeanieProp;
+
+/** The Sailor's Starter Pack's moustache, drawn as a model in 3D
+ * (gl/props.ts): one tapering tube along `spine`, laid on the face. */
+export interface MoustacheProp {
+  kind: "moustache";
+  /** Its parting, in creature space (y down). */
+  center: V3;
+  yaw: number;
+  /** Down its middle from tip to tip, from `center`; how thick it is at
+   * each point; and the way out of the face there (unit). */
+  spine: V3[];
+  radii: number[];
+  normals: V3[];
+  /** Its hair, and its tips. */
+  colors: { hair: string; tips: string };
+}
+
+/** A knitted watch cap, drawn as a model in 3D (gl/props.ts): a ribbed
+ * cuff turned up, and a crown rounded over the head above it. */
+export interface BeanieProp {
+  kind: "beanie";
+  /** The middle of the cuff's lower edge, in creature space (y down). */
+  center: V3;
+  yaw: number;
+  /** The cuff's radius and height, and the crown's height above it. */
+  radius: number;
+  cuff: number;
+  crown: number;
+  colors: { crown: string; cuff: string };
+}
 
 /** A feather (the Troubadour's Plume's), drawn as a model in 3D
  * (gl/props.ts): a quill along `spine` and a flat vane either side of it. */
@@ -2364,6 +2404,63 @@ function headReachAt(spheres: Sphere[], x: number, z: number, y: number) {
   return reach;
 }
 
+/** The sailor's beanie (the skipper's; not out among the items yet): a red
+ * knitted watch cap worn high, docker style, its ribbed cuff turned up
+ * above the eyes and its crown rounded snug over the top of the head. The
+ * 3D view knits it (gl/props.ts: ribs down the cuff and crown, a fold at
+ * the cuff's top); the ray caster gets a band and a domed crown. */
+function buildSailorBeanieSpheres(spheres: Sphere[]): Sphere[] {
+  const head = getHeadBounds(spheres);
+  if (!head) return [];
+  const [hx, hy, hz] = head.center;
+  const hr = head.radius;
+  // Creature space is y down: up is −y. The cuff's lower edge sits where a
+  // cap's bill would, above the eyes, and hugs the head there.
+  const bottom = capBillY(spheres, head);
+  const cuff = hr * 0.3;
+  const radius = Math.max(
+    hr * 0.7,
+    headReachAt(spheres, hx, hz, bottom) + hr * 0.04,
+  );
+  const top = bottom - cuff;
+  // The crown rises clear over the top of the head.
+  const crown = Math.max(hr * 0.28, top - (hy - hr * 1.2));
+  const prop: BeanieProp = {
+    kind: "beanie",
+    center: [hx, bottom, hz],
+    yaw: 0,
+    radius,
+    cuff,
+    crown,
+    colors: { crown: "#C9302A", cuff: "#B42924" },
+  };
+  const crownLow = crown * 0.3;
+  return [
+    {
+      center: [hx, bottom - cuff / 2, hz],
+      radius: radius * 1.03,
+      zone: "wearable",
+      part: "head",
+      color: prop.colors.cuff,
+      shape: { kind: "cylinder", axis: [0, -cuff / 2, 0] },
+      prop,
+    },
+    {
+      center: [hx, top - crownLow / 2, hz],
+      radius: radius * 0.97,
+      zone: "wearable",
+      part: "head",
+      color: prop.colors.crown,
+      shape: {
+        kind: "cylinder",
+        axis: [0, -crownLow / 2, 0],
+        dome: crown - crownLow,
+      },
+      prop,
+    },
+  ];
+}
+
 /** Troubadour's Plume: a purple velvet beret, tipped down over one side,
  * on a gold band, with a long cream feather sweeping up and back from a
  * gold clasp on the other. The 3D view draws the feather as a model of its
@@ -2946,6 +3043,162 @@ function buildMonocleSpheres(spheres: Sphere[]): Sphere[] {
       color: k % 2 === 0 ? goldLight : gold,
     });
   }
+  return result;
+}
+
+/** The Sailor's Starter Pack: a thick white walrus moustache over where
+ * the mouth would be, fullest either side of its parting and drooping at
+ * the tips, with a shaggy fringe; and a briar pipe clenched at one corner,
+ * its black stem running out and down to a gold band and a bowl that rises
+ * in front of the chin, an ember glowing in it (where its smoke comes from:
+ * Sphere.smoke). Laid on the head's front, measured off its eyes as the
+ * fangs are, so it fits any head. The 3D view draws the moustache as one
+ * model (gl/props.ts: a tapering tube, combed into strands, its lower edge
+ * in tufts); the ray caster gets capsules along it and tufts under it. */
+function buildSailorsPackSpheres(spheres: Sphere[]): Sphere[] {
+  const head = largestPart(spheres, "head");
+  const eyes = spheres.filter((s) => s.part === "eye");
+  if (!head || eyes.length < 2) return [];
+  const [hx, hy, hz] = head.center;
+  const hr = head.radius;
+  const er = Math.max(...eyes.map((e) => e.radius));
+  const eyeBottom = Math.max(...eyes.map((e) => e.center[1] + e.radius));
+  const xs = eyes.map((e) => e.center[0]);
+  const spread = (Math.max(...xs) - Math.min(...xs)) / 2;
+  const result: Sphere[] = [];
+  const push = (sphere: Omit<Sphere, "zone" | "part">) =>
+    result.push({ ...sphere, zone: "wearable", part: "head" });
+  /** The point on the head's front over (x, y), moved `out` along its
+   * surface's normal: so what's laid on the face hugs its curve, out to
+   * the cheeks, rather than standing off them. */
+  const onFace = (x: number, y: number, out: number): V3 => {
+    const dx = x - hx;
+    const dy = y - hy;
+    const dz = -Math.sqrt(Math.max(0, hr * hr - dx * dx - dy * dy));
+    const k = (hr + out) / hr;
+    return [hx + dx * k, hy + dy * k, hz + dz * k];
+  };
+
+  // The moustache: a tube across the face, `a` 0 at the parting to 1 at
+  // either tip. Fullest a little out from the middle, thinning to the tips,
+  // which droop well down (a walrus, not a handlebar).
+  const halfWidth = Math.min(hr * 0.7, spread + er * 1.7);
+  const top = eyeBottom + er * 0.5;
+  const thick = (a: number) =>
+    er * (0.5 + 0.18 * Math.sin(Math.PI * Math.min(a / 0.9, 1)) - 0.3 * a ** 4);
+  const droop = (a: number) => top + er * (1.1 * a ** 2.4 - 0.1 * (1 - a));
+  const SEGMENTS = 12;
+  const along: { at: V3; r: number }[] = [];
+  for (let i = 0; i <= SEGMENTS; i++) {
+    const u = (i / SEGMENTS) * 2 - 1;
+    const a = Math.abs(u);
+    const r = thick(a);
+    along.push({ at: onFace(hx + u * halfWidth, droop(a), r * 0.05), r });
+  }
+  const WHITE = "#F4F1EA";
+  const GREY = "#DAD5CC";
+  const parting = along[SEGMENTS / 2].at;
+  const prop: MoustacheProp = {
+    kind: "moustache",
+    center: parting,
+    yaw: 0,
+    spine: along.map((p) => sub(p.at, parting)),
+    radii: along.map((p) => p.r),
+    normals: along.map((p) => norm(sub(p.at, head.center))),
+    colors: { hair: WHITE, tips: GREY },
+  };
+  const first = result.length;
+  for (let i = 0; i < SEGMENTS; i++) {
+    const a = along[i];
+    const b = along[i + 1];
+    // The tips a shade greyer, as an old salt's are.
+    const tip = i === 0 || i === SEGMENTS - 1;
+    result.push(
+      capsuleBetween(a.at, b.at, (a.r + b.r) / 2, tip ? GREY : WHITE),
+    );
+  }
+  // The fringe: tufts along its lower edge, so it reads as hair.
+  for (const u of [-0.82, -0.6, -0.38, -0.16, 0.16, 0.38, 0.6, 0.82]) {
+    const a = Math.abs(u);
+    const r = thick(a);
+    push({
+      center: onFace(hx + u * halfWidth, droop(a) + r * 0.72, r * 0.1),
+      radius: r * 0.48,
+      color: "#E8E3D9",
+    });
+  }
+  for (let k = first; k < result.length; k++) result[k].prop = prop;
+
+  // The pipe, at the corner of the mouth on the herzie's right (the
+  // viewer's left), tucked under the moustache.
+  const side = -1;
+  const cornerA = 0.55;
+  const corner = onFace(
+    hx + side * cornerA * halfWidth,
+    droop(cornerA) + thick(cornerA) * 0.55,
+    -er * 0.1,
+  );
+  // Its stem: out from the face (−z), a little out to the side and down.
+  const stemEnd: V3 = [
+    corner[0] + side * er * 0.55,
+    corner[1] + er * 0.4,
+    corner[2] - er * 1.7,
+  ];
+  const stem = capsuleBetween(corner, stemEnd, er * 0.13, "#26211F");
+  stem.smoke = "mouth";
+  result.push(stem);
+  // A gold band where the stem meets the briar.
+  const dir = sub(stemEnd, corner);
+  const length = Math.hypot(...dir) || 1;
+  push({
+    center: stemEnd,
+    radius: er * 0.18,
+    color: "#C9A24A",
+    finish: "metal",
+    shape: {
+      kind: "cylinder",
+      axis: [
+        (dir[0] / length) * er * 0.07,
+        (dir[1] / length) * er * 0.07,
+        (dir[2] / length) * er * 0.07,
+      ],
+    },
+  });
+  // The shank, on to the foot of the bowl.
+  const BRIAR = "#8A552C";
+  const foot: V3 = [
+    stemEnd[0] + side * er * 0.15,
+    stemEnd[1] + er * 0.12,
+    stemEnd[2] - er * 0.5,
+  ];
+  result.push(capsuleBetween(stemEnd, foot, er * 0.21, BRIAR));
+  // The bowl: upright (up is −y), its bottom rounded, a darker rim, and
+  // the ember domed just proud of it.
+  const bowlR = er * 0.5;
+  const bowl: V3 = [foot[0], foot[1] - er * 0.45, foot[2] - er * 0.18];
+  push({
+    center: bowl,
+    radius: bowlR,
+    color: BRIAR,
+    shape: { kind: "cylinder", axis: [0, er * 0.5, 0] },
+  });
+  push({
+    center: [bowl[0], bowl[1] + er * 0.5, bowl[2]],
+    radius: bowlR,
+    color: BRIAR,
+  });
+  push({
+    center: [bowl[0], bowl[1] - er * 0.5, bowl[2]],
+    radius: bowlR * 1.08,
+    color: "#5A3520",
+    shape: { kind: "cylinder", axis: [0, er * 0.05, 0] },
+  });
+  push({
+    center: [bowl[0], bowl[1] - er * 0.4, bowl[2]],
+    radius: bowlR * 0.74,
+    color: "#FF7A2C",
+    smoke: "bowl",
+  });
   return result;
 }
 
@@ -4233,6 +4486,9 @@ function appendWearableSpheres(
   if (equipped.face === "fyllings-monocle") {
     spheres.push(...buildMonocleSpheres(spheres));
   }
+  if (equipped.face === "sailors-starter-pack") {
+    spheres.push(...buildSailorsPackSpheres(spheres));
+  }
   if (equipped.head === "headphones") {
     spheres.push(...buildHeadphoneSpheres(spheres));
   }
@@ -4256,6 +4512,9 @@ function appendWearableSpheres(
   }
   if (equipped.head === "guard-helm") {
     spheres.push(...buildGuardHelmSpheres(spheres));
+  }
+  if (equipped.head === "sailors-beanie") {
+    spheres.push(...buildSailorBeanieSpheres(spheres));
   }
   if (equipped.head === "troubadour-plume") {
     spheres.push(...buildPlumedBeretSpheres(spheres));

@@ -1,7 +1,7 @@
 {
   "version": 2,
   "id": "airship",
-  "name": "Blåmann",
+  "name": "Sofia III",
   "size": 32,
   "origin": [0, 0, 0],
   "ship": true,

@@ -1,6 +1,6 @@
 import { Vector3 } from "three";
 import { describe, expect, it } from "vitest";
-import { WALK_SPEED } from "./animation.js";
+import { ICE_SPEED, WALK_SPEED } from "./animation.js";
 import {
   type CatHost,
   type CatProp,
@@ -111,6 +111,84 @@ describe("stepCat", () => {
     }
     // And it kept up, on the dry side.
     expect(flat(s.position, h.position)).toBeLessThan(4);
+  });
+
+  it("walks out on ice, its feet slipping, and glides on after it stops", () => {
+    // Ice from z = 3 on. The herzie walks out over it, slipping too: its
+    // legs at a walk, getting ICE_SPEED as far for them.
+    const h = host({ icy: (_x, z) => z > 3 });
+    const s = newCatState(1);
+    stepCat(s, h, 0, 1 / 60);
+    const was = new Vector3();
+    let jump = 0;
+    let legs = 0;
+    let ground = 0;
+    for (let i = 0; i < 600; i++) {
+      h.position.z += (WALK_SPEED * ICE_SPEED) / 60;
+      was.copy(s.position);
+      stepCat(s, h, WALK_SPEED, 1 / 60);
+      const d = flat(was, s.position);
+      jump = Math.max(jump, d);
+      if (i > 300) {
+        legs += s.speed / 60;
+        ground += d;
+      }
+    }
+    // It walked out there (never vanished and reappeared), keeping up.
+    expect(s.position.z).toBeGreaterThan(10);
+    expect(jump).toBeLessThan(0.2);
+    expect(flat(s.position, h.position)).toBeLessThan(4);
+    // Its legs go faster than the ice goes by: it gets ICE_SPEED as far.
+    expect(ground / legs).toBeGreaterThan(ICE_SPEED - 0.1);
+    expect(ground / legs).toBeLessThan(ICE_SPEED + 0.1);
+    // The herzie stops: as its legs do, it slides on a way.
+    let glided = 0;
+    for (let i = 0; i < 240; i++) {
+      was.copy(s.position);
+      stepCat(s, h, 0, 1 / 60);
+      if (s.speed < 0.1) glided += flat(was, s.position);
+    }
+    expect(glided).toBeGreaterThan(0.2);
+  });
+
+  it("never jumps about on ice, however the herzie slides around", () => {
+    // The herzie skating this way and that, gliding in between (as the
+    // Town's movement.ts has it on ice): the cat's slow going out there
+    // isn't being stuck, so it never reappears back along the path.
+    const h = host({ icy: () => true });
+    const s = newCatState(0);
+    stepCat(s, h, 0, 1 / 60);
+    let seed = 49297;
+    const random = () => {
+      seed = (seed * 9301 + 49297) % 233280;
+      return seed / 233280;
+    };
+    const was = new Vector3();
+    let vx = 0;
+    let vz = 0;
+    let dir = 0;
+    let pushing = true;
+    let next = 0;
+    let jump = 0;
+    for (let i = 0; i < 60 * 60; i++) {
+      if (i / 60 >= next) {
+        pushing = random() < 0.6;
+        dir = random() * Math.PI * 2;
+        next = i / 60 + 0.5 + random() * 3;
+      }
+      const top = pushing ? WALK_SPEED * ICE_SPEED : 0;
+      const t = 1 - Math.exp(-(pushing ? 1.5 : 1.15) / 60);
+      vx += (Math.sin(dir) * top - vx) * t;
+      vz += (Math.cos(dir) * top - vz) * t;
+      h.position.x += vx / 60;
+      h.position.z += vz / 60;
+      if (pushing) h.heading = dir;
+      was.copy(s.position);
+      stepCat(s, h, pushing ? WALK_SPEED : 0, 1 / 60);
+      jump = Math.max(jump, flat(was, s.position));
+      expect(flat(s.position, h.position)).toBeLessThan(6);
+    }
+    expect(jump).toBeLessThan(0.2);
   });
 
   it("stands on the ground under it", () => {

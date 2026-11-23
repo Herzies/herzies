@@ -13,7 +13,7 @@ import {
  * - `service`: the running event's window and interval; the latest started
  *   if two overlap. Null when none is on.
  * - `upcomingAt`: the next occurrence's start (ms since the epoch), for
- *   "Blåmann sails from…". Null when one is already on (the feed still lists
+ *   "Sofia III sails from…". Null when one is already on (the feed still lists
  *   the next one, which isn't news yet) or none is planned.
  */
 export function wildsFeed(

@@ -88,6 +88,12 @@ export const VISITOR_THEMES: Record<string, VisitorTheme> = {
     dim: "#c9c3b8",
     accent: "#e8e2d6",
   },
+  // Blåmann the skipper: deep sea blue, the sky he sails at night.
+  skipper: {
+    background: "linear-gradient(90deg, #04101f 0%, #0b2a4d 55%, #030b16 100%)",
+    dim: "#a3bfd9",
+    accent: "#7cc4ff",
+  },
   // Plutus: dusk violet, like his coat.
   market: {
     background: "linear-gradient(90deg, #120b26 0%, #2a1c52 55%, #0d081c 100%)",
