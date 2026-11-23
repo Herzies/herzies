@@ -130,6 +130,7 @@ import {
   type SchemeUniforms,
   setRestPlace,
 } from "./herzieMaterial.js";
+import { PipeSmoke } from "./pipeSmoke.js";
 import {
   buildPropModel,
   disposeProp,
@@ -137,7 +138,6 @@ import {
   propBodyBox,
   type TieRibbon,
 } from "./props.js";
-import { PipeSmoke } from "./pipeSmoke.js";
 import { SetShimmer } from "./setShimmer.js";
 import { ShoeSparkles } from "./shoeSparkles.js";
 import {

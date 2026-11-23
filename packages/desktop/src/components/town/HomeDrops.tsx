@@ -4,13 +4,13 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useRapier } from "@react-three/rapier";
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import * as THREE from "three";
+import { bossFight } from "./combat/fight";
 import {
   type Drop,
   DropView,
   releaseDrops,
   useDropLoop,
 } from "./combat/LootDrops";
-import { bossFight } from "./combat/fight";
 import { LOOT, lootItem, tierOf } from "./combat/loot";
 import {
   type DropSpot,
