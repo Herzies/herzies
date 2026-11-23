@@ -9,6 +9,7 @@ import * as THREE from "three";
 import { notify } from "../../../lib/notices";
 import { announcePickup } from "../../../lib/pickups";
 import { herzies } from "../../../tauri-bridge";
+import { roomLootSpots } from "../dropSpots";
 import { keepAtHome } from "../HomeLayer";
 import { homeMode } from "../homeMode";
 import { townSave, useTownRuntime } from "../runtime";
@@ -486,6 +487,18 @@ function Drops({
 
   useDropLoop(() => drops);
 
+  // Where each landed, for HomeDrops to lay it out there later (see
+  // roomLootSpots).
+  useEffect(() => {
+    for (const d of drops)
+      if (d.dropId)
+        roomLootSpots.set(d.dropId, {
+          map: townSave.map,
+          x: d.spot.x,
+          z: d.spot.z,
+        });
+  }, [drops]);
+
   // Leaving (or the room closing): stop the hums, call the spirit back if
   // it was out for one of these.
   useEffect(() => () => releaseDrops(drops, rt.playerHerzie), [drops, rt]);
@@ -595,11 +608,14 @@ export function useDropLoop(
       return;
     }
     // Refused like Home refuses it: an over-capacity item would have no slot
-    // to show in. It isn't lost; it's one more drop on the Home ground. Not
-    // retried here, so a full bank can't send the spirit round in circles.
-    const waiting = d.home
-      ? `"${name}" is still lying there`
-      : `"${name}" is waiting on your Home ground`;
+    // to show in. It isn't lost: it lies where it is (Home's ground, or the
+    // Wilds', which it never leaves), or a fight's loot is one more drop on
+    // the Home ground. Not retried here, so a full bank can't send the
+    // spirit round in circles.
+    const waiting =
+      d.home || townSave.map === "wilds"
+        ? `"${name}" is still lying there`
+        : `"${name}" is waiting on your Home ground`;
     if (!hasLootRoom(d.item.id)) {
       pushLootLog(`Bag full — ${waiting}`);
       return;

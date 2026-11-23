@@ -199,6 +199,9 @@ export interface PendingDrop {
   id: string;
   itemId: string;
   droppedAt: string;
+  /** It lies on the Wilds (a cache's loot, or listened for there): shown
+   * and picked up only there, and gone once their event is over. */
+  wilds?: boolean;
 }
 
 /** Notification that another player wants to be your friend */

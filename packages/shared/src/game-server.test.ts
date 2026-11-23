@@ -291,4 +291,41 @@ describe("processSync on the Wilds", () => {
     expect(away).toContain("lute");
     expect(away).not.toContain("tonewood");
   });
+
+  it("lets a worn spirit take what lies on the Wilds only while there", async () => {
+    const landed = new Date(Date.now() - 60_000).toISOString();
+    const sweep = async (wildsUntil: string) => {
+      const { admin, calls } = fakeAdmin(
+        context(
+          { wilds_until: wildsUntil, equipped: { spirit: "spirit-orb" } },
+          {
+            pending_drops: [
+              { id: "w", item_id: "tonewood", dropped_at: landed, wilds: true },
+              { id: "n", item_id: "tonewood", dropped_at: landed },
+            ],
+          },
+        ),
+        { collect_pending_drop: { data: "tonewood" } },
+        { items: [{ id: "tonewood", stackable: true }] },
+      );
+      const result = await processSync(admin, "u1", null, 0, []);
+      return {
+        taken: calls
+          .filter((c) => c.fn === "collect_pending_drop")
+          .map((c) => c.args.p_drop_id),
+        left: result.pendingDrops,
+      };
+    };
+
+    const away = await sweep(ago());
+    expect(away.taken).toEqual(["n"]);
+    // Still lying there, still the Wilds'.
+    expect(away.left).toEqual([
+      { id: "w", itemId: "tonewood", droppedAt: landed, wilds: true },
+    ]);
+
+    const there = await sweep(soon());
+    expect(there.taken).toEqual(["w", "n"]);
+    expect(there.left).toEqual([]);
+  });
 });

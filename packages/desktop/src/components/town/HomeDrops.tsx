@@ -10,13 +10,16 @@ import {
   releaseDrops,
   useDropLoop,
 } from "./combat/LootDrops";
+import { bossFight } from "./combat/fight";
 import { LOOT, lootItem, tierOf } from "./combat/loot";
 import {
   type DropSpot,
+  dropsShownOn,
   HOME_DROPS,
   homeDropFeed,
   loadSpots,
   placeDrop,
+  roomLootSpots,
   saveSpots,
   type Vec2,
 } from "./dropSpots";
@@ -273,9 +276,6 @@ export function HomeDrops({ map }: { map: TownMap }) {
     const away = rt.cameraAzimuth + Math.PI;
     let changed = false;
 
-    const pending = homeDropFeed.drops;
-    const pendingIds = new Set(pending.map((d) => d.id));
-
     // What's on the ground, against what's drawn.
     if (
       st.seenVersion !== homeDropFeed.version ||
@@ -283,6 +283,27 @@ export function HomeDrops({ map }: { map: TownMap }) {
     ) {
       st.seenVersion = homeDropFeed.version;
       st.lastReconcile = now;
+      // Everything on the ground, wherever it lies: what's remembered of
+      // where is kept for all of it (a Wilds drop's spot, while you're off
+      // the Wilds, too).
+      const ground = homeDropFeed.drops;
+      const groundIds = new Set(ground.map((d) => d.id));
+      // A room's loot on the ground here (a Wilds cache's) is LootDrops' to
+      // show; once it's gone from there it's laid out where it landed.
+      const roomLoot = new Set<string>();
+      for (const l of bossFight.loots)
+        for (const d of l.drops) {
+          if (!d.id) continue;
+          roomLoot.add(d.id);
+          const at = roomLootSpots.get(d.id);
+          if (at && at.map === map.id && !st.spots.has(d.id)) {
+            st.spots.set(d.id, at);
+            st.spotsDirty = true;
+          }
+        }
+      const pending = dropsShownOn(ground, map.id, roomLoot);
+      const pendingIds = new Set(pending.map((d) => d.id));
+
       for (const p of pending) {
         const d = st.live.get(p.id);
         if (d) {
@@ -338,9 +359,9 @@ export function HomeDrops({ map }: { map: TownMap }) {
         return false;
       });
       // Spots of drops that were on the ground and aren't any more.
-      for (const id of pendingIds) st.seen.add(id);
+      for (const id of groundIds) st.seen.add(id);
       for (const id of st.spots.keys()) {
-        if (st.seen.has(id) && !pendingIds.has(id)) {
+        if (st.seen.has(id) && !groundIds.has(id)) {
           st.spots.delete(id);
           st.spotsDirty = true;
         }

@@ -252,6 +252,9 @@ pub struct PendingDrop {
     pub id: String,
     pub item_id: String,
     pub dropped_at: String,
+    /// It lies on the Wilds (00159): shown and picked up only there.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wilds: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

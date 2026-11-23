@@ -127,6 +127,27 @@ export const homeDropFeed = {
   },
 };
 
+/** Where a room's loot (LootDrops: a Wilds cache's) landed, by drop id, on
+ * which island: once that loot's gone from the scene (you left, and came
+ * back), HomeDrops lays it out where it was rather than somewhere new. */
+export const roomLootSpots = new Map<string, DropSpot>();
+
+/**
+ * The drops HomeDrops lays out on island `map`: what lies on the Wilds
+ * only there (it stays there: see PendingDrop.wilds), and none a room's
+ * loot is showing already (`roomLoot`, by drop id), which would be the
+ * same drop twice.
+ */
+export function dropsShownOn(
+  drops: readonly PendingDrop[],
+  map: string,
+  roomLoot: ReadonlySet<string>,
+): PendingDrop[] {
+  return drops.filter(
+    (d) => (!d.wilds || map === "wilds") && !roomLoot.has(d.id),
+  );
+}
+
 // --- Where they lie, remembered ----------------------------------------------
 
 const SPOTS_KEY = "town.homeDrops.spots.v1";

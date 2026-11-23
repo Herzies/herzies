@@ -218,6 +218,7 @@ mod tests {
             id: id.into(),
             item_id: item.into(),
             dropped_at: "2026-11-05T00:00:00Z".into(),
+            wilds: false,
         }
     }
 

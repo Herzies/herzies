@@ -3634,6 +3634,7 @@ mod landed_drop_tests {
             id: "d".into(),
             item_id: "cd".into(),
             dropped_at: dropped_at.into(),
+            wilds: false,
         }
     }
 

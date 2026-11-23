@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { HOME_DROPS, placeDrop, seenAtHome, type Vec2 } from "./dropSpots";
+import {
+  dropsShownOn,
+  HOME_DROPS,
+  placeDrop,
+  seenAtHome,
+  type Vec2,
+} from "./dropSpots";
 
 /** A seeded random, so the tests are the same every run. */
 function seeded(seed: number) {
@@ -78,5 +84,27 @@ describe("seenAtHome", () => {
     expect(seenAtHome({ x: 0, z: 30 }, player, 0)).toBe(false);
     // Behind the camera.
     expect(seenAtHome({ x: 0, z: -3 }, player, 0)).toBe(false);
+  });
+});
+
+describe("dropsShownOn", () => {
+  const at = "2026-11-23T12:00:00Z";
+  const listened = { id: "a", itemId: "cd", droppedAt: at };
+  const wilds = { id: "b", itemId: "tonewood", droppedAt: at, wilds: true };
+  const cache = { id: "c", itemId: "sky-string", droppedAt: at, wilds: true };
+
+  it("keeps what lies on the Wilds there", () => {
+    const none = new Set<string>();
+    expect(dropsShownOn([listened, wilds], "home", none)).toEqual([listened]);
+    expect(dropsShownOn([listened, wilds], "wilds", none)).toEqual([
+      listened,
+      wilds,
+    ]);
+  });
+
+  it("leaves a room's loot on show to the room", () => {
+    expect(
+      dropsShownOn([listened, wilds, cache], "wilds", new Set(["c"])),
+    ).toEqual([listened, wilds]);
   });
 });

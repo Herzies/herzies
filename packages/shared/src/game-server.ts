@@ -482,7 +482,13 @@ interface SyncContext {
     amount: number;
     cap: number | null;
   }[];
-  pending_drops: { id: string; item_id: string; dropped_at: string }[];
+  /** `wilds` (00159): it lies on the Wilds. Absent on an older database. */
+  pending_drops: {
+    id: string;
+    item_id: string;
+    dropped_at: string;
+    wilds?: boolean;
+  }[];
   /** Server feature switches (game_flags, 00140). Absent on an older
    * database, which reads as every flag off. */
   flags?: Record<string, boolean>;
@@ -1065,19 +1071,21 @@ export async function processSync(
   if (rolledThisSync) {
     const { data: pendingDropRows } = await admin
       .from("pending_drops")
-      .select("id, item_id, dropped_at")
+      .select("id, item_id, dropped_at, wilds")
       .eq("user_id", userId)
       .order("dropped_at", { ascending: true });
     pendingDrops = (pendingDropRows ?? []).map((r) => ({
       id: r.id as string,
       itemId: r.item_id as string,
       droppedAt: r.dropped_at as string,
+      ...(r.wilds ? { wilds: true } : {}),
     }));
   } else {
     pendingDrops = (ctx.pending_drops ?? []).map((r) => ({
       id: r.id,
       itemId: r.item_id,
       droppedAt: r.dropped_at,
+      ...(r.wilds ? { wilds: true } : {}),
     }));
   }
 
@@ -1112,6 +1120,12 @@ export async function processSync(
       // the cave gets first go at it, where the spirit fetches it in plain
       // sight. Leave it until it has "landed"; a later sync takes it.
       if (Date.parse(drop.droppedAt) > now.getTime()) {
+        uncollected.push(drop);
+        continue;
+      }
+      // What lies on the Wilds is only picked up there (00159): the spirit
+      // leaves it until the room says you're back.
+      if (drop.wilds && !onWilds) {
         uncollected.push(drop);
         continue;
       }
@@ -1692,10 +1706,13 @@ export async function attuneCrystal(
     admin.from("herzies").select("*").eq("user_id", userId).maybeSingle(),
     admin.rpc("item_units_json", { p_user_id: userId }),
     admin.from("items").select("id, name, rarity"),
+    // The Crystal's finds land on the ground listening fills, not the
+    // Wilds' (00159).
     admin
       .from("pending_drops")
       .select("id", { count: "exact", head: true })
-      .eq("user_id", userId),
+      .eq("user_id", userId)
+      .eq("wilds", false),
   ]);
   if (!row) return { ok: false, reason: "not-found" };
   if (Number(row.crystal_attunes ?? 0) !== expectedAttunes) {
