@@ -130,6 +130,7 @@ import {
   type SchemeUniforms,
   setRestPlace,
 } from "./herzieMaterial.js";
+import { PipeSmoke } from "./pipeSmoke.js";
 import {
   buildPropModel,
   disposeProp,
@@ -1038,9 +1039,12 @@ export class HerzieModel {
   private readonly sparkles: ShoeSparkles | null = null;
   /** A full set's shimmer (setShimmer.ts); null without one. */
   private shimmer: SetShimmer | null = null;
-  /** A set shimmer is on: a paused view still needs drawing. */
+  /** Its pipe's smoke (pipeSmoke.ts); null without one. */
+  private smoke: PipeSmoke | null = null;
+  /** A set shimmer is on, or a pipe smoking: a paused view still needs
+   * drawing. */
   get glittering(): boolean {
-    return this.shimmer !== null;
+    return this.shimmer !== null || this.smoke !== null;
   }
   /** The floating companion, flying after the herzie; null when it has none,
    * or its scenery is anchored (then the companion stays put with it). */
@@ -1064,11 +1068,19 @@ export class HerzieModel {
    * (the Town sets these from its map; flat and everywhere without). */
   groundAt: ((x: number, z: number) => number) | null = null;
   walkable: ((x: number, z: number) => boolean) | null = null;
+  /** Where its cat's feet slip (ice; see CatHost.icy): nowhere without. */
+  icy: ((x: number, z: number) => boolean) | null = null;
   /** Whether its cat can walk straight from one point to another: nothing
    * in the way, no water (the Town asks its physics). Water only without. */
   pathClear:
     | ((ax: number, az: number, bx: number, bz: number) => boolean)
     | null = null;
+  /** The space it lives in, when that isn't the world's: what its
+   * companion, its cat and its cloth's sway move through. A sky ship's
+   * deck carries its herzies through the sky; measured in the deck's
+   * space, they keep up with it instead of trailing out behind. Changed
+   * with setFrame, which carries them over. */
+  private frameSpace: THREE.Object3D | null = null;
   private readonly meshes: THREE.Mesh[] = [];
   /** Props drawn as models (see Sphere.prop): each follows the sphere at
    * `at` (it hops with it), `offset` from it. */
@@ -1651,6 +1663,18 @@ export class HerzieModel {
       );
       this.root.add(this.sparkles.points);
     }
+    // A pipe (the Sailor's Starter Pack): smoke from its bowl, and what's
+    // blown out by its stem.
+    const bowl = this.meshes.find((_, i) => spheres[i].smoke === "bowl");
+    const mouth = this.meshes.find((_, i) => spheres[i].smoke === "mouth");
+    if (bowl && mouth) {
+      this.smoke = new PipeSmoke(
+        { bowl, mouth, facing: this.turn },
+        this.height,
+        this.root,
+      );
+      this.root.add(this.smoke.points);
+    }
     if (glass) this.layerOverGlass(spheres);
     // A full set's shimmer (ItemSet.shimmer), round the herzie itself.
     const shimmering = ITEM_SETS.find(
@@ -1867,6 +1891,7 @@ export class HerzieModel {
     this.stepCatAlong(dt, speed);
     this.sparkles?.update(dt);
     this.shimmer?.update(dt);
+    this.smoke?.update(dt);
   }
 
   /** Walks its cat on after it (or keeps it sat, pinned), and poses it. */
@@ -1881,8 +1906,7 @@ export class HerzieModel {
       poseCat(model, state, 1);
       return;
     }
-    this.root.updateWorldMatrix(true, false);
-    this.root.getWorldPosition(host.position);
+    this.inFrame(this.root, host.position);
     host.scale = this.root.getWorldScale(scratchScale).y;
     host.heading = this.heading;
     host.dancing = this.danceWeight > 0.5;
@@ -1890,6 +1914,7 @@ export class HerzieModel {
     host.afk = this.afk;
     host.groundAt = this.groundAt ?? undefined;
     host.walkable = this.walkable ?? undefined;
+    host.icy = this.icy ?? undefined;
     host.clear = this.pathClear ?? undefined;
     host.prop = this.propForCat();
     host.facing = this.homeFacing;
@@ -1907,7 +1932,7 @@ export class HerzieModel {
     // Posed in world terms, then brought into the root's space (which
     // carries the herzie's scale already).
     poseCat(model, state, 1);
-    this.root.worldToLocal(model.group.position);
+    this.frameToRoot(model.group.position);
   }
 
   /** Its boombox, as its cat sees it (round its middle, and its top), in
@@ -2386,6 +2411,8 @@ export class HerzieModel {
     this.worldVelocity.copy(from.worldVelocity);
     // Its set shimmer's sparkles, so equipping something doesn't blink them.
     if (this.shimmer && from.shimmer) this.shimmer.carryOver(from.shimmer);
+    // Its pipe's smoke, likewise.
+    if (this.smoke && from.smoke) this.smoke.carryOver(from.smoke);
     // Its companion, if it's the same kind: the new one takes over the old
     // one's state (where it is, its errand, its pose), keeping its own
     // build (its slot and clearance follow the new gear).
@@ -2395,6 +2422,74 @@ export class HerzieModel {
     if (this.cat && from.cat && !this.cat.pinned && !from.cat.pinned) {
       this.cat.state = from.cat.state;
     }
+  }
+
+  /** The space it lives in (null: the world's; see frameSpace). */
+  get frame(): THREE.Object3D | null {
+    return this.frameSpace;
+  }
+
+  /** Moves it into another space (a ship's deck, or back to the world's),
+   * carrying everything it remembers there across, so its cat, its
+   * companion and its cloth carry on as they were, not jumping. */
+  setFrame(next: THREE.Object3D | null): void {
+    if (next === this.frameSpace) return;
+    // Old space → world → new space.
+    const m = new THREE.Matrix4();
+    if (this.frameSpace) {
+      this.frameSpace.updateWorldMatrix(true, false);
+      m.copy(this.frameSpace.matrixWorld);
+    }
+    if (next) {
+      next.updateWorldMatrix(true, false);
+      m.premultiply(next.matrixWorld.clone().invert());
+    }
+    const turn = new THREE.Quaternion();
+    m.decompose(new THREE.Vector3(), turn, new THREE.Vector3());
+    const yaw = new THREE.Euler().setFromQuaternion(turn, "YXZ").y;
+    const at = (v: THREE.Vector3 | null) => v?.applyMatrix4(m);
+    const along = (v: THREE.Vector3 | null) => v?.applyQuaternion(turn);
+    at(this.lastWorld);
+    along(this.worldVelocity);
+    if (this.cloak) {
+      at(this.cloak.lastWorld);
+      along(this.cloak.worldVelocity);
+    }
+    const f = this.follower?.state;
+    if (f) {
+      at(f.position);
+      at(f.anchor);
+      at(f.target);
+      along(f.velocity);
+      f.heading += yaw;
+      f.slotHeading += yaw;
+    }
+    const c = this.cat && !this.cat.pinned ? this.cat.state : null;
+    if (c) {
+      at(c.position);
+      at(c.hostLast);
+      at(c.target);
+      at(c.pounceFrom);
+      at(c.pounceTo);
+      along(c.hostVelocity);
+      along(c.slide);
+      c.heading += yaw;
+      c.slotHeading += yaw;
+    }
+    this.frameSpace = next;
+  }
+
+  /** Where `obj` is in its frame's space. */
+  private inFrame(obj: THREE.Object3D, out: THREE.Vector3): THREE.Vector3 {
+    obj.updateWorldMatrix(true, false);
+    obj.getWorldPosition(out);
+    return this.frameSpace ? this.frameSpace.worldToLocal(out) : out;
+  }
+
+  /** A point in its frame's space, into its root's. */
+  private frameToRoot(v: THREE.Vector3): THREE.Vector3 {
+    if (this.frameSpace) this.frameSpace.localToWorld(v);
+    return this.root.worldToLocal(v);
   }
 
   /** Whether it has a floating companion of its own (a spirit) to send. */
@@ -2456,8 +2551,7 @@ export class HerzieModel {
     if (!f) return;
     const { host, state } = f;
     // Fresh: a host may have moved it (or what it's on) this frame.
-    this.root.updateWorldMatrix(true, false);
-    this.root.getWorldPosition(host.position);
+    this.inFrame(this.root, host.position);
     host.scale = this.root.getWorldScale(scratchScale).y;
     host.heading = this.heading;
     host.dancing = this.danceWeight > 0.5;
@@ -2490,7 +2584,7 @@ export class HerzieModel {
       const [wide, tall] = surgeStretch(surge.v);
       f.yaw.scale.set(wide, tall, wide);
     }
-    this.root.worldToLocal(f.group.position);
+    this.frameToRoot(f.group.position);
     f.yaw.rotation.set(pitch, heading, state.roll, "YXZ");
   }
 
@@ -2537,8 +2631,7 @@ export class HerzieModel {
     accel: [number, number, number];
     velocity: [number, number, number];
   } {
-    this.root.updateWorldMatrix(true, false);
-    const now = this.root.getWorldPosition(new THREE.Vector3());
+    const now = this.inFrame(this.root, new THREE.Vector3());
     let accel = new THREE.Vector3();
     if (this.lastWorld && dt > 0) {
       const velocity = now.clone().sub(this.lastWorld).divideScalar(dt);
@@ -2907,8 +3000,7 @@ export class HerzieModel {
   private stepCloak(dt: number, turned: number) {
     const run = this.cloak;
     if (!run || !(dt > 0)) return;
-    this.creature.updateWorldMatrix(true, false);
-    const now = this.creature.getWorldPosition(new THREE.Vector3());
+    const now = this.inFrame(this.creature, new THREE.Vector3());
     const scale = this.root.getWorldScale(scratchScale).y * MODEL_SCALE;
     let accel = new THREE.Vector3();
     let jumped = false;
@@ -3470,6 +3562,7 @@ export class HerzieModel {
 
   setTint(grey: number, opacity: number): void {
     this.shimmer?.setOpacity(opacity * (1 - grey));
+    this.smoke?.setOpacity(opacity * (1 - grey));
     this.scheme.uGrey.value = grey;
     this.scheme.uOpacity.value = opacity;
     this.tintOpacity = opacity;
@@ -3565,9 +3658,12 @@ export class HerzieModel {
    * once, before it's drawn.
    */
   petrify(): void {
-    // A statue doesn't shimmer.
+    // A statue doesn't shimmer, nor smoke.
     this.shimmer?.dispose();
     this.shimmer = null;
+    this.smoke?.points.removeFromParent();
+    this.smoke?.dispose();
+    this.smoke = null;
     // Stone isn't see-through: glass goes solid.
     for (const m of this.glassMaterials) {
       delete m.defines.GLASS;
@@ -3613,6 +3709,7 @@ export class HerzieModel {
   dispose() {
     this.sparkles?.dispose();
     this.shimmer?.dispose();
+    this.smoke?.dispose();
     // Its cat's own (not its shaded ones, already in materials).
     this.cat?.model.dispose();
     for (const m of this.materials) m.dispose();

@@ -18,13 +18,21 @@
  */
 import type { CreatureParams } from "./creature-params.ts";
 import type { Equipped } from "./items.ts";
+import type {
+  WildsCacheHold,
+  WildsCacheView,
+  WildsGroundDrop,
+  WildsHunt,
+  WildsLootRefusal,
+} from "./wilds-loot.ts";
 
 /** Bumped on any incompatible change; the server turns away other versions
  * with {@link TOWN_CLOSE.outdated} so old desktop betas say "update" instead of
  * misreading frames. */
-export const TOWN_PROTOCOL = 4;
-// 4: cloaks (the Back slot). A boss pays everyone in the cave, and an app
-// from before the cloaks doesn't know them, so it's kept out until updated.
+export const TOWN_PROTOCOL = 6;
+// 6: the sky ship to the Wilds (the `airship` map, a room for its deck) and
+// free-for-all PvP on the Wilds. An app from before can't ride a ship or
+// fight there.
 
 /** Server snapshot rate. */
 export const TOWN_TICK_HZ = 15;
@@ -35,30 +43,78 @@ export const TOWN_ROOM_CAPACITY = 40;
 export const TOWN_MAX_SHARDS = 16;
 
 /** The maps a client may ask for, with what the server needs to check
- * movement: the walkable radius and where a respawn puts you. Must match the
- * desktop's map files (checked by a desktop test). */
+ * movement: the walkable radius and where a respawn puts you, and on the
+ * islands with a Sky Dock its ship's gangplank — walked up from the pier's
+ * end past the island's edge into the gangway (`from` foot, `to` top, its
+ * walkable `half` width either side), which is the island's room's until
+ * you're through. Must match the desktop's map files (checked by a desktop
+ * test). */
 export const TOWN_MAPS = {
-  home: { radius: 40, spawn: { x: 13.5, z: 12 } },
-  /** The training grounds, through the portal: training dummies. */
-  arena: { radius: 17, spawn: { x: 0, z: -12 } },
+  home: {
+    radius: 40,
+    spawn: { x: 13.5, z: 12 },
+    gangplank: { from: [39.42, -3.78], to: [44.42, -4.26], half: 0.5 },
+  },
   /** The boss's cave: a small dark room, one shared fight. */
   bossroom: { radius: 13, spawn: { x: 0, z: 10 } },
-  /** The Tower (an event): a lush island fought floor by floor, alone. Its
-   * spawn is the meadow's west end; each new floor puts you back there. */
+  /** The Tower (an event): its round stone hall inside, fought floor by
+   * floor, alone. Its spawn is the west end of the open floor, a few
+   * steps in from the doorway; each new floor puts you back there. */
   tower: { radius: 21, spawn: { x: -12.5, z: 0.5 } },
-  /** The Wilds: a big wild island west of Town, through its portal. */
-  wilds: { radius: 83, spawn: { x: 66.5, z: 0.5 } },
+  /** The Wilds: a big wild island east of Town, reached by sky ship. */
+  wilds: {
+    radius: 83,
+    spawn: { x: -66.5, z: 0.5 },
+    gangplank: { from: [-82.6, 0.52], to: [-87.62, 0.55], half: 0.5 },
+  },
+  /** A sky ship's deck, in its own frame (its flight is the same for
+   * everyone, from the clock: see wilds.ts). One room per ship: its shard
+   * is the ship's index. */
+  airship: { radius: 13, spawn: { x: 0, z: 0 } },
 } as const;
 export type TownMapId = keyof typeof TOWN_MAPS;
 export function isTownMapId(id: string): id is TownMapId {
   return Object.hasOwn(TOWN_MAPS, id);
 }
 
+type Gangplank = {
+  readonly from: readonly [number, number];
+  readonly to: readonly [number, number];
+  readonly half: number;
+};
+
+/** Whether (x, z) is somewhere a herzie may stand on `map`, give or take
+ * `slack`: inside its walkable radius, or on its Sky Dock's gangplank (a
+ * ship's there only some of the time; the server doesn't keep the
+ * timetable, and a stub of plank in the air is nowhere worth cheating to). */
+export function inTownBounds(
+  map: TownMapId,
+  x: number,
+  z: number,
+  slack = 0,
+): boolean {
+  const def: { radius: number; gangplank?: Gangplank } = TOWN_MAPS[map];
+  if (Math.hypot(x, z) <= def.radius + slack) return true;
+  const g = def.gangplank;
+  if (!g) return false;
+  const [x0, z0] = g.from;
+  const dx = g.to[0] - x0;
+  const dz = g.to[1] - z0;
+  const len = Math.hypot(dx, dz);
+  const along = ((x - x0) * dx + (z - z0) * dz) / len;
+  const across = ((x - x0) * dz - (z - z0) * dx) / len;
+  return (
+    along >= -slack &&
+    along <= len + slack &&
+    Math.abs(across) <= g.half + slack
+  );
+}
 /** Maps where sitting on a bench earns extra health: the peaceful ones
  * with benches. The app counts it as you sit; the Town server credits it. */
 export const TOWN_REST_MAPS: ReadonlySet<TownMapId> = new Set([
   "home",
   "wilds",
+  "airship",
 ]);
 
 /** Maps that are one room however many come: the boss is shared, so there is
@@ -79,6 +135,14 @@ export const TOWN_WATCHER_ID = 0;
 export const TOWN_TICKETED_MAPS: ReadonlySet<TownMapId> = new Set([
   "bossroom",
   "tower",
+]);
+/** Maps whose ticket is asked for by name (`town-ticket?map=`), so it can
+ * carry that map's claim: the ticketed ones, which need one, and the Wilds,
+ * where an open "wilds" event's claim keys the room's loot and the
+ * listening bonus (none while the Wilds are shut). */
+export const TOWN_CLAIM_MAPS: ReadonlySet<TownMapId> = new Set([
+  ...TOWN_TICKETED_MAPS,
+  "wilds",
 ]);
 /** Maps where every herzie gets a room of their own: the client names it
  * with `?i=<user id>`, and the room only takes that herzie's ticket. */
@@ -151,6 +215,11 @@ export type TownTicketPayload = {
    * seconds), and the floor this herzie starts on (one past their best).
    * The Tower turns away tickets without it. */
   tower?: { event: string; until: number; floor: number };
+  /** Set only while a "wilds" event is on (on a ticket for the Wilds): the
+   * event and its window (ms since the epoch). The Wilds room keys its
+   * caches, dropped cards and listening bonus on it; without it, none of
+   * those. */
+  wilds?: { event: string; startsAt: number; endsAt: number };
   /** The herzie's level, for the Tower's level gap. */
   lv?: number;
   /** The herzie's class (classes.ts), once chosen. */
@@ -163,6 +232,8 @@ export type TownTicketPayload = {
   em?: string[];
   /** A game master (00133): its name carries a "GM" mark. */
   gm?: true;
+  /** The title it wears (titles.ts), shown over its name. Absent: none. */
+  ti?: string;
 };
 
 /** The boss room's half of a ticket. */
@@ -357,7 +428,7 @@ export const TOWN_FLAG_DANCING = 4;
  * an "is casting" bit, so two casts between ticks aren't one. */
 export const TOWN_CAST_SHIFT = 3;
 export const TOWN_CAST_MASK = 0b111 << TOWN_CAST_SHIFT;
-/** In combat mode, on the training grounds. */
+/** In combat mode. */
 export const TOWN_FLAG_COMBAT = 64;
 /** Flips on every jump: whenever it changes, the herzie hopped. A toggle,
  * not an "is airborne" bit, so a jump straight after landing still shows. */
@@ -554,6 +625,107 @@ export type TownPlayer = {
   down?: true;
   /** A game master: its name carries a "GM" mark. */
   gm?: true;
+  /** The title it wears (titles.ts), shown over its name. */
+  title?: string;
+};
+
+/** What a duelist sends about a duel (see duel.ts). */
+export type DuelClientOp =
+  /** Challenge herzie `to` (an entity id), standing within
+   * DUEL.challengeRange. One outgoing challenge at a time: a new one
+   * replaces the last. */
+  | { op: "ask"; to: number }
+  /** Answer `from`'s challenge. `auto`: declined without asking the player
+   * (they don't take duels, or blocked this herzie): the challenger is told
+   * "not accepting" rather than "declined". */
+  | { op: "answer"; from: number; yes: boolean; auto?: boolean }
+  /** Withdraw your challenge. */
+  | { op: "cancel" }
+  /** Give up the duel you're in (also sent before leaving the map). */
+  | { op: "yield" }
+  /** After a duel: ask for a rematch, or agree to one asked for. */
+  | { op: "rematch" };
+
+/** Why a challenge (or a rematch) didn't happen, as the room tells the
+ * challenger. */
+export type DuelRefusal =
+  /** Not close enough: walk up (DUEL.challengeRange; on accept, acceptRange). */
+  | "far"
+  /** One of you is in a duel, or the herzie is answering another challenge. */
+  | "busy"
+  /** Not on this map (DUEL_MAPS). */
+  | "here"
+  | "self"
+  | "declined"
+  /** No answer in DUEL.askTtlMs. */
+  | "expired"
+  /** The herzie doesn't take duels (an `auto` decline). */
+  | "auto"
+  /** Too soon: after your last challenge, or this herzie's last decline.
+   * `retryIn` says how long. */
+  | "cooldown"
+  /** The herzie is away (AFK) or knocked out. */
+  | "away"
+  /** The herzie left the room. */
+  | "gone"
+  /** You withdrew it. */
+  | "cancelled";
+
+/** How a duel ended. */
+export type DuelEndReason =
+  /** Brought to its knees (the winner's hit took the last of its HP). */
+  | "defeat"
+  /** Gave up. */
+  | "yield"
+  /** Stayed outside the ring too long. */
+  | "bounds"
+  /** Left the room, or lost its connection and didn't come back. */
+  | "left"
+  /** Ran to DUEL.hardCapMs: the higher share of health won. */
+  | "time"
+  /** Ran to DUEL.hardCapMs level, or both left. No winner. */
+  | "draw"
+  /** Called off before the fight began (a disconnect in the countdown, the
+   * room restarting). Nothing counts. */
+  | "cancelled";
+
+/** A duel as the room tells everyone in it. Times are server clock (ms,
+ * the snapshots' clock). */
+export type DuelState = {
+  id: number;
+  /** The challenger and the challenged (entity ids). */
+  a: number;
+  b: number;
+  /** The ring's centre (radius DUEL.ringRadius). */
+  x: number;
+  z: number;
+  phase: "countdown" | "fight" | "over";
+  /** Whether the countdown opens with the VS card (not on a rematch). */
+  intro: boolean;
+  /** When the countdown began, and when the fight does ("FIGHT!"). */
+  at: number;
+  startsAt: number;
+  /** Sudden death from here (startsAt + DUEL.regulationMs), and the end at
+   * the latest (startsAt + DUEL.hardCapMs). */
+  suddenAt: number;
+  endsAt: number;
+  /** Where each was put for the countdown. */
+  marks: { a: { x: number; z: number }; b: { x: number; z: number } };
+  /** Both duelists' duel health. */
+  hp: { id: number; hp: number; maxHp: number }[];
+};
+
+/** A herzie in the Wilds' free-for-all (wilds-pvp.ts) as the room tells
+ * everyone, when any of it changes: its PvP health, whether it's down
+ * (and gets up in the camp at `down`, server ms), and whether hits on it
+ * don't count yet (until `shield`, server ms). Nobody is told of a
+ * herzie at full health with neither. */
+export type WildsPvpState = {
+  id: number;
+  hp: number;
+  maxHp: number;
+  down?: number;
+  shield?: number;
 };
 
 export type ClientMessage =
@@ -571,8 +743,9 @@ export type ClientMessage =
   /** In the Tower, on a cleared floor: on to the next one. The room puts
    * you back at the map's spawn (the west end). */
   | { t: "next" }
-  /** In the boss room: whether you're playing music (the boss hates it,
-   * any of it). Sent when it changes. */
+  /** In the boss room, the Tower or on the Wilds: whether you're playing
+   * music (the boss hates it, any of it; the Tower pays the same bonus;
+   * the Wilds' Hunt Crystal fills with it). Sent when it changes. */
   | { t: "tune"; on: boolean }
   /** A Bard's lute: its basic attack heals the ally it's aimed at (true)
    * or hurts (false). Sent on every switch and every arrival. */
@@ -583,11 +756,23 @@ export type ClientMessage =
   | { t: "emote"; e: string }
   /** Knocked out in a raid, and giving up: out of the fight for good (no
    * reward). The app then respawns you in town. */
-  | { t: "forfeit" };
+  | { t: "forfeit" }
+  /** Duels, on the maps that have them (DUEL_MAPS). */
+  | ({ t: "duel" } & DuelClientOp)
+  /** On the Wilds: take dropped card `id` (in reach, and only once its
+   * first claim is yours or over). (A cache isn't asked for: the room
+   * opens it for whoever holds it; see `wildsHold`.) */
+  | { t: "wildsTake"; id: string };
 
 /** Why a skill was refused, when the player can do something about it:
- * nobody downed near enough, no revives left, or not until the fight. */
-export type SkillRefusal = "no-target" | "not-yet" | "instrument";
+ * nobody downed near enough, no revives left, not until the fight, or not
+ * in a duel or the Wilds' free-for-all (Taunt, Resurrect). */
+export type SkillRefusal =
+  | "no-target"
+  | "not-yet"
+  | "instrument"
+  | "duel"
+  | "wilds";
 
 /** Why the room refused to let you eat: knocked out, already at full HP,
  * too soon after the last one, none left in the bank, not something you
@@ -723,6 +908,10 @@ export type TowerFloor = {
   /** Ms until the mobs enrage, as of sending (0: they have). Missing from
    * older servers. */
   enrageIn?: number;
+  /** A cleared Warden's floor's chest, where it stands, until you walk up
+   * to it (the room opens it, and its loot follows as a `loot` from here:
+   * see TOWER_CHEST). Absent: no chest (any other floor, or opened). */
+  chest?: { x: number; z: number };
 };
 
 /** One piece of boss loot: a pending drop's id and its item id. */
@@ -741,8 +930,19 @@ export type BossPlace = {
 };
 
 export type ServerMessage =
-  /** Accepted: your entity id and everyone else here. A full snapshot follows. */
-  | { t: "welcome"; you: number; players: TownPlayer[]; fight?: FightState }
+  /** Accepted: your entity id and everyone else here. A full snapshot
+   * follows. `now`: the server's clock as it sent this, so times it
+   * schedules (a shield, a cache opening) read right before any snapshot
+   * (none come while you're alone); older servers left it out. `duels`:
+   * those running in the room (to draw their rings). */
+  | {
+      t: "welcome";
+      you: number;
+      players: TownPlayer[];
+      now?: number;
+      fight?: FightState;
+      duels?: DuelState[];
+    }
   /** The boss's health and phase, when either changes. */
   | { t: "boss"; hp: number; maxHp: number; phase: 1 | 2 | 3 }
   | ({ t: "telegraph" } & BossTelegraph)
@@ -781,7 +981,8 @@ export type ServerMessage =
   | {
       t: "loot";
       drops: LootDrop[];
-      /** Where they drop from (a Tower mob); absent: out of the boss. */
+      /** Where they drop from (a Tower mob, or a Warden's chest); absent:
+       * out of the boss. */
       at?: { x: number; z: number };
     }
   /** The fight is over: how it went, its ten top damage dealers, and your
@@ -871,7 +1072,133 @@ export type ServerMessage =
       ok: boolean;
       heal?: number;
       reason?: EatRefusal;
-    };
+    }
+  /** `from` challenges you to a duel (sent to you alone): its level and
+   * class for the prompt, and ms left to answer. */
+  | {
+      t: "duelAsk";
+      from: number;
+      lv?: number;
+      cls?: string;
+      ttl: number;
+    }
+  /** Your challenge to `to` is out, waiting `ttl` ms (sent to you alone). */
+  | { t: "duelAsked"; to: number; ttl: number }
+  /** A challenge (or rematch) with `with` didn't happen, and why (sent to
+   * those it concerns). `retryIn`: ms until you may ask again. */
+  | { t: "duelNo"; with: number; why: DuelRefusal; retryIn?: number }
+  /** `from` withdrew its challenge, or it ran out (sent to the challenged). */
+  | { t: "duelAskGone"; from: number }
+  /** Your last opponent wants a rematch (sent to you alone). */
+  | { t: "duelRematch"; by: number }
+  /** A duel began, moved on a phase, or went into sudden death (to the
+   * whole room). */
+  | ({ t: "duel" } & DuelState)
+  /** A duelist's duel health (to the whole room). */
+  | { t: "duelHp"; id: number; hp: number; maxHp: number }
+  /** Your duel hit landed on `target` for `damage` (sent to you alone);
+   * `blocked`: a Cymbrella's dome took it (damage 0). */
+  | {
+      t: "duelHit";
+      target: number;
+      damage: number;
+      crit: boolean;
+      blocked?: true;
+    }
+  /** A duelist is stunned until `until` (server ms; to the whole room). */
+  | { t: "duelStun"; id: number; until: number }
+  /** You're outside the ring: you yield at `until` (server ms) unless you're
+   * back. Null: back in, or the timer paused (stunned). */
+  | { t: "duelOut"; until: number | null }
+  /** Your opponent's connection dropped: it has until `until` (server ms)
+   * to come back (null: it's back). */
+  | { t: "duelAway"; id: number; until: number | null }
+  /** A duel ended (to the whole room). `winner`/`loser` null on a draw or a
+   * cancel. `ms`: how long the fight ran. `rematchUntil`: server ms the
+   * two may ask for a rematch until (absent if they can't). */
+  | {
+      t: "duelEnd";
+      id: number;
+      a: number;
+      b: number;
+      winner: number | null;
+      loser: number | null;
+      why: DuelEndReason;
+      ms: number;
+      tally: { id: number; damage: number; hits: number }[];
+      rematchUntil?: number;
+    }
+  /** A herzie's standing in the Wilds' free-for-all changed (to the whole
+   * room; to a newcomer, everyone's that isn't the default). `by`: who
+   * just hurt it, for the blow's direction. */
+  | ({ t: "pvp"; by?: number } & WildsPvpState)
+  /** Your blow in the Wilds landed on `target` for `damage` (sent to you
+   * alone); `blocked`: its Cymbrella dome took it, or it was still
+   * protected (damage 0). */
+  | {
+      t: "pvpHit";
+      target: number;
+      damage: number;
+      crit: boolean;
+      blocked?: true;
+    }
+  /** A herzie in the Wilds is stunned until `until` (server ms; to the
+   * whole room). */
+  | { t: "pvpStun"; id: number; until: number }
+  /** A herzie in the Wilds was taken down by `by` (an entity id; null if
+   * it has left the room since), names as they were then. `logged`: it
+   * left mid-fight, which counts the same. Sent to the two of them and to
+   * anyone near where it fell. */
+  | {
+      t: "pvpFeed";
+      by: number | null;
+      byName: string;
+      victim: number;
+      victimName: string;
+      logged?: true;
+    }
+  /** The Wilds' loot as it lies (to a newcomer, after `welcome`): the
+   * cards dropped by herzies taken down, the cache that's out, who's
+   * holding it (null: nobody), and the Hunt Crystal (null, or absent from
+   * an older room: no event on). */
+  | {
+      t: "wildsLoot";
+      drops: WildsGroundDrop[];
+      cache: WildsCacheView | null;
+      hold: WildsCacheHold | null;
+      hunt?: WildsHunt | null;
+    }
+  /** The Hunt Crystal's charge or rate changed: someone started or
+   * stopped listening, it filled (its cache's `wildsCache` comes with it),
+   * it went dull again once the cache was opened, or the event began or
+   * ended (null). To the whole room. */
+  | { t: "wildsHunt"; hunt: WildsHunt | null }
+  /** A herzie taken down on the Wilds (entity `from`) dropped a card where
+   * it fell (to the whole room). */
+  | { t: "wildsDrop"; drop: WildsGroundDrop; from: number }
+  /** A dropped card is gone: taken by entity `by` (null: someone who has
+   * left since), or `back` to its owner, unclaimed (to the whole room). */
+  | { t: "wildsGone"; id: string; by: number | null; back?: true }
+  /** A cache turned up (`cache`), or was opened by `by` (`cache` null;
+   * `byName` as they were then) or ran out (null, no `by`). To the whole
+   * room. */
+  | {
+      t: "wildsCache";
+      cache: WildsCacheView | null;
+      by?: number;
+      byName?: string;
+    }
+  /** You took a dropped card (sent to you alone): it's in your bag. */
+  | { t: "wildsTaken"; item: string; level: number }
+  /** You were taken down and dropped this card (sent to you alone). */
+  | { t: "wildsLost"; item: string; level: number }
+  /** Who's holding cache `id` changed (to the whole room; see
+   * WildsCacheHold): said on each change, not as it counts. Cleared by
+   * the cache's own `wildsCache`. */
+  | ({ t: "wildsHold"; id: string } & WildsCacheHold)
+  /** The room wouldn't let you take drop `id`, or couldn't open cache
+   * `id` for you though you held it, and why (sent to you alone). */
+  | { t: "wildsRefused"; id: string; why: WildsLootRefusal };
 
 export function parseServerMessage(text: string): ServerMessage | null {
   try {

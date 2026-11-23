@@ -1,6 +1,7 @@
 import { TOWN_SPRINT_SPEED } from "@herzies/shared";
 import {
   angleDelta,
+  ICE_SPEED,
   newAnimationState,
   STRIDE,
   stepAnimation,
@@ -11,7 +12,6 @@ import type { TownInput } from "./input";
 import { emptyMap, MAP_SIZE } from "./map";
 import {
   ICE_GRIP,
-  ICE_SPEED,
   type Mover,
   onIce,
   stepMover,

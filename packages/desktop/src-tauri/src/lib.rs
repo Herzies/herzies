@@ -1,4 +1,5 @@
 mod api;
+mod artwork;
 mod auth;
 mod collects;
 mod game;
@@ -91,9 +92,8 @@ fn now_playing_payload(s: &ManagedState) -> Option<NowPlayingPayload> {
             artist: np.artist.clone(),
             genre,
             // Sync only Last.fm's remote artwork, not `np.album_art_url`
-            // (which prefers the local system artwork data: URL) — that blob
-            // is fine for this device's own widget but too large, macOS-only,
-            // and not durable enough to store/serve to friends.
+            // (which prefers the local system artwork, a `herzies-art` URL
+            // that only this app can load) — friends couldn't show it.
             album_art_url: s.enrichment.as_ref().and_then(|e| e.album_art_url.clone()),
         }
     })
@@ -541,14 +541,21 @@ async fn friend_lookup(
     let client = api::http();
     if let Some(profiles) = api::api_lookup_herzies(&client, &codes).await {
         let mut s = state.lock().unwrap();
-        for (code, profile) in &profiles {
-            s.friends.insert(code.clone(), profile.clone());
+        // Polled while Friends is open: most rounds bring nothing new, and
+        // then there's nothing to save or push to the webview.
+        let changed = profiles
+            .iter()
+            .any(|(code, profile)| s.friends.get(code) != Some(profile));
+        if changed {
+            for (code, profile) in &profiles {
+                s.friends.insert(code.clone(), profile.clone());
+            }
+            if let Some(herzie) = &s.herzie {
+                storage::save_friends_cache(&herzie.friend_codes, &s.friends);
+            }
+            drop(s);
+            emit_state_update(&app);
         }
-        if let Some(ref herzie) = s.herzie {
-            storage::save_friends_cache(&herzie.friend_codes, &s.friends);
-        }
-        drop(s);
-        emit_state_update(&app);
         Ok(profiles)
     } else {
         let s = state.lock().unwrap();
@@ -676,6 +683,46 @@ async fn apply_dice_upgrade(
     Ok(data)
 }
 
+/// Crafts a Wilds instrument (recipe from WILDS_RECIPES); applies the returned item state.
+#[tauri::command]
+async fn craft_wilds_instrument(
+    recipe: String,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
+    let data = api::api_craft_wilds_instrument(&client, &recipe).await?;
+    let mut s = state.lock().unwrap();
+    if let Some(snapshot) = snapshot_from_response(&data, &s, issued_at) {
+        apply_inventory(&mut s, snapshot, None);
+        drop(s);
+        emit_state_update(&app);
+    }
+    Ok(data)
+}
+
+/// Tunes one instrument copy with crafting bits; applies the returned item state.
+#[tauri::command]
+async fn tune_instrument(
+    unit_id: String,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
+    let data = api::api_tune_instrument(&client, &unit_id).await?;
+    let mut s = state.lock().unwrap();
+    if let Some(snapshot) = snapshot_from_response(&data, &s, issued_at) {
+        apply_inventory(&mut s, snapshot, None);
+        drop(s);
+        emit_state_update(&app);
+    }
+    Ok(data)
+}
+
 #[tauri::command]
 async fn equip_item(
     unit_id: String,
@@ -748,6 +795,94 @@ async fn allocate_stats(
     drop(s);
     emit_state_update(&app);
     Ok(result)
+}
+
+/// Puts the other loadout on (1 or 2). The answer carries the item state
+/// (applied like an equip's), the loadouts, and what couldn't be put on.
+#[tauri::command]
+async fn switch_loadout(
+    loadout: u8,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
+    let result = api::api_switch_loadout(&client, loadout).await?;
+    let mut s = state.lock().unwrap();
+    if let Some(snapshot) = snapshot_from_response(&result, &s, issued_at) {
+        apply_inventory(&mut s, snapshot, None);
+        // Like an equip: an `/inventory` already in flight predates it.
+        s.bump_equip_epoch();
+    }
+    drop(s);
+    emit_state_update(&app);
+    Ok(result)
+}
+
+/// Every title, earned or not, for the Titles tab. The worn one it reports
+/// is the server's word, so it's taken unless a wear is on its way.
+#[tauri::command]
+async fn fetch_titles(
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let epoch_before = state.lock().unwrap().title_epoch;
+    let result = api::api_fetch_titles(&client).await?;
+    let worn = result["worn"].as_str().map(str::to_string);
+    let mut s = state.lock().unwrap();
+    let changed =
+        s.title_epoch == epoch_before && s.herzie.as_ref().is_some_and(|h| h.title != worn);
+    if changed {
+        if let Some(herzie) = &mut s.herzie {
+            herzie.title = worn;
+            storage::save_herzie(herzie);
+        }
+        drop(s);
+        emit_state_update(&app);
+    }
+    Ok(result)
+}
+
+/// Wears an earned title, or none.
+#[tauri::command]
+async fn wear_title(
+    title: Option<String>,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let result = api::api_wear_title(&client, title.as_deref()).await?;
+    let mut s = state.lock().unwrap();
+    if let Some(herzie) = &mut s.herzie {
+        herzie.title = result["worn"].as_str().map(str::to_string);
+        storage::save_herzie(herzie);
+    }
+    s.title_epoch = s.title_epoch.wrapping_add(1);
+    drop(s);
+    emit_state_update(&app);
+    Ok(result)
+}
+
+/// Clears the NEW pill on titles that have been looked at.
+#[tauri::command]
+async fn mark_titles_seen(ids: Vec<String>) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    api::api_mark_titles_seen(&client, &ids).await
+}
+
+/// The UI has announced these new titles: they leave the queue.
+#[tauri::command]
+fn ack_new_titles(ids: Vec<String>, app: AppHandle, state: tauri::State<'_, SharedState>) {
+    let mut s = state.lock().unwrap();
+    let before = s.new_titles.len();
+    s.new_titles.retain(|id| !ids.contains(id));
+    let changed = s.new_titles.len() != before;
+    drop(s);
+    if changed {
+        emit_state_update(&app);
+    }
 }
 
 /// Buys from Good ol' George (a live `merchant` event) — the only way coins
@@ -1197,9 +1332,9 @@ async fn trade_cancel(trade_id: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
-async fn trade_poll(trade_id: String) -> Result<Option<Trade>, String> {
+async fn trade_poll(trade_id: String, with_names: bool) -> Result<Option<Trade>, String> {
     let client = api::http();
-    Ok(api::api_poll_trade(&client, &trade_id).await)
+    Ok(api::api_poll_trade(&client, &trade_id, with_names).await)
 }
 
 #[tauri::command]
@@ -1320,20 +1455,12 @@ async fn get_auth_config() -> Result<Option<AuthConfig>, String> {
     let session = storage::load_session();
 
     match (token, session) {
-        (Some(access_token), Some(session)) => {
-            let supabase_url = std::env::var("NEXT_PUBLIC_SUPABASE_URL")
-                .or_else(|_| std::env::var("SUPABASE_URL"))
-                .unwrap_or_else(|_| "https://ojqfqxolbjegorgoyond.supabase.co".to_string());
-            let anon_key = std::env::var("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-                .or_else(|_| std::env::var("SUPABASE_ANON_KEY"))
-                .unwrap_or_else(|_| "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qcWZxeG9sYmplZ29yZ295b25kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2NTcwMjgsImV4cCI6MjA5MzIzMzAyOH0.BBT77VK1ROJr57BJvMfCyra3lbycMA9u2-jxG-LhBJE".to_string());
-            Ok(Some(AuthConfig {
-                supabase_url,
-                anon_key,
-                access_token,
-                user_id: session.user_id,
-            }))
-        }
+        (Some(access_token), Some(session)) => Ok(Some(AuthConfig {
+            supabase_url: api::supabase_url(),
+            anon_key: api::supabase_anon_key(),
+            access_token,
+            user_id: session.user_id,
+        })),
         _ => Ok(None),
     }
 }
@@ -1349,6 +1476,11 @@ async fn chat_fetch(
     let client = api::http();
     if let Some(chat) = api::api_chat_fetch(&client).await {
         let mut s = state.lock().unwrap();
+        // The safety poll and the refetch on focus mostly find what realtime
+        // already delivered: no need to push the whole state for that.
+        if s.chat_messages == chat.messages {
+            return Ok(Some(chat));
+        }
         s.chat_messages = chat.messages.clone();
         let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
         drop(s);
@@ -1518,6 +1650,7 @@ fn apply_inventory(s: &mut ManagedState, snapshot: ItemSnapshot, equip_epoch_bef
         units,
         bank_expansions,
         emotes,
+        loadouts,
         issued_at,
     } = snapshot;
     s.inventory = Some(inventory.clone());
@@ -1529,6 +1662,9 @@ fn apply_inventory(s: &mut ManagedState, snapshot: ItemSnapshot, equip_epoch_bef
     }
     if let Some(emotes) = emotes {
         s.emotes = emotes;
+    }
+    if let Some(loadouts) = loadouts {
+        s.loadouts = Some(loadouts);
     }
     s.inventory_currency = currency;
     s.item_upgrades = item_upgrades.clone();
@@ -1590,6 +1726,7 @@ fn snapshot_from_response(
     let item_upgrades = serde_json::from_value::<ItemUpgrades>(data["itemUpgrades"].clone())
         .unwrap_or_else(|_| s.item_upgrades.clone());
     let units = serde_json::from_value::<Vec<ItemUnit>>(data["units"].clone()).ok();
+    let loadouts = serde_json::from_value::<LoadoutState>(data["loadouts"].clone()).ok();
     Some(ItemSnapshot {
         inventory,
         currency,
@@ -1598,6 +1735,7 @@ fn snapshot_from_response(
         units,
         bank_expansions: None,
         emotes: None,
+        loadouts,
         issued_at: Some(issued_at),
     })
 }
@@ -1700,7 +1838,6 @@ async fn refresh_app_cache(app: &AppHandle, client: &Client, include_inventory: 
 // --- Background loops ---
 
 async fn poll_loop(app: AppHandle) {
-    let client = api::http();
     let mut last_tick = Instant::now();
 
     loop {
@@ -1716,7 +1853,7 @@ async fn poll_loop(app: AppHandle) {
 
         let elapsed = last_tick.elapsed().as_secs_f64().min(2.0 * delay as f64);
         last_tick = Instant::now();
-        if let Err(e) = poll_tick(&app, &client, elapsed).await {
+        if let Err(e) = poll_tick(&app, elapsed).await {
             log::warn!("Poll error: {}", e);
         }
     }
@@ -1848,7 +1985,11 @@ async fn fetch_system_artwork_url() -> Option<String> {
 fn spawn_system_artwork_fetch(app: &AppHandle, track_key: String) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let Some(artwork) = fetch_system_artwork_url().await else {
+        let Some(artwork) = fetch_system_artwork_url()
+            .await
+            .as_deref()
+            .and_then(artwork::Artwork::from_data_url)
+        else {
             return;
         };
 
@@ -1858,7 +1999,9 @@ fn spawn_system_artwork_fetch(app: &AppHandle, track_key: String) {
             if s.last_track_key.as_deref() != Some(track_key.as_str()) {
                 return;
             }
-            s.system_album_art_url = Some(artwork);
+            // Published under the lock, after the check: a late fetch for a
+            // track already gone can't replace the playing one's image.
+            s.system_album_art_url = Some(artwork::publish(artwork));
             let album_art_url =
                 resolve_album_art_url(s.system_album_art_url.as_deref(), s.enrichment.as_ref());
             if let Some(ref mut np) = s.current_now_playing {
@@ -1901,7 +2044,7 @@ fn spawn_artist_image_fetch(app: &AppHandle, artist: String, track_key: String) 
     });
 }
 
-async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: f64) -> Result<(), String> {
+async fn poll_tick(app: &AppHandle, elapsed_secs: f64) -> Result<(), String> {
     let state = app.state::<SharedState>();
     let lastfm = app.state::<LastFmService>();
 
@@ -1918,7 +2061,14 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: f64) -> Resu
         return Ok(());
     }
 
-    let np = nowplaying::get_now_playing().await;
+    // Ghost mode tracks nothing, so don't spend a MediaRemote read (and the
+    // AppleScript fallbacks behind it) on finding out what's playing: None
+    // takes the same "not tracking" arm below as a ghost's track would.
+    let np = if tray::is_ghost_mode() {
+        None
+    } else {
+        nowplaying::get_now_playing().await
+    };
 
     // Collect side-effect info to act on after releasing the lock
     let mut spawn_enrichment: Option<(String, String, String)> = None;
@@ -2488,6 +2638,7 @@ async fn events_watch_loop(app: AppHandle) {
             let title = match event.event_type.as_str() {
                 "song_hunt" => "Orphiez is in town!".to_string(),
                 "tower" => "The Tower is open!".to_string(),
+                "wilds" => "The Wilds are open!".to_string(),
                 _ if event.title.trim().is_empty() => "Someone's in town!".to_string(),
                 _ => format!("{} is in town!", event.title),
             };
@@ -2509,16 +2660,22 @@ async fn events_watch_loop(app: AppHandle) {
             let fallback_body = if event.event_type == "song_hunt" {
                 "He's lost a song. Help him find it."
             } else if event.event_type == "tower" {
-                "Climb it floor by floor, through the portal in Town."
+                "Climb it floor by floor, through its door in Town."
             } else {
                 "Someone new has arrived in Town."
             };
-            let body = event
-                .description
-                .as_deref()
-                .map(|d| d.trim())
-                .filter(|d| !d.is_empty())
-                .unwrap_or(fallback_body);
+            // The Wilds always say where the ship leaves from: an admin's
+            // description wouldn't know.
+            let body = if event.event_type == "wilds" {
+                "Sofia III is sailing: board her at the Sky Dock on the home island's east rim."
+            } else {
+                event
+                    .description
+                    .as_deref()
+                    .map(|d| d.trim())
+                    .filter(|d| !d.is_empty())
+                    .unwrap_or(fallback_body)
+            };
             send_notification(&app, &title, body, Some("events"));
             let _ = app.emit("activity", format!("{}: {}", title, body));
         }
@@ -2555,6 +2712,7 @@ async fn sync_tick_with(
         trade_epoch_before,
         currency_epoch_before,
         crystal_epoch_before,
+        title_epoch_before,
     ) = {
         let s = state.lock().unwrap();
         let has = s.herzie.is_some();
@@ -2577,6 +2735,7 @@ async fn sync_tick_with(
             s.trade_epoch,
             s.currency_epoch,
             s.crystal_epoch,
+            s.title_epoch,
         )
     };
 
@@ -2642,6 +2801,7 @@ async fn sync_tick_with(
         // or re-showing an accepted request). The next sync reconciles.
         let friend_state_stale = s.friend_epoch != friend_epoch_before;
         let s_currency_current = s.currency_epoch == currency_epoch_before;
+        let s_title_current = s.title_epoch == title_epoch_before;
         let friend_codes_changed = if let Some(ref mut herzie) = s.herzie {
             let server = &sync_resp.herzie;
             herzie.xp = server.xp;
@@ -2657,6 +2817,10 @@ async fn sync_tick_with(
             // keeps what's here.
             if server.stat_points.is_some() {
                 herzie.stat_points = server.stat_points;
+            }
+            // Skipped when a wear changed it while this request was out.
+            if s_title_current {
+                herzie.title = server.title.clone();
             }
             herzie.total_minutes_listened = server.total_minutes_listened;
             herzie.genre_minutes = server.genre_minutes.clone();
@@ -2732,6 +2896,16 @@ async fn sync_tick_with(
         }
         if let Some(emotes) = sync_resp.emotes.clone() {
             s.emotes = emotes;
+        }
+        if let Some(loadouts) = sync_resp.loadouts.clone() {
+            s.loadouts = Some(loadouts);
+        }
+        // Queued until the UI acks them (see `ack_new_titles`); a title
+        // can't arrive twice, but guard against a repeat all the same.
+        for id in &sync_resp.new_titles {
+            if !s.new_titles.contains(id) {
+                s.new_titles.push(id.clone());
+            }
         }
         // Whether this sync filled the resonance (see crystal_became_full);
         // announced below, once the state's out.
@@ -2960,8 +3134,26 @@ pub(crate) fn adopt_local_herzie() -> Option<Herzie> {
 
 // --- Tauri setup ---
 
+/// Where the `log` facade goes: stdout for the terminal running `tauri dev`,
+/// and ~/Library/Logs/<identifier>/ so issues that need a restart to clear
+/// still leave a trail. Debug builds also mirror it into the webview console,
+/// next to the frontend's own lines in devtools; in release that was an IPC
+/// event per line that nobody reads.
+fn log_targets() -> Vec<tauri_plugin_log::Target> {
+    use tauri_plugin_log::{Target, TargetKind};
+    let mut targets = vec![
+        Target::new(TargetKind::Stdout),
+        Target::new(TargetKind::LogDir { file_name: None }),
+    ];
+    if cfg!(debug_assertions) {
+        targets.push(Target::new(TargetKind::Webview));
+    }
+    targets
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(debug_assertions)]
     lastfm::load_env();
     let lastfm_service = LastFmService::from_env();
     lastfm_service.log_missing_key_once();
@@ -2982,21 +3174,13 @@ pub fn run() {
             // at login" (stay hidden in the menu bar).
             Some(vec!["--autostart"]),
         ))
+        .register_uri_scheme_protocol(artwork::SCHEME, |_ctx, request| {
+            artwork::respond(request.uri().path())
+        })
         .plugin(
-            // Routes the `log` facade somewhere visible: stdout for the
-            // terminal running `tauri dev`, and the webview console so the
-            // same lines show up in devtools next to the frontend's own.
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
-                .targets([
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
-                    // Persisted to ~/Library/Logs/<identifier>/ so issues
-                    // that need a restart to clear still leave a trail.
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                        file_name: None,
-                    }),
-                ])
+                .targets(log_targets())
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
@@ -3035,6 +3219,8 @@ pub fn run() {
             fetch_inventory,
             sell_item,
             apply_dice_upgrade,
+            craft_wilds_instrument,
+            tune_instrument,
             buy_from_merchant,
             buy_from_boboku,
             fetch_tower_guard,
@@ -3057,6 +3243,11 @@ pub fn run() {
             equip_item,
             choose_class,
             allocate_stats,
+            switch_loadout,
+            fetch_titles,
+            wear_title,
+            mark_titles_seen,
+            ack_new_titles,
             fetch_store_products,
             fetch_premium_items,
             start_purchase,
@@ -3234,7 +3425,7 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 let client = api::http();
                 // Initial tick credits no listening minutes (no prior interval).
-                let _ = poll_tick(&app_handle, &client, 0.0).await;
+                let _ = poll_tick(&app_handle, 0.0).await;
                 let _ = sync_tick(&app_handle, &client).await;
                 refresh_app_cache(&app_handle, &client, false).await;
             });
@@ -3443,6 +3634,7 @@ mod landed_drop_tests {
             id: "d".into(),
             item_id: "cd".into(),
             dropped_at: dropped_at.into(),
+            wilds: false,
         }
     }
 

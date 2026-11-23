@@ -38,6 +38,8 @@ import {
   portalCells,
   pruneFacing,
   pruneTurns,
+  ROOM_KINDS,
+  type RoomKind,
   SPOT_NAMES,
   TERRAIN,
   type TownMap,
@@ -56,6 +58,11 @@ import {
 import { dayOfYear } from "./components/town/Seasons";
 import { STAND, standFacing } from "./components/town/Stands";
 import TownCanvas, { PIXEL_SCALE } from "./components/town/TownCanvas";
+import {
+  CRAFTING_STATION,
+  craftingFacing,
+} from "./components/town/wilds/craftingSpot";
+import { HUNT_CRYSTAL } from "./components/town/wilds/huntCrystalSpot";
 
 // The Crystal is drawn here even while the server has it off.
 showCrystalAlways();
@@ -104,6 +111,10 @@ const PALETTE: Paint[] = [
       "Q",
       "b",
       "p",
+      "I",
+      "X",
+      "W",
+      "G",
     ] as const
   ).map((ch) => ({
     layer: "objects" as const,
@@ -115,8 +126,10 @@ const PALETTE: Paint[] = [
 /** Each palette entry's key, in order (clear last): the number row, then
  * K (shop, "kiosk"), C (cave), H (auction house, "hall"), U (bush), L (lamp post), N (bench), T
  * (market stand), I (bulletin board, "info"), Y (training dummy), O
- * (portal), Q (Crystal), Z (barrel) and / (pots). Clear of the 3D preview's keys (WASD,
- * arrows, E) and the tools' (B, R, F, M, P). */
+ * (portal), Q (Crystal), Z (barrel), / (pots), ; (the Tower), ' (the
+ * Sky dock: it faces out of the island, the ship moored past its pier),
+ * \ (a Crafting station, "workbench") and ` (a Hunt crystal). Clear of
+ * the 3D preview's keys (WASD, arrows, E) and the tools' (B, R, F, M, P). */
 const KEYS = [
   ..."1234567890-",
   "k",
@@ -133,6 +146,10 @@ const KEYS = [
   "q",
   "z",
   "/",
+  ";",
+  "'",
+  "\\",
+  "`",
   "x",
 ];
 type Tool = "brush" | "rect" | "fill" | "move";
@@ -222,9 +239,11 @@ function eighthsAt(map: TownMap, col: number, row: number): number {
         ? standFacing(map, col, row)
         : o === BOARD
           ? boardFacing(map, col, row)
-          : o === "@"
-            ? Math.atan2(-x, -z)
-            : objectJitter(map, col, row).yaw);
+          : o === CRAFTING_STATION
+            ? craftingFacing(map, col, row)
+            : o === "@"
+              ? Math.atan2(-x, -z)
+              : objectJitter(map, col, row).yaw);
   return Math.round(yaw / EIGHTH);
 }
 
@@ -325,18 +344,19 @@ function markers(m: TownMap): { id: MarkerId; label: string; at: Point }[] {
   ];
 }
 
-/** The Tower Guard's spot: placed by hand on whichever island he should
- * stand on (the button "Place Tower Guard"), never filled in. */
-const GUARD_SPOT = "tower_guard";
+/** Spots placed by hand on whichever island they should stand on (a
+ * "Place …" button each), never filled in: the Tower Guard's, and Madas's
+ * in the Wilds' camp. */
+const PINNED_SPOTS: readonly string[] = ["tower_guard", "madas"];
 
 /** The map, every visitor kind given a spot (new ones start mid-plaza) —
- * on islands visitors stand on at all (home, not the training grounds).
- * The Tower Guard isn't a visitor: he's placed by hand. */
+ * on islands visitors stand on at all (home, not the Tower). Those pinned
+ * aren't visitors: they're placed by hand. */
 function withAllSpots(m: TownMap): TownMap {
-  if (!Object.keys(m.spots).some((k) => k !== GUARD_SPOT)) return m;
+  if (!Object.keys(m.spots).some((k) => !PINNED_SPOTS.includes(k))) return m;
   const spots = { ...m.spots };
   for (const key of Object.keys(SPOT_NAMES))
-    if (key !== GUARD_SPOT) spots[key] ??= [0, 0];
+    if (!PINNED_SPOTS.includes(key)) spots[key] ??= [0, 0];
   return { ...m, spots };
 }
 
@@ -380,7 +400,13 @@ function drawMap(
             zoom * 0.66,
             zoom * 0.56,
           );
-        else if (o === "H" || o === "$" || o === "C" || o === "A") {
+        else if (
+          o === "H" ||
+          o === "$" ||
+          o === "C" ||
+          o === "A" ||
+          o === "I"
+        ) {
           // Whole cells, so a patch reads as one building.
           ctx.rect(c * zoom, r * zoom, zoom, zoom);
         } else if (o === "v") {
@@ -427,6 +453,16 @@ function drawMap(
           ctx.beginPath();
           ctx.fillStyle = "#5b5850";
           ctx.arc(cx, cy, zoom * 0.22, 0, Math.PI * 2);
+        } else if (o === CRAFTING_STATION) {
+          // A workbench: a long plank.
+          ctx.rect(cx - zoom * 0.42, cy - zoom * 0.2, zoom * 0.84, zoom * 0.4);
+        } else if (o === HUNT_CRYSTAL) {
+          // A gem: a diamond, taller than wide.
+          ctx.moveTo(cx, cy - zoom * 0.45);
+          ctx.lineTo(cx + zoom * 0.28, cy);
+          ctx.lineTo(cx, cy + zoom * 0.45);
+          ctx.lineTo(cx - zoom * 0.28, cy);
+          ctx.closePath();
         } else if (o === "D") {
           // A post with a round head: a dummy.
           ctx.rect(cx - zoom * 0.08, cy - zoom * 0.1, zoom * 0.16, zoom * 0.5);
@@ -441,13 +477,14 @@ function drawMap(
           ctx.arc(cx, cy, zoom * 0.25, 0, Math.PI * 2);
         } else ctx.arc(cx, cy, zoom * 0.26, 0, Math.PI * 2);
         ctx.fill();
-        if (o === "H" || o === "$" || o === "C" || o === "A") {
+        if (o === "H" || o === "$" || o === "C" || o === "A" || o === "I") {
           // A darker edge where the building meets open ground.
           ctx.fillStyle = {
             H: "#8a3b2e",
             $: "#2c559f",
             C: "#4e463c",
             A: "#8a7a5a",
+            I: "#6a5a8a",
           }[o];
           const edge = Math.max(1, zoom * 0.15);
           if (map.objects[r - 1]?.[c] !== o)
@@ -1311,33 +1348,36 @@ function MapEditor() {
           >
             Respawn <span style={{ color: "#6b7090" }}>P</span>
           </button>
-          <button
-            type="button"
-            style={btn(!!map.spots[GUARD_SPOT])}
-            title="The Tower Guard stands only on islands with his spot"
-            onClick={() => {
-              const { [GUARD_SPOT]: had, ...rest } = map.spots;
-              edit({
-                spots: had
-                  ? rest
-                  : {
-                      ...map.spots,
-                      // A few steps in front of the spawn, clear of its
-                      // marker: drag him from there.
-                      [GUARD_SPOT]: [
-                        Math.round(
-                          map.spawn.at[0] + Math.sin(map.spawn.heading) * 3,
-                        ),
-                        Math.round(
-                          map.spawn.at[1] + Math.cos(map.spawn.heading) * 3,
-                        ),
-                      ],
-                    },
-              });
-            }}
-          >
-            {map.spots[GUARD_SPOT] ? "Remove" : "Place"} Tower Guard
-          </button>
+          {PINNED_SPOTS.map((key) => (
+            <button
+              key={key}
+              type="button"
+              style={btn(!!map.spots[key])}
+              title={`${SPOT_NAMES[key]} stands only on islands with this spot`}
+              onClick={() => {
+                const { [key]: had, ...rest } = map.spots;
+                edit({
+                  spots: had
+                    ? rest
+                    : {
+                        ...map.spots,
+                        // A few steps in front of the spawn, clear of its
+                        // marker: drag them from there.
+                        [key]: [
+                          Math.round(
+                            map.spawn.at[0] + Math.sin(map.spawn.heading) * 3,
+                          ),
+                          Math.round(
+                            map.spawn.at[1] + Math.cos(map.spawn.heading) * 3,
+                          ),
+                        ],
+                      },
+                });
+              }}
+            >
+              {map.spots[key] ? "Remove" : "Place"} {SPOT_NAMES[key]}
+            </button>
+          ))}
           <button
             type="button"
             style={btn(false)}
@@ -1608,16 +1648,23 @@ function IslandBar({
         />{" "}
         combat
       </label>
-      <label style={{ color: "#8b8fa3" }}>
-        <input
-          type="checkbox"
-          checked={map.room === "dark"}
-          onChange={(e) =>
-            onEdit({ room: e.target.checked ? "dark" : undefined })
-          }
-        />{" "}
-        dark room
-      </label>
+      <span style={{ color: "#8b8fa3" }}>room</span>
+      <select
+        style={btn(false)}
+        value={map.room ?? ""}
+        onChange={(e) =>
+          onEdit({
+            room: (e.target.value || undefined) as RoomKind | undefined,
+          })
+        }
+      >
+        <option value="">none</option>
+        {ROOM_KINDS.map((kind) => (
+          <option key={kind} value={kind}>
+            {kind}
+          </option>
+        ))}
+      </select>
       {links.map(([k, link]) => (
         <span key={k} style={{ color: "#d6b8ff" }}>
           portal {k} →{" "}

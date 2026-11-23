@@ -144,6 +144,23 @@ gl_Position = projectionMatrix * mvPosition;`,
 }
 
 /**
+ * The Town's screen-door dither, as GLSL: `bayer4( gl_FragCoord.xy )` is a
+ * 4×4 ordered threshold, 0–1 (crisp at the Town's chunky pixels, nothing
+ * to sort). Discard where it's under how hidden a fragment should be.
+ * Guarded, so materials patched more than one way get it once.
+ */
+export const BAYER_GLSL = /* glsl */ `
+#ifndef TOWN_BAYER4
+#define TOWN_BAYER4
+float bayer4( vec2 frag ) {
+  ivec2 cell = ivec2( mod( frag, 4.0 ) );
+  float bayer[16] = float[16]( 0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0 );
+  return ( bayer[ cell.x + cell.y * 4 ] + 0.5 ) / 16.0;
+}
+#endif
+`;
+
+/**
  * Let the player be seen through a material: wherever it comes between
  * the camera and the player's herzie, only a scattered few of its
  * pixels are drawn (a screen-door dither, crisp like the rest of the
@@ -176,7 +193,8 @@ vSeeView = mvPosition.xyz;`,
         "#include <common>",
         /* glsl */ `#include <common>
 uniform vec3 uPlayerView;
-varying vec3 vSeeView;`,
+varying vec3 vSeeView;
+${BAYER_GLSL}`,
       )
       .replace(
         "#include <clipping_planes_fragment>",
@@ -194,11 +212,8 @@ varying vec3 vSeeView;`,
   float near = smoothstep( 3.2, 1.8, off );
   float hide = inFront * near;
   if ( hide > 0.0 ) {
-    // A 4×4 ordered dither: keep fewer pixels the more it's in the way.
-    ivec2 cell = ivec2( mod( gl_FragCoord.xy, 4.0 ) );
-    int i = cell.x + cell.y * 4;
-    float bayer[16] = float[16]( 0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0 );
-    if ( ( bayer[i] + 0.5 ) / 16.0 < hide * 0.82 ) discard;
+    // Keep fewer pixels the more it's in the way.
+    if ( bayer4( gl_FragCoord.xy ) < hide * 0.82 ) discard;
   }
 }`,
       );

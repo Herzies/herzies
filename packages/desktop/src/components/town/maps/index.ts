@@ -10,7 +10,10 @@ const files = import.meta.glob<unknown>("./*.json", {
   import: "default",
 });
 
-/** Check that every portal leads to an island there is. */
+/** Check that every portal leads to an island there is, and that the sky
+ * ships' route is whole: a Sky dock (`X`) on each of Town and the Wilds,
+ * and none anywhere else or twice over (a ship only plies between those
+ * two, and moors at the first dock it finds). */
 export function checkLinks(maps: Iterable<TownMap>): void {
   const all = [...maps];
   const ids = new Set(all.map((m) => m.id));
@@ -20,6 +23,17 @@ export function checkLinks(maps: Iterable<TownMap>): void {
       const to = map.portals?.[k]?.to;
       if (to && !ids.has(to)) errors.push(`${map.id} portal ${k}: no "${to}"`);
     }
+    const docks = map.objects.reduce(
+      (n, row) => n + row.split("X").length - 1,
+      0,
+    );
+    const wants = map.id === "home" || map.id === "wilds" ? 1 : 0;
+    if (docks !== wants)
+      errors.push(
+        wants
+          ? `${map.id}: needs one Sky dock, has ${docks}`
+          : `${map.id}: only Town and the Wilds have a Sky dock`,
+      );
   }
   if (errors.length) throw new Error(`maps: ${errors.join("; ")}`);
 }

@@ -26,6 +26,10 @@ import {
   type MerchantConfigForm,
   merchantConfigFromRecord,
   merchantFormToConfig,
+  WildsConfigFields,
+  type WildsConfigForm,
+  wildsConfigFromRecord,
+  wildsFormToConfig,
 } from "./event-fields";
 
 type SeriesType = EventSeries["type"];
@@ -51,12 +55,22 @@ type SeriesForm = {
   /** The Tower Guard's reward for the month's best climber, and the
    * herzies (comma separated names) never ranked for it. */
   tower: { topRewardItemId: string; excludeHerzies: string };
+  wilds: WildsConfigForm;
 };
 
-/** Starting points per type; everything is editable. */
+/** Starting points per type; everything is editable. `days` + `hours` is
+ * how long each lasts; `everyDays` and `atHour` (local) the default
+ * schedule, else weekly from the next midnight. */
 const PRESETS: Record<
   SeriesType,
-  { title: string; description: string; days: number }
+  {
+    title: string;
+    description: string;
+    days: number;
+    hours?: number;
+    everyDays?: number;
+    atHour?: number;
+  }
 > = {
   song_hunt: { title: "Song Hunt", description: "", days: 7 },
   boss_fight: {
@@ -74,18 +88,30 @@ const PRESETS: Record<
     description: "Climb as high as you can before the month is out.",
     days: 0,
   },
+  // Evenings, two hours.
+  wilds: {
+    title: "The Wilds",
+    description:
+      "Sofia III, the sky ship, sails from the Sky Dock for the Wilds. Anyone may fight anyone there.",
+    days: 0,
+    hours: 2,
+    everyDays: 1,
+    atHour: 19,
+  },
 };
 
 function newSeriesForm(type: SeriesType = "song_hunt"): SeriesForm {
   const preset = PRESETS[type];
-  // Next local midnight, a sensible default first start; a Tower starts on
-  // the 1st of next month (UTC), monthly and back to back.
+  // The next local midnight (or the preset's hour), a sensible default first
+  // start; a Tower starts on the 1st of next month (UTC), monthly and back to
+  // back.
   const tower = type === "tower";
   const start = new Date();
   if (tower) {
     start.setTime(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1));
   } else {
-    start.setHours(24, 0, 0, 0);
+    start.setHours(preset.atHour ?? 24, 0, 0, 0);
+    if (start.getTime() <= Date.now()) start.setDate(start.getDate() + 1);
   }
   return {
     type,
@@ -94,11 +120,11 @@ function newSeriesForm(type: SeriesType = "song_hunt"): SeriesForm {
     enabled: true,
     anchorAt: toDatetimeLocalValue(start),
     repeatUnit: tower ? "months" : "days",
-    intervalDays: "7",
+    intervalDays: String(preset.everyDays ?? 7),
     intervalMonths: "1",
     backToBack: tower,
     durationDays: String(preset.days),
-    durationHours: "0",
+    durationHours: String(preset.hours ?? 0),
     until: "",
     songHunt: { rewardItemId: "", maxClaims: "50" },
     bossFight: {
@@ -110,6 +136,7 @@ function newSeriesForm(type: SeriesType = "song_hunt"): SeriesForm {
     },
     merchant: { stock: [] },
     tower: { topRewardItemId: "power-dice-3", excludeHerzies: "slowtaxi" },
+    wilds: wildsConfigFromRecord({}),
   };
 }
 
@@ -148,6 +175,7 @@ function seriesToForm(s: EventSeries): SeriesForm {
         ? t.excludeHerzies.join(", ")
         : "",
     },
+    wilds: wildsConfigFromRecord(t),
   };
 }
 
@@ -176,6 +204,8 @@ function seriesPayload(form: SeriesForm): Record<string, unknown> | string {
     configTemplate = bossFightFormToConfig(form.bossFight, { template: true });
   } else if (form.type === "merchant") {
     configTemplate = merchantFormToConfig(form.merchant);
+  } else if (form.type === "wilds") {
+    configTemplate = wildsFormToConfig(form.wilds);
   } else if (form.type === "tower") {
     configTemplate = {
       topRewardItemId: form.tower.topRewardItemId || "power-dice-3",
@@ -495,6 +525,7 @@ function SeriesFormFields({
             <option value="boss_fight">boss fight</option>
             <option value="merchant">Good ol&apos; George</option>
             <option value="tower">the Tower</option>
+            <option value="wilds">The Wilds (sky ship, PvP)</option>
           </select>
         </div>
         <div>
@@ -709,6 +740,13 @@ function SeriesFormFields({
             Track and hints are set per week on each occurrence.
           </p>
         </div>
+      )}
+      {form.type === "wilds" && (
+        <WildsConfigFields
+          wilds={form.wilds}
+          setWilds={(wilds) => update({ wilds })}
+          fieldIdPrefix={idp}
+        />
       )}
       {form.type === "tower" && (
         <div className="grid sm:grid-cols-2 gap-4 border border-border rounded-sm p-4 bg-bg">

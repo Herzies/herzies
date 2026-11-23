@@ -10,9 +10,8 @@ import {
   type MentionableChatUser,
   RARITY_LABELS,
 } from "@herzies/shared";
-import type { RealtimeChannel } from "@supabase/supabase-js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { closeChannel, openChannel, realtimeClient } from "../lib/realtime";
+import { useBroadcast } from "../lib/realtime";
 import { chatUserColor, cn } from "../lib/utils";
 import { type ChatMessage, herzies, useWindowFocused } from "../tauri-bridge";
 import { BlockCaret, useBlockCaret } from "./BlockCaret";
@@ -284,7 +283,6 @@ export function ChatPanel({
   const ignoreScrollRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const channelRef = useRef<RealtimeChannel | null>(null);
   const itemHashPosRef = useRef<number>(-1);
   const userAtPosRef = useRef<number>(-1);
   const slashPosRef = useRef<number>(-1);
@@ -397,126 +395,46 @@ export function ChatPanel({
   //      broadcasts each new message to the private "chat" topic, and we ingest
   //      the payload directly (no per-message GET). Far more scalable than
   //      Postgres Changes, which runs an RLS check per client for every row.
-  //   2. Reconnect with a fresh auth token whenever the channel errors/closes.
+  //   2. Reconnect with a fresh auth token whenever the channel errors/closes
+  //      (useBroadcast).
   //   3. A polling fallback + refetch-on-focus so the chat always converges
   //      even if realtime is wedged.
+  const subscribed = useBroadcast<{ new_message: ChatMessage }>(isOnline, {
+    topic: () => "chat",
+    on: {
+      // Render straight from the broadcast payload — no GET per msg.
+      new_message: (msg) => {
+        if (msg?.id) herzies.chatIngest(msg);
+      },
+    },
+    // Resync on (re)connect to catch anything missed while down.
+    onSubscribed: () => herzies.chatFetch(),
+    label: "chat",
+  });
+
+  // Reopening the tray window (or refocusing) should show fresh messages
+  // immediately rather than waiting for the next poll.
   useEffect(() => {
     if (!isOnline) return;
-    let cancelled = false;
-    // Bumped on every (re)connect; status callbacks from a stale channel
-    // compare against this so they can't trigger spurious reconnects.
-    let generation = 0;
-    const topic = "chat";
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let reconnectAttempts = 0;
-
-    const clearReconnect = () => {
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
-    };
-
-    const scheduleReconnect = () => {
-      if (cancelled || reconnectTimer) return;
-      const delay = Math.min(30_000, 1000 * 2 ** reconnectAttempts);
-      reconnectAttempts += 1;
-      reconnectTimer = setTimeout(() => {
-        reconnectTimer = null;
-        connect();
-      }, delay);
-    };
-
-    const connect = () => {
-      if (cancelled) return;
-      const myGen = ++generation;
-      // Tear down any previous channel so we don't stack subscriptions.
-      if (channelRef.current) {
-        closeChannel(channelRef.current);
-        channelRef.current = null;
-      }
-      // Always pull a fresh token: a stale/expired access token is the most
-      // common reason realtime quietly stops delivering messages.
-      herzies
-        .getAuthConfig()
-        .then(async (config) => {
-          if (cancelled || myGen !== generation || !config) return;
-          const supabase = realtimeClient(config.supabaseUrl, config.anonKey);
-          supabase.realtime.setAuth(config.accessToken);
-          const fresh = await openChannel(supabase, topic, {
-            config: { private: true },
-          });
-          if (cancelled || myGen !== generation) {
-            closeChannel(fresh);
-            return;
-          }
-
-          // Private Broadcast topic — requires auth (setAuth above) and the
-          // Broadcast-authorization RLS policy on realtime.messages.
-          const channel = fresh
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .on(
-              "broadcast" as any,
-              { event: "new_message" } as any,
-              (payload: any) => {
-                if (cancelled || myGen !== generation) return;
-                const msg = payload?.payload as ChatMessage | undefined;
-                if (!msg?.id) return;
-                // Render straight from the broadcast payload — no GET per msg.
-                herzies.chatIngest(msg);
-              },
-            )
-            .subscribe((status, err) => {
-              if (cancelled || myGen !== generation) return;
-              if (status === "SUBSCRIBED") {
-                reconnectAttempts = 0;
-                // Resync on (re)connect to catch anything missed while down.
-                herzies.chatFetch();
-              } else if (
-                status === "CHANNEL_ERROR" ||
-                status === "TIMED_OUT" ||
-                status === "CLOSED"
-              ) {
-                console.warn("chat realtime:", status, err);
-                scheduleReconnect();
-              }
-            });
-
-          channelRef.current = channel;
-        })
-        .catch(() => scheduleReconnect());
-    };
-
-    connect();
-
-    // Reopening the tray window (or refocusing) should show fresh messages
-    // immediately rather than waiting for the next poll.
-    const onFocus = () => {
-      if (!cancelled) herzies.chatFetch();
-    };
+    const onFocus = () => herzies.chatFetch();
     window.addEventListener("focus", onFocus);
-
-    return () => {
-      cancelled = true;
-      generation += 1;
-      clearReconnect();
-      window.removeEventListener("focus", onFocus);
-      if (channelRef.current) {
-        closeChannel(channelRef.current);
-        channelRef.current = null;
-      }
-    };
+    return () => window.removeEventListener("focus", onFocus);
   }, [isOnline]);
 
   // Fallback: even if realtime is wedged, periodically reconcile the chat —
   // only while someone can see it. Hidden, it was 4 calls a minute for nothing:
   // the refetch on focus above brings it up to date the moment the window
-  // opens.
+  // opens. Every 15s while the channel is down; while it's subscribed,
+  // broadcasts deliver and this is only a minutely check against a socket
+  // that died without saying so.
   useEffect(() => {
     if (!isOnline || !focused) return;
-    const pollInterval = setInterval(() => herzies.chatFetch(), 15_000);
+    const pollInterval = setInterval(
+      () => herzies.chatFetch(),
+      subscribed ? 60_000 : 15_000,
+    );
     return () => clearInterval(pollInterval);
-  }, [isOnline, focused]);
+  }, [isOnline, focused, subscribed]);
 
   // "c" shortcut (or any caller) asked for the chat to open: focusing the
   // input expands the panel via its onFocus handler.

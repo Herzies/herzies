@@ -22,7 +22,8 @@ pub struct ManagedState {
     pub enrichment: Option<TrackEnrichment>,
     pub enrichment_requested_at: Option<Instant>,
     pub enrichment_in_flight: bool,
-    /// Album art from the system Now Playing session (`data:` URL), when available.
+    /// Album art from the system Now Playing session, when available: its
+    /// `herzies-art` protocol URL (see artwork.rs).
     pub system_album_art_url: Option<String>,
     /// Current artist's portrait photo (Spotify), fetched via our backend.
     /// Cleared and re-fetched only when the artist actually changes, so
@@ -67,6 +68,16 @@ pub struct ManagedState {
     pub xp_floor: Option<(f64, std::time::Instant)>,
     /// The class skills, from the last sync that carried them.
     pub skills: Vec<HerzieSkill>,
+    /// The loadouts, from the last sync or item response that carried them.
+    pub loadouts: Option<LoadoutState>,
+    /// Titles earned that the UI hasn't announced yet, oldest first. A sync
+    /// carries each once; they wait here until the UI acks them, so a window
+    /// that's closed when they arrive still gets to show them.
+    pub new_titles: Vec<String>,
+    /// Bumped when a wear changes `herzie.title` locally. `sync_tick` skips
+    /// the response's title if it moved, so a sync issued before the wear
+    /// can't put the old title back (and refresh the Town ticket twice).
+    pub title_epoch: u64,
     /// Friend profiles keyed by friend code (persisted when codes match).
     pub friends: HashMap<String, HerzieProfile>,
     /// Latest incoming trade from `/sync` (cleared when absent on a successful sync).
@@ -180,6 +191,9 @@ impl ManagedState {
             crystal: None,
             xp_floor: None,
             skills: Vec::new(),
+            loadouts: None,
+            new_titles: Vec::new(),
+            title_epoch: 0,
             friends: crate::storage::load_friends_cache(&friend_codes),
             pending_trade_request: None,
             pending_friend_request: None,
@@ -257,6 +271,8 @@ impl ManagedState {
         self.units.clear();
         self.bank_expansions = 0;
         self.emotes.clear();
+        self.loadouts = None;
+        self.new_titles.clear();
         self.friends.clear();
         self.pending_trade_request = None;
         self.pending_friend_request = None;
@@ -344,6 +360,8 @@ impl ManagedState {
             emotes: self.emotes.clone(),
             crystal: self.crystal.clone(),
             skills: self.skills.clone(),
+            loadouts: self.loadouts.clone(),
+            new_titles: self.new_titles.clone(),
             friends: self.friends.clone(),
             pending_trade_request: self.pending_trade_request.clone(),
             pending_friend_request: self.pending_friend_request.clone(),
@@ -386,6 +404,28 @@ pub fn crystal_full(crystal: &serde_json::Value) -> bool {
 /// every launch doesn't announce it again.
 pub fn crystal_became_full(before: Option<&serde_json::Value>, after: &serde_json::Value) -> bool {
     before.is_some_and(|b| !crystal_full(b)) && crystal_full(after)
+}
+
+impl ManagedState {
+    /// Take a Crystal state from the server unless it's older than the one we
+    /// hold: a sync that left before an attune comes back with the Crystal as
+    /// it was, and must not refill the one that was just emptied. Every attune
+    /// bumps `attunes`, so a lower count is always the older picture.
+    pub fn accept_crystal(&mut self, next: &serde_json::Value) -> bool {
+        if !next.is_object() {
+            return false;
+        }
+        let held = self
+            .crystal
+            .as_ref()
+            .and_then(|c| c["attunes"].as_u64())
+            .unwrap_or(0);
+        if next["attunes"].as_u64().unwrap_or(0) < held {
+            return false;
+        }
+        self.crystal = Some(next.clone());
+        true
+    }
 }
 
 #[cfg(test)]
@@ -507,6 +547,7 @@ mod tests {
             stage,
             class: None,
             stat_points: None,
+            title: None,
             total_minutes_listened: 0.0,
             genre_minutes: HashMap::new(),
             friend_code: "ABCD".to_string(),
@@ -546,6 +587,9 @@ mod tests {
             crystal: None,
             xp_floor: None,
             skills: Vec::new(),
+            loadouts: None,
+            new_titles: Vec::new(),
+            title_epoch: 0,
             friends: HashMap::new(),
             pending_trade_request: None,
             pending_friend_request: None,
@@ -601,27 +645,5 @@ mod tests {
     fn display_herzie_none_when_no_herzie() {
         let state = test_state(None, 5.0);
         assert!(state.display_herzie().is_none());
-    }
-}
-
-impl ManagedState {
-    /// Take a Crystal state from the server unless it's older than the one we
-    /// hold: a sync that left before an attune comes back with the Crystal as
-    /// it was, and must not refill the one that was just emptied. Every attune
-    /// bumps `attunes`, so a lower count is always the older picture.
-    pub fn accept_crystal(&mut self, next: &serde_json::Value) -> bool {
-        if !next.is_object() {
-            return false;
-        }
-        let held = self
-            .crystal
-            .as_ref()
-            .and_then(|c| c["attunes"].as_u64())
-            .unwrap_or(0);
-        if next["attunes"].as_u64().unwrap_or(0) < held {
-            return false;
-        }
-        self.crystal = Some(next.clone());
-        true
     }
 }

@@ -2,6 +2,7 @@ import {
   getItem,
   ItemTypeIcon,
   type ItemUnit,
+  isInBag,
   RARITY_COLORS,
   requiredDiceForLevel,
   SAFETY_PICK_ID,
@@ -140,7 +141,7 @@ export function DiceUpgradeOverlay({
   if (!dice) return null;
 
   const unworn = (itemId: string) =>
-    units.filter((u) => u.itemId === itemId && u.equippedSlot === null).length;
+    units.filter((u) => u.itemId === itemId && isInBag(u)).length;
   const diceLeft = unworn(diceItemId);
   const picksLeft = unworn(SAFETY_PICK_ID);
 
@@ -148,6 +149,8 @@ export function DiceUpgradeOverlay({
   for (const u of units) {
     const def = getItem(u.itemId);
     if (!def?.stats || Object.keys(def.stats).length === 0) continue;
+    // A copy the other loadout holds is put away: no rolling on it.
+    if (u.heldBy !== undefined) continue;
     const needs = requiredDiceForLevel(u.upgradeLevel);
     if (!needs) continue;
     const worn = u.equippedSlot !== null;

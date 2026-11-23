@@ -59,7 +59,7 @@ export async function GET(request: Request) {
     const { data, error } = await admin
       .from("herzies")
       .select(
-        "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, last_synced_at, share_listening, stat_stamina, stat_sonic, stat_euphony, stat_timing",
+        "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, last_synced_at, share_listening, stat_stamina, stat_sonic, stat_euphony, stat_timing, title",
       )
       .eq("friend_code", singleCode.toUpperCase().trim())
       .single();
@@ -110,7 +110,7 @@ export async function GET(request: Request) {
   const { data, error } = await admin
     .from("herzies")
     .select(
-      "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, last_synced_at, share_listening, stat_stamina, stat_sonic, stat_euphony, stat_timing",
+      "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, last_synced_at, share_listening, stat_stamina, stat_sonic, stat_euphony, stat_timing, title",
     )
     .in("friend_code", codes);
 
@@ -178,6 +178,8 @@ type HerzieRow = {
   stat_sonic: number;
   stat_euphony: number;
   stat_timing: number;
+  /** The title worn (00152), shown under the name. */
+  title?: string | null;
 };
 
 /**
@@ -256,6 +258,8 @@ function formatProfile(
       isListening: nowPlaying !== null,
     }),
     songHuntWins,
+    // Worn for all to see, like the name it sits under.
+    title: row.title ?? null,
   };
 }
 

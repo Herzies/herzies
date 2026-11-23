@@ -9,6 +9,9 @@
  * as before.
  */
 
+import { mitigate } from "./skills.ts";
+import { defReduction } from "./stats.ts";
+
 /** The stats a hit reads. */
 export type HitStats = {
   sonicPower: number;
@@ -314,6 +317,18 @@ export function stunMs(base: number, recent: number): number {
   return base / 2 ** Math.max(0, recent);
 }
 
+/** A hit of `raw` as a herzie with `def` (classDef: a Percussionist's
+ * counts more) takes it, less its buffs' `reductions`, under the overall
+ * clamp (MAX_DAMAGE_REDUCTION). Unrounded: the boss's hits and a duel's
+ * each finish it their own way. */
+export function mitigatedDamage(
+  raw: number,
+  def: number,
+  reductions: readonly number[] = [],
+): number {
+  return mitigate(raw, [defReduction(def), ...reductions]);
+}
+
 // ---------------------------------------------------------------------------
 // Melee: a Percussionist's stick, or an unarmed herzie's punch or body slam. Up
 // close, ahead of it, and only at the moment of contact: the client tells
@@ -558,6 +573,15 @@ export type Body = {
   chest: number;
   top: number;
 };
+
+/** A herzie's body, as a duel's casts are judged against it (the boss's
+ * and the mobs' are their own): about a training dummy's, its middle at
+ * the height a heal bolt aims for (HEAL_TARGET_HEIGHT). */
+export const HERZIE_BODY = {
+  radius: 0.5,
+  chest: 1,
+  top: 1.5,
+} as const;
 
 /** {@link bossReaches} for any standing body (a Tower mob): at its middle
  * by the wave rule, or anywhere on it. */

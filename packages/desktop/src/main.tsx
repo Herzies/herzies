@@ -56,10 +56,11 @@ import { QuestsView } from "./components/QuestsView";
 import { SettingsView } from "./components/SettingsView";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { SplashScreen } from "./components/SplashScreen";
-import { StatsTab } from "./components/StatsTab";
+import { StatsWindow, type StatsWindowTab } from "./components/StatsWindow";
 import { StoreView } from "./components/StoreView";
 import { type MenuLanding, TabBar, type View } from "./components/TabBar";
 import { TitleBar } from "./components/TitleBar";
+import { TitleToasts } from "./components/TitleToast";
 import { TradeView } from "./components/TradeView";
 import { BULLETIN_KEY } from "./components/town/Boards";
 import { setBagOpen, setLootRoom } from "./components/town/combat/lootFeed";
@@ -86,6 +87,7 @@ import { useOptimisticUnits } from "./hooks/useOptimisticUnits";
 import { useHomeStageOffset } from "./hooks/useStageAlignment";
 import { useTradeRequests } from "./hooks/useTradeRequests";
 import { onLogActivity } from "./lib/activity";
+import { setLoadouts } from "./lib/loadoutState";
 import { notify } from "./lib/notices";
 import { announcePickup } from "./lib/pickups";
 import { IS_MAC } from "./lib/platform";
@@ -98,9 +100,10 @@ import {
   downloadUpdate,
   herzies,
   installUpdate,
+  refreshFullscreen,
   type UpdateInstallEvent,
+  useFullscreen,
   useGhostMode,
-  useWindowFocused,
   useWindowVisible,
   useWindowWaking,
 } from "./tauri-bridge";
@@ -247,6 +250,7 @@ function App() {
     rawState.units,
     rawState.herzie?.stage ?? 1,
     rawState.herzie?.class ?? null,
+    bankCapacity(rawState.bankExpansions),
   );
   // Memoized on its inputs, each of which is itself identity-stable while its
   // content is unchanged (`rawState` via stableMerge, field by field) — so this
@@ -303,9 +307,14 @@ function App() {
   useEffect(() => {
     homeMode.setLocked(overlay !== null);
   }, [overlay]);
+  /** Real OS full screen (the menu's toggle, or the OS's own way in and
+   * out): the world's screens take the big window's layout, and the
+   * window's size is left alone until it's back out. */
+  const fullscreen = useFullscreen();
   /** Home in the big window (see setView): only once Home's in the world. */
   const [homeBigWanted, setHomeBig] = useState(false);
-  const homeBig = base === "home" && homeInWorld && homeBigWanted;
+  const homeBig =
+    base === "home" && homeInWorld && (homeBigWanted || fullscreen);
   /** Whether the window's big right now, for setView (set where it's
    * worked out, below). */
   const bigWindowRef = useRef(false);
@@ -334,6 +343,8 @@ function App() {
    * change gear. Either opens without closing the other; close one and the
    * other stays. */
   const [statsBeside, setStatsBeside] = useState(false);
+  /** The Stats window's tab: Stats or Titles. */
+  const [statsTab, setStatsTab] = useState<StatsWindowTab>("stats");
   /** The deck-and-bag window's tab: the one asked for last. */
   const [inventoryPanel, setInventoryPanel] = useState<HerzieTab>("deck");
   if (isInventory(overlay) && overlay !== inventoryPanel) {
@@ -407,7 +418,7 @@ function App() {
   const [testClassChoice, setTestClassChoice] = useState(false);
   // The Town's skill bar follows the class skills the app knows about —
   // or, under a Class Preview, that class's skills at Lv. 1 (practice on
-  // the training grounds works; the cave's server refuses them).
+  // Town's dummies works; the cave's server refuses them).
   useEffect(() => {
     const cls = classOverride ?? rawState.herzie?.class;
     setMySkills(
@@ -439,11 +450,11 @@ function App() {
     combat.blow = a.blow;
     setArmed(hasInstrument(attackCls, mainHand), instrumentOf(attackCls));
   }, [attackCls, attackStage, mainHand]);
-  // A new class, level or instrument: the Town server judges casts from the
-  // ticket (a class's attack, the instrument it needs; the Tower's level
-  // gap), so it gets a fresh one. After a beat, so the server has the
-  // change saved.
-  const ticketKey = `${rawState.herzie?.class ?? ""}|${rawState.herzie?.level ?? 0}|${rawState.equipped.main_hand ?? ""}`;
+  // A new class, level, instrument or title: the Town server judges casts
+  // from the ticket (a class's attack, the instrument it needs; the Tower's
+  // level gap) and shows the title worn from it, so it gets a fresh one.
+  // After a beat, so the server has the change saved.
+  const ticketKey = `${rawState.herzie?.class ?? ""}|${rawState.herzie?.level ?? 0}|${rawState.equipped.main_hand ?? ""}|${rawState.herzie?.title ?? ""}`;
   const firstTicketKey = useRef(ticketKey);
   useEffect(() => {
     if (firstTicketKey.current === ticketKey) return;
@@ -538,7 +549,6 @@ function App() {
     version: string;
     promise: Promise<void>;
   } | null>(null);
-  const focused = useWindowFocused();
   const ghostMode = useGhostMode();
 
   // The cave's loot asks the bank before picking up, as Home's drops do.
@@ -565,6 +575,10 @@ function App() {
   useEffect(() => {
     setCrystal(state.crystal);
   }, [state.crystal]);
+  // The loadouts, for the Deck's tabs and their hover card.
+  useEffect(() => {
+    setLoadouts(state.loadouts);
+  }, [state.loadouts]);
 
   const addLog = useCallback((message: string) => {
     const time = new Date().toISOString();
@@ -667,23 +681,6 @@ function App() {
     return () => root.remove("boss-mode", "merchant-mode");
   }, [base, eventsScreen]);
 
-  // The tab only needs to know whether a song hunt is running right now, which
-  // /events-active alone answers — and it's an Edge Function, so it's cheap and
-  // fast. This used to also fetch /events/previous-hunt (a slow Vercel route)
-  // purely "for parity with EventsView" and discard the result.
-  const refreshEventIndicator = useCallback(() => {
-    herzies
-      .fetchActiveEvents()
-      .then(({ events }) => {
-        // Not the monthly Tower: it's always on, so it would keep the
-        // button sparkling all month.
-        setEventsRunning(events.filter((e) => e.type !== "tower").length);
-      })
-      .catch(() => {
-        setEventsRunning(0);
-      });
-  }, []);
-
   // CSS keyframe loops (marquees, floating drops) can't read the hook, so
   // flag the root and let globals.css pause them while the window is off
   // screen. Unfocused but visible, they keep going.
@@ -692,17 +689,6 @@ function App() {
   useEffect(() => {
     document.documentElement.toggleAttribute("data-window-hidden", !visible);
   }, [visible]);
-
-  // One effect, not two: a second copy gated on `state.isOnline` alone fired a
-  // duplicate of this every time connectivity flipped while the window was
-  // open, which is part of why opening the tray produced a burst of identical
-  // requests.
-  useEffect(() => {
-    if (!focused || !state.isOnline) return;
-    refreshEventIndicator();
-    const interval = setInterval(refreshEventIndicator, 60_000);
-    return () => clearInterval(interval);
-  }, [focused, state.isOnline, refreshEventIndicator]);
 
   // Back to the world when logging back in
   const prevOnline = useRef(state.isOnline);
@@ -903,6 +889,13 @@ function App() {
     [switchView],
   );
 
+  // Stable, so the always-mounted InventoryView (memo) doesn't re-render on
+  // every App render.
+  const onInventoryPanel = useCallback(
+    (p: string) => switchView(p as HerzieTab),
+    [switchView],
+  );
+
   /** "c" shortcut: go home and focus the chat. Mid-trade this routes through
    * the leave-trade confirmation like every other view switch. */
   /** The Town's 3D world is on screen: it fills the window, and the chat
@@ -921,7 +914,7 @@ function App() {
   const townExpanded = useTownExpanded();
   // Home has its own say (homeBig): it's big if it came from the big
   // Town, or was made big there.
-  const bigWindow = (townWorld && townExpanded) || homeBig;
+  const bigWindow = (townWorld && (townExpanded || fullscreen)) || homeBig;
   bigWindowRef.current = bigWindow;
   // Stats only stands beside the Herzie window in the big window.
   if (statsBeside && (!bigWindow || !isInventory(overlay))) {
@@ -934,18 +927,28 @@ function App() {
     if (base === "home") setHomeBig((b) => !b);
     else toggleTownExpanded();
   }, [base]);
+  // Not in full screen: there's no window size to pick there.
   const canToggleWindow =
-    canExpandTown && (townWorld || (base === "home" && homeInWorld));
+    canExpandTown &&
+    !fullscreen &&
+    (townWorld || (base === "home" && homeInWorld));
   // Not while the world loads at launch: the window opens big
   // (tauri.conf.json) and stays so until there's a screen to size it for.
   // Nor before the first state arrives (a reload): its placeholder has no
   // herzie, which would read as logged out and shrink the window for a beat.
+  // Nor in full screen: the OS has the window's frame, and hands back the
+  // one from before on the way out, which this then sizes for the screen.
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || fullscreen) return;
     // Logged out there's no world coming: the small window at once.
     if (worldLoading && rawState.herzie) return;
     herzies.setTownExpanded(bigWindow).catch(() => {});
-  }, [bigWindow, worldLoading, rawState.herzie, hydrated]);
+  }, [bigWindow, worldLoading, rawState.herzie, hydrated, fullscreen]);
+  // The menu says Full screen or Exit full screen: ask the window afresh as
+  // it opens, in case a resize went by unheard.
+  useEffect(() => {
+    if (menuOpen) refreshFullscreen();
+  }, [menuOpen]);
   // The boss's end screen is up over the Town: the chat steps aside.
   const endScreen = endScreenUp && townWorld;
 
@@ -1063,8 +1066,7 @@ function App() {
       const v = shortcuts[key];
       if (!v) return;
       if (v === "home" && homeBlocked) return;
-      // Stats once the server knows stat points, Skills once there's a class.
-      if (v === "stats" && !herzie.statPoints) return;
+      // Skills once there's a class.
       if (v === "skills" && !herzie.class) return;
       switchView(v, true);
     };
@@ -1382,6 +1384,7 @@ function App() {
             debugForceMerchant={debugMerchantOverride}
             debugForceTreatTrader={debugTreatTraderOverride}
             onScreenChange={setEventsScreen}
+            onEventsRunning={setEventsRunning}
             equipped={
               classOverride
                 ? withClassGear(state.equipped, classOverride)
@@ -1393,6 +1396,7 @@ function App() {
             playerSeed={herzie?.friendCode}
             playerStage={stageOverride ?? herzie?.stage}
             playerStatPoints={herzie?.statPoints}
+            playerClass={classOverride ?? herzie?.class ?? null}
             playerProfile={
               herzie
                 ? {
@@ -1403,6 +1407,7 @@ function App() {
                     xp: herzie.xp,
                     multipliers: state.multipliers,
                     classLabel: classLabelOf(classOverride ?? herzie.class),
+                    title: herzie.title ?? null,
                     nowPlaying: state.nowPlaying,
                   }
                 : undefined
@@ -1564,13 +1569,22 @@ function App() {
               setView={(v) => switchView(v, true)}
               menuOpen={menuOpen}
               setMenuOpen={setMenuOpen}
-              hasStats={!!herzie.statPoints}
               hasSkills={!!herzie.class}
               landing={menuLanding}
               compact={bigWindow}
               windowSize={
                 canToggleWindow
                   ? { expanded: bigWindow, onToggle: toggleWindow }
+                  : null
+              }
+              fullscreen={
+                isTauri()
+                  ? {
+                      on: fullscreen,
+                      onToggle: () => {
+                        herzies.setFullscreen(!fullscreen).catch(() => {});
+                      },
+                    }
                   : null
               }
               // Only once the server knows stat points: before that,
@@ -1617,14 +1631,14 @@ function App() {
         >
           {selfProfile ? (
             <ProfileView
-              profile={
+              profile={{
                 // The synced profile's nowPlaying.albumArtUrl only ever holds
                 // Last.fm's art (see sync_tick in lib.rs — the local system
                 // artwork data: URL is never synced). Prefer the live local
                 // value here, which does include it, whenever it's still the
                 // same track — avoids a stale mismatch right after a track
                 // change, before the next sync tick catches up.
-                selfProfile.nowPlaying &&
+                ...(selfProfile.nowPlaying &&
                 state.nowPlaying &&
                 state.nowPlaying.title === selfProfile.nowPlaying.title &&
                 state.nowPlaying.artist === selfProfile.nowPlaying.artist &&
@@ -1636,8 +1650,10 @@ function App() {
                         albumArtUrl: state.nowPlaying.albumArtUrl,
                       },
                     }
-                  : selfProfile
-              }
+                  : selfProfile),
+                // The title just put on, before the profile's next fetch.
+                title: herzie.title ?? null,
+              }}
               isSelf
               isFriend
               stageOverride={stageOverride}
@@ -1701,14 +1717,14 @@ function App() {
             slot={inventorySlot}
             open={isInventory(overlay)}
             panel={inventoryPanel}
-            onPanelChange={(p) => switchView(p as HerzieTab)}
+            onPanelChange={onInventoryPanel}
             onTabLanded={onTabLanded}
             wide={bigWindow}
           />
         </>
       )}
 
-      {herzie?.statPoints && (
+      {herzie && (
         <OverlayWindow
           open={overlay === "stats" || statsBesideOpen}
           onClosed={windowClosed("stats")}
@@ -1720,16 +1736,17 @@ function App() {
           inTown={townWorld}
           fit
         >
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-            <StatsTab
-              // Read off the copies, so each worn one counts at its own
-              // upgrade level.
-              stats={getHerzieStatsFromUnits(state.units)}
-              level={herzie.level}
-              points={herzie.statPoints}
-              onLog={addLog}
-            />
-          </div>
+          <StatsWindow
+            herzie={herzie}
+            // Read off the copies, so each worn one counts at its own
+            // upgrade level.
+            stats={getHerzieStatsFromUnits(state.units)}
+            open={overlay === "stats" || statsBesideOpen}
+            tab={statsTab}
+            onTabChange={setStatsTab}
+            refreshKey={(rawState.newTitles ?? []).join()}
+            onLog={addLog}
+          />
         </OverlayWindow>
       )}
 
@@ -2033,6 +2050,16 @@ function App() {
 
       {/* Short messages that matter now (lib/notices.ts). */}
       <Notices />
+      {/* New titles, announced (TitleToast). */}
+      {herzie && (
+        <TitleToasts
+          newTitles={rawState.newTitles ?? []}
+          onOpenTitles={() => {
+            setStatsTab("titles");
+            if (overlay !== "stats" && !statsBesideOpen) switchView("stats");
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -2040,11 +2067,13 @@ function App() {
 // Pipes the Rust side's `log` output into this webview's console, so backend
 // and frontend lines interleave in devtools instead of only reaching the
 // terminal running `tauri dev`. The plugin's Webview target emits events; this
-// is the subscriber that turns them into console output, and without it that
-// target goes nowhere.
-attachConsole().catch(() => {
-  // Logging is a debugging aid, never a reason to fail startup.
-});
+// is the subscriber that turns them into console output. Dev builds only, as
+// is that target (lib.rs `log_targets`).
+if (import.meta.env.DEV) {
+  attachConsole().catch(() => {
+    // Logging is a debugging aid, never a reason to fail startup.
+  });
+}
 
 const root = createRoot(document?.getElementById("root") ?? document.body);
 root.render(<App />);

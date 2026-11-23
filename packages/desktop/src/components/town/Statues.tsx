@@ -6,9 +6,11 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { ambient } from "./ambient";
 import type { Champion } from "./champion";
+import { homeMode } from "./homeMode";
 import { cellCenter, facingAt, groundY, objectAt, type TownMap } from "./map";
 import { nameOpacity } from "./nameFade";
 import { townSave } from "./runtime";
+import { WORN_TITLE_COLOUR } from "./TitleLine";
 
 export type { Champion } from "./champion";
 
@@ -70,6 +72,8 @@ function Statue({
   // The plaque fades in as you come near.
   const plaque = useRef<HTMLDivElement>(null);
   useFrame(() => {
+    // Settled at Home the plaque's already faded out (see nameOpacity).
+    if (homeMode.full) return;
     if (plaque.current) {
       plaque.current.style.opacity = String(
         nameOpacity(Math.hypot(townSave.x - x, townSave.z - z)),
@@ -105,10 +109,12 @@ function Statue({
         zIndexRange={[20, 0]}
         style={{ pointerEvents: "none" }}
       >
+        {/* "champion" over the name, grey and smaller, as a worn title
+            reads over a herzie's. */}
         <div
           ref={plaque}
-          style={{ opacity: 0 }}
-          className="whitespace-nowrap text-center text-[9px] leading-tight text-white/70 [text-shadow:0_1px_3px_#000,0_0_6px_#000]"
+          style={{ opacity: 0, color: WORN_TITLE_COLOUR }}
+          className="whitespace-nowrap text-center text-[9px] leading-tight [text-shadow:0_1px_3px_#000,0_0_6px_#000]"
         >
           champion
           <div className="text-[10px] text-white">{champion.name}</div>

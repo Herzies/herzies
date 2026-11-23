@@ -59,8 +59,9 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
+        // The only page the app loads. The dev pages (sandbox, map editor
+        // and the rest) are served by `vite dev` and stay out of the build.
         main: resolve(__dirname, "src/index.html"),
-        sandbox: resolve(__dirname, "src/sandbox.html"),
       },
     },
   },

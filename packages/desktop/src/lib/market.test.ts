@@ -76,7 +76,8 @@ describe("matchMarketItems", () => {
   });
 
   it("finds class gear, which trades like anything else", () => {
-    expect(matchMarketItems("lute")).toEqual(["lute"]);
+    // The Wilds' build of it too (crafted, never dropped, but traded).
+    expect(matchMarketItems("lute")).toEqual(["lute", "wildwood-lute"]);
   });
 
   it("matches nothing for nothing", () => {

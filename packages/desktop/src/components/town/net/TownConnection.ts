@@ -1,6 +1,7 @@
 import {
   castSeqOf,
   castsBetween,
+  type DuelClientOp,
   decodeSnapshot,
   EntityBuffer,
   encodeCastFrame,
@@ -75,6 +76,8 @@ export type RemotePlayer = {
   down: boolean;
   /** A game master: a "GM" mark goes left of the name. */
   gm: boolean;
+  /** The title it wears (titles.ts), over its name; null: none. */
+  title: string | null;
   /** An emote they played, not yet shown (null: none). */
   pendingEmote: string | null;
 };
@@ -100,6 +103,12 @@ export type TownConnectionOptions = {
   readState: () => TownState;
   /** The server refused a move: put the herzie back here. */
   onCorrect?: (x: number, z: number) => void;
+  /** About to leave this room (another island, out of the Town), with the
+   * socket still open: last words go now (a duel yielded). */
+  onLeaving?: () => void;
+  /** A snapshot stamped with the server's time `serverMs` arrived (local
+   * wall time now): for clocks that outlive the room (the sky ship's). */
+  onServerTime?: (serverMs: number) => void;
 };
 
 /** How often to ping; the server drops sockets silent for 45 s. */
@@ -141,6 +150,9 @@ export class TownConnection {
   private ws: WebSocket | null = null;
   private wanted = false;
   private shard = 0;
+  /** A room named by its shard (a sky ship's: shard = the ship), never
+   * spilled into the next when it's full; null: first that fits. */
+  private fixedShard: number | null = null;
   private attempt = 0;
   private ticket: TownTicket | null = null;
   /** The map the held ticket was issued for. */
@@ -178,20 +190,24 @@ export class TownConnection {
   start() {
     if (this.wanted) return;
     this.wanted = true;
-    this.shard = 0;
+    this.shard = this.fixedShard ?? 0;
     this.attempt = 0;
     // Coming back to the Town after being replaced takes the herzie back.
     if (this.status === "outdated") return;
     this.connect();
   }
 
-  /** Move to another island's room: everyone there instead of here. */
-  setMap(map: TownMapId) {
-    if (this.opts.map === map) return;
+  /** Move to another island's room: everyone there instead of here.
+   * `shard`: that room exactly (a sky ship's deck), not the first with
+   * space. */
+  setMap(map: TownMapId, shard?: number) {
+    if (this.opts.map === map && (shard ?? null) === this.fixedShard) return;
     this.opts = { ...this.opts, map };
-    this.shard = 0;
+    this.fixedShard = shard ?? null;
+    this.shard = shard ?? 0;
     this.attempt = 0;
     this.clearRetry();
+    this.leaving();
     this.teardown(1000, "moving");
     if (this.wanted && this.status !== "outdated") this.connect();
   }
@@ -200,8 +216,14 @@ export class TownConnection {
   stop() {
     this.wanted = false;
     this.clearRetry();
+    this.leaving();
     this.teardown(1000, "bye");
     if (this.status !== "outdated") this.setStatus("idle");
+  }
+
+  /** Last words to the room we're leaving, while they can still go. */
+  private leaving() {
+    if (this.status === "online") this.opts.onLeaving?.();
   }
 
   /** Shown dimmed to others ("away"). Sent at once. */
@@ -320,7 +342,8 @@ export class TownConnection {
         // A room that is one shared fight has no next shard: it's full.
         if (
           TOWN_SINGLE_SHARD.has(this.opts.map) ||
-          TOWN_INSTANCED_MAPS.has(this.opts.map)
+          TOWN_INSTANCED_MAPS.has(this.opts.map) ||
+          this.fixedShard !== null
         ) {
           this.setStatus("offline");
           this.opts.onRefused?.("full");
@@ -417,7 +440,11 @@ export class TownConnection {
         this.attempt = 0;
         this.remotes.clear();
         for (const p of m.players) this.addRemote(p);
-        if (m.fight) this.clock.observe(m.fight.now, performance.now());
+        // Set the clock before anything it times: a lone herzie gets no
+        // snapshots to set it by, and an unset clock read the Wilds'
+        // shield (in server time) as some 57 years off.
+        if (m.now !== undefined) this.clock.observe(m.now, performance.now());
+        else if (m.fight) this.clock.observe(m.fight.now, performance.now());
         this.opts.onMessage?.(m);
         this.setStatus("online");
         this.emit();
@@ -434,6 +461,7 @@ export class TownConnection {
           r.look = m.player.look;
           r.down = !!m.player.down;
           r.gm = !!m.player.gm;
+          r.title = m.player.title ?? null;
         } else if (m.player.id !== this.you) this.addRemote(m.player);
         this.emit();
         return;
@@ -471,7 +499,8 @@ export class TownConnection {
     this.sendJson({ t: "skill", skill, seq, yaw, pitch });
   }
 
-  /** In the boss room: whether you're playing music. */
+  /** In the boss room, the Tower or on the Wilds: whether you're playing
+   * music. */
   sendTune(on: boolean) {
     if (this.status !== "online") return;
     this.sendJson({ t: "tune", on });
@@ -489,10 +518,25 @@ export class TownConnection {
     this.sendJson({ t: "emote", e });
   }
 
+  /** About a duel: a challenge, an answer, a yield, a rematch. */
+  sendDuel(op: DuelClientOp) {
+    if (this.status !== "online") return;
+    this.sendJson({ t: "duel", ...op });
+  }
+
   /** Knocked out in a raid, and giving up (no reward). */
   sendForfeit() {
     if (this.status !== "online") return;
     this.sendJson({ t: "forfeit" });
+  }
+
+  /** On the Wilds: take the dropped card `id`. The room judges reach and
+   * whose it is first; the answer is a `wildsTaken` or a `wildsRefused`.
+   * False if there's no room to ask. */
+  sendWildsTake(id: string): boolean {
+    if (this.status !== "online") return false;
+    this.sendJson({ t: "wildsTake", id });
+    return true;
   }
 
   /** In the Tower, on a cleared floor: on to the next. */
@@ -523,6 +567,7 @@ export class TownConnection {
       castTimes: existing?.castTimes ?? [],
       down: !!p.down,
       gm: !!p.gm,
+      title: p.title ?? null,
       pendingEmote: existing?.pendingEmote ?? null,
     });
   }
@@ -532,6 +577,7 @@ export class TownConnection {
     if (!snap) return;
     const now = performance.now();
     this.clock.observe(snap.serverTime, now);
+    this.opts.onServerTime?.(snap.serverTime);
     for (const e of snap.entries) {
       if (e.id === this.you) continue;
       const r = this.remotes.get(e.id);

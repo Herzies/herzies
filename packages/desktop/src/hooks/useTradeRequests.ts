@@ -1,6 +1,7 @@
-import type { RealtimeChannel } from "@supabase/supabase-js";
-import { useEffect, useRef } from "react";
-import { closeChannel, openChannel, realtimeClient } from "../lib/realtime";
+import type { TradeUpdate } from "@herzies/shared";
+import { useEffect } from "react";
+import { useBroadcast } from "../lib/realtime";
+import { publishTradeUpdate, setTradeChannelLive } from "../lib/tradeLive";
 import { herzies, type PendingTradeRequest } from "../tauri-bridge";
 
 /**
@@ -27,108 +28,32 @@ import { herzies, type PendingTradeRequest } from "../tauri-bridge";
  *     cover this, at ~17k calls a day per idle install; it was dropped
  *     without first confirming broadcasts survive a long stay in the tray.)
  *
- * Connection handling mirrors ChatPanel's: fresh token per connect (a stale
- * access token is the usual reason realtime goes quiet), a generation counter
- * so a stale channel's status callbacks can't trigger reconnects, and capped
- * exponential backoff.
+ * The same channel carries every change to a trade you're in
+ * (`trade_update`, 00157_trade_live_updates.sql), handed to an open
+ * TradeView through lib/tradeLive.
+ *
+ * Connection handling (fresh token per connect, generation counter, capped
+ * backoff) is useBroadcast's, shared with ChatPanel.
  */
 export function useTradeRequests(isOnline: boolean) {
-  const channelRef = useRef<RealtimeChannel | null>(null);
-
-  useEffect(() => {
-    if (!isOnline) return;
-    let cancelled = false;
-    let generation = 0;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let reconnectAttempts = 0;
-
-    const clearReconnect = () => {
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
-    };
-
-    const scheduleReconnect = () => {
-      if (cancelled || reconnectTimer) return;
-      const delay = Math.min(30_000, 1000 * 2 ** reconnectAttempts);
-      reconnectAttempts += 1;
-      reconnectTimer = setTimeout(() => {
-        reconnectTimer = null;
-        connect();
-      }, delay);
-    };
-
-    const connect = () => {
-      if (cancelled) return;
-      const myGen = ++generation;
-      if (channelRef.current) {
-        closeChannel(channelRef.current);
-        channelRef.current = null;
-      }
-      herzies
-        .getAuthConfig()
-        .then(async (config) => {
-          if (cancelled || myGen !== generation || !config) return;
-          // Shared with ChatPanel: one socket, one channel per feature.
-          const supabase = realtimeClient(config.supabaseUrl, config.anonKey);
-          supabase.realtime.setAuth(config.accessToken);
-
-          // Per-user topic. The Broadcast-authorization policy on
-          // realtime.messages checks this against auth.uid(), so subscribing to
-          // someone else's topic yields nothing rather than their invites.
-          const fresh = await openChannel(supabase, `trade:${config.userId}`, {
-            config: { private: true },
-          });
-          if (cancelled || myGen !== generation) {
-            closeChannel(fresh);
-            return;
-          }
-          const channel = fresh
-            // supabase-js types "broadcast" as a literal union its own .on()
-            // overloads won't accept for a custom event name, so the arguments
-            // are cast. Same shape as ChatPanel's chat subscription.
-            .on(
-              // biome-ignore lint/suspicious/noExplicitAny: see above
-              "broadcast" as any,
-              // biome-ignore lint/suspicious/noExplicitAny: see above
-              { event: "trade_request" } as any,
-              (payload: { payload?: PendingTradeRequest }) => {
-                if (cancelled || myGen !== generation) return;
-                const request = payload?.payload;
-                if (!request?.tradeId) return;
-                void herzies.tradeRequestIngest(request);
-              },
-            )
-            .subscribe((status, err) => {
-              if (cancelled || myGen !== generation) return;
-              if (status === "SUBSCRIBED") {
-                reconnectAttempts = 0;
-              } else if (
-                status === "CHANNEL_ERROR" ||
-                status === "TIMED_OUT" ||
-                status === "CLOSED"
-              ) {
-                console.warn("trade realtime:", status, err);
-                scheduleReconnect();
-              }
-            });
-
-          channelRef.current = channel;
-        })
-        .catch(() => scheduleReconnect());
-    };
-
-    connect();
-
-    return () => {
-      cancelled = true;
-      generation += 1;
-      clearReconnect();
-      if (channelRef.current) {
-        closeChannel(channelRef.current);
-        channelRef.current = null;
-      }
-    };
-  }, [isOnline]);
+  const live = useBroadcast<{
+    trade_request: PendingTradeRequest;
+    trade_update: TradeUpdate;
+  }>(isOnline, {
+    // Per-user topic. The Broadcast-authorization policy on realtime.messages
+    // checks this against auth.uid(), so subscribing to someone else's topic
+    // yields nothing rather than their invites.
+    topic: (userId) => `trade:${userId}`,
+    on: {
+      trade_request: (request) => {
+        if (!request?.tradeId) return;
+        void herzies.tradeRequestIngest(request);
+      },
+      trade_update: (update) => {
+        if (update?.id) publishTradeUpdate(update);
+      },
+    },
+    label: "trade",
+  });
+  useEffect(() => setTradeChannelLive(live), [live]);
 }

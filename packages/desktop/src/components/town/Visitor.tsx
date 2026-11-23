@@ -45,15 +45,23 @@ const RING_OPACITY = 0.85;
 const RING_FADE = 8;
 const RING_GROW_FROM = 0.85;
 
+/** Where each visitor stands now (a roamer moves), by spot key: what its
+ * body (VisitorBody) follows. */
+const standingAt = new Map<string, { x: number; y: number; z: number }>();
+
 /**
  * A visitor's spot: while they're in town, the visitor themselves,
- * breathing, and solid enough to bump into, with their name over their
- * head (which opens them). As you come near they turn to look at you, and a
- * ring in their colour fades in round their feet at the same moment; it
- * fades away as you go. Away, there's nothing. A few residents (ROAMERS)
- * wander round their spot and dance now and then, the ring and name going
- * with them. `bare` (the website's Town) leaves out the ring, the name and
- * the "!".
+ * breathing, with their name over their head (which opens them). As you
+ * come near they turn to look at you, and a ring in their colour fades in
+ * round their feet at the same moment; it fades away as you go. Away,
+ * there's nothing. A few residents (ROAMERS) wander round their spot and
+ * dance now and then, the ring and name going with them. `bare` (the
+ * website's Town, or seen from a sky ship) leaves out the ring, the name
+ * and the "!".
+ *
+ * What's seen is drawn outside the physics, so it's there from a ship
+ * before you step ashore and stays put as you do; what you bump into is
+ * VisitorBody, in the island's physics.
  */
 export function Visitor({
   spot,
@@ -91,6 +99,12 @@ export function Visitor({
     return s;
   }, [standing, card.type, card.eventId, ground]);
   useEffect(() => () => herzie?.dispose(), [herzie]);
+  useEffect(
+    () => () => {
+      standingAt.delete(spot.key);
+    },
+    [spot.key],
+  );
 
   const roamer = map ? ROAMERS[card.type] : undefined;
   // biome-ignore lint/correctness/useExhaustiveDependencies: a fresh walk per herzie
@@ -106,7 +120,6 @@ export function Visitor({
   const follow = useRef<Group>(null);
   const ring = useRef<Mesh>(null);
   const ringShown = useRef(0);
-  const body = useRef<RapierRigidBody>(null);
 
   // The name fades in as you come near.
   const name = useRef<HTMLDivElement>(null);
@@ -125,15 +138,15 @@ export function Visitor({
         dt,
       });
       y = groundY(map, roam.at.x, roam.at.z);
-      herzie.root.position.set(roam.at.x, y, roam.at.z);
       herzie.dancing = roam.dancing;
-      body.current?.setNextKinematicTranslation({
-        x: roam.at.x,
-        y,
-        z: roam.at.z,
-      });
     }
     const here = roam?.at ?? at;
+    const was = standingAt.get(spot.key);
+    if (was) {
+      was.x = here.x;
+      was.y = y;
+      was.z = here.z;
+    } else standingAt.set(spot.key, { x: here.x, y, z: here.z });
     follow.current?.position.set(here.x, y, here.z);
     const dx = townSave.x - here.x;
     const dz = townSave.z - here.z;
@@ -198,19 +211,7 @@ export function Visitor({
   };
   return (
     <>
-      {herzie && (
-        <>
-          <primitive object={herzie.root} />
-          <RigidBody
-            ref={body}
-            type={roam ? "kinematicPosition" : "fixed"}
-            colliders={false}
-            position={[at.x, ground, at.z]}
-          >
-            <CylinderCollider args={[1, 0.9 * size]} position={[0, 1, 0]} />
-          </RigidBody>
-        </>
-      )}
+      {herzie && <primitive object={herzie.root} />}
       <group ref={follow} position={[at.x, ground, at.z]}>
         {herzie && !bare && (
           <mesh
@@ -274,5 +275,35 @@ export function Visitor({
         )}
       </group>
     </>
+  );
+}
+
+/** A visitor you can bump into: a post where they stand (following a
+ * roamer about), in the island's physics. Only while they're there. */
+export function VisitorBody({
+  spot,
+  ground = 0,
+}: {
+  spot: TownSpot;
+  ground?: number;
+}) {
+  const { card, at, standing } = spot;
+  const roams = !!ROAMERS[card.type];
+  const size = card.type === "boss_fight" ? BOSS_SCALE : 1;
+  const body = useRef<RapierRigidBody>(null);
+  useFrame(() => {
+    const p = roams ? standingAt.get(spot.key) : undefined;
+    if (p) body.current?.setNextKinematicTranslation(p);
+  });
+  if (!standing) return null;
+  return (
+    <RigidBody
+      ref={body}
+      type={roams ? "kinematicPosition" : "fixed"}
+      colliders={false}
+      position={[at.x, ground, at.z]}
+    >
+      <CylinderCollider args={[1, 0.9 * size]} position={[0, 1, 0]} />
+    </RigidBody>
   );
 }

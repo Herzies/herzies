@@ -66,10 +66,40 @@
       "import": "./dist/emotes.js",
       "require": "./dist/emotes.js"
     },
+    "./duel": {
+      "types": "./dist/duel.d.ts",
+      "import": "./dist/duel.js",
+      "require": "./dist/duel.js"
+    },
+    "./titles": {
+      "types": "./dist/titles.d.ts",
+      "import": "./dist/titles.js",
+      "require": "./dist/titles.js"
+    },
+    "./loadouts": {
+      "types": "./dist/loadouts.d.ts",
+      "import": "./dist/loadouts.js",
+      "require": "./dist/loadouts.js"
+    },
     "./tower": {
       "types": "./dist/tower.d.ts",
       "import": "./dist/tower.js",
       "require": "./dist/tower.js"
+    },
+    "./wilds": {
+      "types": "./dist/wilds.d.ts",
+      "import": "./dist/wilds.js",
+      "require": "./dist/wilds.js"
+    },
+    "./wilds-pvp": {
+      "types": "./dist/wilds-pvp.d.ts",
+      "import": "./dist/wilds-pvp.js",
+      "require": "./dist/wilds-pvp.js"
+    },
+    "./wilds-loot": {
+      "types": "./dist/wilds-loot.d.ts",
+      "import": "./dist/wilds-loot.js",
+      "require": "./dist/wilds-loot.js"
     },
     "./medea": {
       "types": "./dist/medea.d.ts",

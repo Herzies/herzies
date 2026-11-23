@@ -10,7 +10,16 @@
 #   scripts/local.sh boss [HP] [LOBBY]  open the cave's lobby now; the fight locks in LOBBY
 #                                       minutes (default 3) with HP per herzie (default 20000)
 #   scripts/local.sh tower [HOURS]      open the Tower (its portal in Town) for a few hours
+#   scripts/local.sh wilds [HOURS] [EVERY]  run the sky ship to the Wilds for a few hours,
+#                                       leaving each dock every EVERY s (default 120)
+#   scripts/local.sh wilds-bot [CLASS] [LVL]  a rival on the Wilds (Rival A): fights anyone out of
+#                                       the camp, drops a card when taken down (needs `up` and
+#                                       `wilds`; see town-server/scripts/wilds-bot.mjs)
 #   scripts/local.sh reset              wipe the local database (all migrations re-applied)
+#   scripts/local.sh kit EMAIL [CLASS] [LVL]  ready a herzie to fight: level (default 25),
+#                                       class (default bard), its instrument and spare gear
+#   scripts/local.sh bot [CLASS]        a sparring partner by the Home spawn: challenge it to
+#                                       a duel (needs `up` running; see town-server/scripts/duel-bot.mjs)
 #
 # Sign in from the desktop with any email: the web's sign-in page offers a
 # local-only form when it runs against this stack. The app keeps its data in
@@ -140,6 +149,72 @@ returning h.name, h.level, h.stage, h.class,
 SQL
 }
 
+# A herzie ready for duels and loadouts: the level, a class (its skills come
+# with it, 00138), the class's instrument in hand, and two of each wearable
+# slot (one worn) so loadout 2 has something to change to.
+cmd_kit() {
+  local email="${1:?email}" class="${2:-bard}" level="${3:-25}"
+  case "$class" in
+    bard | record_slinger | percussionist) ;;
+    *) echo "CLASS is bard, record_slinger or percussionist" >&2; exit 1 ;;
+  esac
+  cmd_herzie "$email" "$level" >/dev/null
+  psql_local <<SQL
+do \$\$
+declare
+  u uuid := (select id from auth.users where email = '$email');
+  r record;
+begin
+  if u is null then raise exception 'no local user %', '$email'; end if;
+  update public.herzies set class = '$class' where user_id = u;
+  -- What choose_class teaches, plus the level skill the trigger adds.
+  insert into public.herzie_skills (user_id, skill_id)
+  select u, s from unnest(case '$class'
+    when 'bard' then array['soothing-drones', 'resurrect']
+    when 'record_slinger' then array['backspin']
+    else array['cymbrella', 'taunt'] end) s
+  on conflict do nothing;
+  insert into public.item_units (user_id, item_id)
+  select u, i.id from public.items i
+   where i.required_class = '$class' and i.equip_slot in ('main_hand', 'off_hand')
+     and i.id in ('lute', 'compact-discs', 'worn-stick', 'old-cymbal')
+     and not exists (select 1 from public.item_units x where x.user_id = u and x.item_id = i.id);
+  insert into public.item_units (user_id, item_id)
+  select u, s.id from (
+    select i.id, row_number() over (partition by i.equip_slot order by i.id) n
+      from public.items i
+     where i.equipable and i.required_class is null and coalesce(i.min_stage, 1) <= 3
+       and i.equip_slot in ('head', 'body', 'back', 'face', 'feet', 'color')
+  ) s
+   where s.n <= 2
+     and not exists (select 1 from public.item_units x where x.user_id = u and x.item_id = s.id);
+  -- Wear the instrument and the first of each slot (equip_unit's rules).
+  for r in
+    select distinct on (i.equip_slot) iu.id
+      from public.item_units iu join public.items i on i.id = iu.item_id
+     where iu.user_id = u and iu.equipped_slot is null
+       and i.equip_slot in ('main_hand', 'off_hand', 'head', 'body', 'back', 'face', 'feet', 'color')
+       and not exists (select 1 from public.item_units w join public.items wi on wi.id = w.item_id
+                        where w.user_id = u and w.equipped_slot is not null and wi.equip_slot = i.equip_slot)
+     order by i.equip_slot, i.id
+  loop
+    perform public.equip_unit(u, r.id, 'equip');
+  end loop;
+  perform public.refresh_titles(u);
+end
+\$\$;
+select h.name, h.level, h.stage, h.class, h.equipped
+  from public.herzies h join auth.users u on u.id = h.user_id where u.email = '$email';
+SQL
+}
+
+cmd_bot() {
+  local class="${1:-bard}" secret
+  secret="$(grep -E '^TOWN_TICKET_SECRET=' packages/town-server/.dev.vars | cut -d= -f2-)"
+  TOWN_URL="ws://127.0.0.1:$TOWN_PORT" TOWN_TICKET_SECRET="$secret" BOT_CLASS="$class" \
+    exec node packages/town-server/scripts/duel-bot.mjs
+}
+
 cmd_boss() {
   local hp="${1:-20000}" lobby="${2:-3}"
   # The lobby is open from now; the roster locks at starts_at. Any earlier
@@ -161,6 +236,24 @@ cmd_tower() {
     returning id, ends_at;"
 }
 
+cmd_wilds() {
+  local hours="${1:-3}" every="${2:-120}"
+  psql_local -c "insert into public.events (type, title, active, starts_at, ends_at, config)
+    values ('wilds', 'The Wilds', true, now() - interval '1 minute', now() + interval '$hours hours',
+            jsonb_build_object('departEverySec', $every))
+    returning id, ends_at;"
+}
+
+# Class and level default to its herzie's class and the dev user's level
+# (see the script for the rest of its env).
+cmd_wilds_bot() {
+  local secret
+  secret="$(grep -E '^TOWN_TICKET_SECRET=' packages/town-server/.dev.vars | cut -d= -f2-)"
+  exec env TOWN_URL="ws://127.0.0.1:$TOWN_PORT" TOWN_TICKET_SECRET="$secret" DB_CONTAINER="$DB_CONTAINER" \
+    ${1:+BOT_CLASS="$1"} ${2:+BOT_LEVEL="$2"} \
+    node packages/town-server/scripts/wilds-bot.mjs
+}
+
 cmd_reset() {
   npx --yes "$SUPABASE_CLI" db reset --local
 }
@@ -170,8 +263,12 @@ case "${1:-}" in
   desktop) cmd_desktop ;;
   desktop-release) cmd_desktop_release ;;
   herzie) shift; cmd_herzie "$@" ;;
+  kit) shift; cmd_kit "$@" ;;
+  bot) shift; cmd_bot "$@" ;;
   boss) shift; cmd_boss "$@" ;;
   tower) shift; cmd_tower "$@" ;;
+  wilds) shift; cmd_wilds "$@" ;;
+  wilds-bot) shift; cmd_wilds_bot "$@" ;;
   reset) cmd_reset ;;
-  *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

@@ -209,8 +209,7 @@ export function skillLearned(id: SkillId, level: number): boolean {
 }
 
 /** Shuffle: how far a disc bounces on from what it hit, centre to centre
- * on the ground (the training grounds' dummies stand 8.5 apart), and how
- * much weaker each bounce is than the one before. */
+ * on the ground, and how much weaker each bounce is than the one before. */
 /** The most attack speed a Haste can give, however much Euphony is behind
  * it (+50%). */
 export const HASTE_MAX = 0.5;

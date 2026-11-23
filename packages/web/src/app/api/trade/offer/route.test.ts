@@ -44,13 +44,26 @@ const row = (
   equipped_slot: string | null = null,
 ): UnitRow => ({ id, item_id, upgrade_level, equipped_slot });
 
-/** A mock admin serving one trade, the caller's coins, and their item units. */
+/** A mock admin serving one trade, the caller's coins, and their item units
+ * (as item_units_json gives them). */
 function adminWith(opts: {
   trade: Record<string, unknown> | null;
   currency?: number;
   units?: UnitRow[];
 }) {
-  const admin = createMockAdmin();
+  const admin = createMockAdmin(
+    {},
+    {
+      item_units_json: {
+        data: (opts.units ?? []).map((u) => ({
+          id: u.id,
+          itemId: u.item_id,
+          upgradeLevel: u.upgrade_level ?? 0,
+          equippedSlot: u.equipped_slot ?? null,
+        })),
+      },
+    },
+  );
   const originalFrom = admin.from;
   admin.from = vi.fn((table: string) => {
     const respond = (data: unknown) => {
@@ -62,7 +75,6 @@ function adminWith(opts: {
     };
     if (table === "trades") return respond(opts.trade);
     if (table === "herzies") return respond({ currency: opts.currency ?? 100 });
-    if (table === "item_units") return respond(opts.units ?? []);
     return originalFrom(table);
   }) as typeof admin.from;
   return admin;

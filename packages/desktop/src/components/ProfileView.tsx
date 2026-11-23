@@ -14,6 +14,7 @@ import { HERZIE_STAGE_HEIGHT, HerzieWithSky } from "./HerzieWithSky";
 import { List } from "./List";
 import { ProfileBadges } from "./ProfileBadges";
 import { TabButton } from "./TabButton";
+import { TitleLabel } from "./TitleLabel";
 import { TrackCard } from "./TrackCard";
 import { View } from "./View";
 
@@ -144,11 +145,15 @@ export function ProfileView({
           needs its own stacking context above them — otherwise a tall
           creature overlaps and hides these rows. */}
       <div className="relative z-10 shrink-0">
-        <div className="mb-2 text-ui-lg font-bold text-text">
-          {profile.name}
-          <span className="ml-2 text-[10px] font-normal text-text-dim">
-            Lv. {profile.level}
-          </span>
+        <div className="mb-2 flex flex-col">
+          <div className="text-ui-lg font-bold text-text">
+            {profile.name}
+            <span className="ml-2 text-[10px] font-normal text-text-dim">
+              Lv. {profile.level}
+            </span>
+          </div>
+          {/* The title worn, under the name (as on the duel's cards). */}
+          <TitleLabel id={profile.title} className="text-ui-sm font-bold" />
         </div>
 
         {!isSelf && (

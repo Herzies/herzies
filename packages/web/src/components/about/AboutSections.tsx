@@ -44,7 +44,13 @@ const WARDROBE: Partial<Record<EquippedSlot, (string | undefined)[]>> = {
     "drumhide-helm",
     undefined,
   ],
-  face: ["fangs", "ff-shades", "fyllings-monocle", undefined],
+  face: [
+    "fangs",
+    "ff-shades",
+    "fyllings-monocle",
+    "sailors-starter-pack",
+    undefined,
+  ],
   body: [
     "gold-chain",
     "pearl-necklace",

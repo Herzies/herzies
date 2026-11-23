@@ -43,8 +43,9 @@ describe("town map", () => {
     const map = parseMap(homeMap);
     // It's painted by hand, so only check what the game relies on.
     for (const kind of Object.keys(SPOT_NAMES)) {
-      // The Tower Guard stands wherever a map is given his spot, if any.
-      if (kind === "tower_guard") continue;
+      // The Tower Guard and Madas stand wherever a map is given their
+      // spot, if any (Madas: the Wilds' camp).
+      if (kind === "tower_guard" || kind === "madas") continue;
       expect(map.spots[kind]).toHaveLength(2);
     }
     expect(map.spare.length).toBeGreaterThan(0);
@@ -174,10 +175,22 @@ describe("town map", () => {
       "A",
       "@",
       "B",
+      "I",
     ].entries()) {
       paint(map, "objects", MID + i * 2, MID, ch);
     }
     expect(() => parseMap(map)).not.toThrow();
+    expect(buildingsOf(parseMap(map)).map((b) => b.kind)).toContain("tower");
+  });
+
+  it("has the Tower on the home island, its door toward the plaza", () => {
+    const towers = buildingsOf(parseMap(homeMap)).filter(
+      (b) => b.kind === "tower",
+    );
+    expect(towers).toHaveLength(1);
+    expect(towers[0].door?.side).toBe("s");
+    // Its old portal disc is gone.
+    expect(homeMap.portals).not.toHaveProperty("56,5");
   });
 });
 
@@ -218,18 +231,18 @@ describe("turned objects", () => {
   });
 
   it("sizes each island by its own grid", () => {
-    const small = emptyMap(36, "arena", "Training Grounds");
+    const small = emptyMap(36, "pond", "Pond");
     expect(islandRadius(small)).toBe(18);
     expect(worldRadius(small)).toBe(15);
     expect(small.terrain).toHaveLength(36);
     expect(cellCenter(small, 18, 18)).toEqual([0.5, 0.5]);
     expect(parseMap(JSON.parse(serializeMap(small)))).toEqual(small);
-    const odd = { ...emptyMap(36, "arena", "x"), size: 35 };
+    const odd = { ...emptyMap(36, "pond", "x"), size: 35 };
     expect(() => parseMap(odd)).toThrow(/even/);
   });
 
   it("needs every portal to lead somewhere, and links only on portals", () => {
-    const map = emptyMap(36, "arena", "Training Grounds");
+    const map = emptyMap(36, "pond", "Pond");
     paint(map, "objects", 18, 18, "O");
     expect(() => parseMap(map)).toThrow(/leads nowhere/);
     map.portals = { "18,18": { to: "home" } };
@@ -237,7 +250,7 @@ describe("turned objects", () => {
     expect(back.portals).toEqual({ "18,18": { to: "home" } });
     map.portals = { "18,18": { to: "home" }, "17,18": { to: "home" } };
     expect(() => parseMap(map)).toThrow(/no portal there/);
-    map.portals = { "18,18": { to: "arena" } };
+    map.portals = { "18,18": { to: "pond" } };
     expect(() => parseMap(map)).toThrow(/back to this island/);
   });
 
@@ -247,6 +260,15 @@ describe("turned objects", () => {
     paint(lost, "objects", 18, 18, "O");
     lost.portals = { "18,18": { to: "nowhere" } };
     expect(() => checkLinks([lost])).toThrow(/no "nowhere"/);
+  });
+
+  it("wants one Sky dock each on Town and the Wilds, and none elsewhere", () => {
+    const lost = emptyMap(36, "lost", "Lost");
+    paint(lost, "objects", 18, 18, "X");
+    expect(() => checkLinks([lost])).toThrow(/only Town and the Wilds/);
+    const home = structuredClone(TOWN_MAPS_LOCAL.get("home") as TownMap);
+    paint(home, "objects", 10, 40, "X");
+    expect(() => checkLinks([home])).toThrow(/needs one Sky dock, has 2/);
   });
 });
 

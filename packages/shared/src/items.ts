@@ -36,6 +36,7 @@ import {
   VIOLET_RAMP,
 } from "./ascii3d.js";
 import type { HerzieClass } from "./classes.js";
+import { isLoadoutIndex, type LoadoutIndex } from "./loadouts.js";
 import {
   levelStats,
   normalizeStatPoints,
@@ -210,7 +211,10 @@ const catalogBankLookup: BankItemLookup = (itemId) => {
  * currently needs: one slot per stackable item id owned (any quantity),
  * plus one per unit of a non-stackable item — except whatever's currently
  * equipped, which reserves a unit as "worn" and frees its bank slot. Mirrors
- * the slot-key expansion InventoryView uses to lay out its grid. */
+ * the slot-key expansion InventoryView uses to lay out its grid. Copies put
+ * away in the other loadout never reach it: inventory_v2 leaves them out.
+ * The SQL twin is 00152 bag_slots_used, which can't skip non-"deck" items
+ * (the items table has no category; none exist yet): keep the two equal. */
 export function bankSlotsUsed(
   inventory: Record<string, number> | null | undefined,
   equipped: Equipped | null | undefined,
@@ -319,9 +323,20 @@ export interface ItemUnit {
   itemId: string;
   upgradeLevel: number;
   equippedSlot: UnitSlot | null;
+  /** The inactive loadout holding this copy (00152 `loadout_items`), or
+   * absent. A held copy that isn't worn is put away: out of the bag, and it
+   * can't be sold, listed, traded or spent until it's taken off again. A worn
+   * copy can be held too (the same copy in both loadouts). */
+  heldBy?: LoadoutIndex;
 }
 
 const UNIT_SLOTS: readonly string[] = [...EQUIPPED_SLOTS, "modifier"];
+
+/** Whether a copy is in the bag: not worn and not put away in the other
+ * loadout. The same rule as the SQL `inventory_v2` projection (00152). */
+export function isInBag(unit: ItemUnit): boolean {
+  return unit.equippedSlot === null && unit.heldBy === undefined;
+}
 
 /** Parse an untrusted units payload (an API response, a local cache), dropping
  * anything malformed rather than trusting its shape. */
@@ -332,7 +347,7 @@ export function normalizeUnits(raw: unknown): ItemUnit[] {
     if (!entry || typeof entry !== "object") continue;
     const r = entry as Record<string, unknown>;
     if (typeof r.id !== "string" || typeof r.itemId !== "string") continue;
-    out.push({
+    const unit: ItemUnit = {
       id: r.id,
       itemId: r.itemId,
       upgradeLevel: typeof r.upgradeLevel === "number" ? r.upgradeLevel : 0,
@@ -341,17 +356,24 @@ export function normalizeUnits(raw: unknown): ItemUnit[] {
         UNIT_SLOTS.includes(r.equippedSlot)
           ? (r.equippedSlot as UnitSlot)
           : null,
-    });
+    };
+    if (isLoadoutIndex(r.heldBy)) unit.heldBy = r.heldBy;
+    out.push(unit);
   }
   return out;
 }
 
-/** `{itemId: count}` — the legacy inventory shape, derived. */
+/** `{itemId: count}` — the legacy inventory shape, derived. Copies put away in
+ * the other loadout (held, not worn) are left out, the same as the
+ * `inventory_v2` projection the server derives it from (00152). */
 export function unitsToInventory(
   units: readonly ItemUnit[],
 ): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const u of units) out[u.itemId] = (out[u.itemId] ?? 0) + 1;
+  for (const u of units) {
+    if (u.equippedSlot === null && u.heldBy !== undefined) continue;
+    out[u.itemId] = (out[u.itemId] ?? 0) + 1;
+  }
   return out;
 }
 
@@ -387,10 +409,11 @@ export interface BankTile {
 }
 
 /**
- * The bank grid's tiles: every unworn copy in the "deck" category, with a
- * stackable item's copies folded into one tile. Always exactly as many tiles as
- * `bankSlotsUsed` counts slots — they are the same rule, one returning the
- * tiles and the other their number.
+ * The bank grid's tiles: every copy in the bag (see `isInBag`) in the "deck"
+ * category, with a stackable item's copies folded into one tile. Always exactly
+ * as many tiles as `bankSlotsUsed` counts slots for the `inventory_v2`
+ * projection — they are the same rule, one returning the tiles and the other
+ * their number.
  */
 export function bankTiles(
   units: readonly ItemUnit[],
@@ -399,7 +422,7 @@ export function bankTiles(
   const tiles: BankTile[] = [];
   const stacks = new Map<string, BankTile>();
   for (const u of units) {
-    if (u.equippedSlot !== null) continue;
+    if (!isInBag(u)) continue;
     const info = lookup(u.itemId);
     if (info && info.category !== "deck") continue;
     if (info?.stackable) {
@@ -428,16 +451,34 @@ export function bankTiles(
   return tiles;
 }
 
+/**
+ * Whether going from `before` to `after` grows the bag past `capacity`: the
+ * rule equip_unit and switch_loadout (00152 bag_would_overflow) refuse a
+ * change with "bag-full" on, so a prediction can refuse it the same way. A
+ * change that doesn't grow the bag always passes, even over capacity, so a
+ * swap never gets stuck.
+ */
+export function growsBagPastCapacity(
+  before: readonly ItemUnit[],
+  after: readonly ItemUnit[],
+  capacity: number,
+  lookup: BankItemLookup = catalogBankLookup,
+): boolean {
+  const used = bankTiles(after, lookup).length;
+  return used > capacity && used > bankTiles(before, lookup).length;
+}
+
 /** Copies of one item, plainest first — unworn before worn, then lowest level,
  * then in the order given (oldest first). What "sell/offer N of this item"
  * means when it can't say which copies: a spare goes before one you've
- * invested in or are wearing. */
+ * invested in or are wearing. Copies the other loadout holds are left out:
+ * they can't be sold or offered while it holds them. */
 export function unitsPlainestFirst(
   units: readonly ItemUnit[],
   itemId: string,
 ): ItemUnit[] {
   return units
-    .filter((u) => u.itemId === itemId)
+    .filter((u) => u.itemId === itemId && u.heldBy === undefined)
     .map((u, order) => ({ u, order }))
     .sort(
       (a, b) =>
@@ -540,6 +581,10 @@ export type EquipOutcome =
  *  - Equipping into an occupied single-value slot displaces the incumbent
  *    (swapping a hat shouldn't need an explicit unequip first); the displaced
  *    copy returns to the bank.
+ *
+ * `heldBy` rides along untouched: a held copy taken off stays put away in
+ * the other loadout. Bag capacity isn't checked here; equip_unit refuses a
+ * change that would overflow it ("bag-full", see growsBagPastCapacity).
  */
 export function applyEquip(
   units: readonly ItemUnit[],
@@ -760,9 +805,7 @@ export function applyItemUpgrade(
   const { protectionItemId = null, result = "upgraded" } = options;
   if (!getItem(diceItemId)?.dice) return { ok: false, reason: "not-dice" };
 
-  const dice = units.find(
-    (u) => u.itemId === diceItemId && u.equippedSlot === null,
-  );
+  const dice = units.find((u) => u.itemId === diceItemId && isInBag(u));
   if (!dice) return { ok: false, reason: "dice-not-owned" };
 
   const target = units.find((u) => u.id === targetUnitId);
@@ -788,9 +831,7 @@ export function applyItemUpgrade(
   const risky = chance < 1;
   let pick: ItemUnit | undefined;
   if (risky && protectionItemId) {
-    pick = units.find(
-      (u) => u.itemId === protectionItemId && u.equippedSlot === null,
-    );
+    pick = units.find((u) => u.itemId === protectionItemId && isInBag(u));
     if (!getItem(protectionItemId)?.protection || !pick) {
       return { ok: false, reason: "protection-not-owned" };
     }
@@ -1263,6 +1304,26 @@ export const DECK_TOTAL_SLOTS = DECK_SLOT_GROUPS.reduce(
   0,
 );
 
+/** Every rarity, plainest first. */
+export const RARITIES = [
+  "common",
+  "uncommon",
+  "rare",
+  "legendary",
+  "mythic",
+] as const satisfies readonly Rarity[];
+
+/** Rarest first: mythic is 0, common 4. Typed on Rarity so a new tier can't
+ * be forgotten in the sorts that use it — mythic once was, and fell through
+ * to common. */
+export const RARITY_RANK: Record<Rarity, number> = {
+  mythic: 0,
+  legendary: 1,
+  rare: 2,
+  uncommon: 3,
+  common: 4,
+};
+
 export const RARITY_COLORS: Record<Rarity, string> = {
   common: "#9d9d9d",
   uncommon: "#1eff00",
@@ -1333,6 +1394,15 @@ export const NON_DROPPABLE_ITEM_IDS = [
   "compact-discs",
   "worn-stick",
   "old-cymbal",
+  // The Wilds' bits and instruments come only from the Wilds (wilds-loot.ts).
+  "tonewood",
+  "sky-string",
+  "storm-hide",
+  "resonite",
+  "wildwood-lute",
+  "stormcut-discs",
+  "thunderhide-sticks",
+  "storm-cymbal",
   // Consumables are bought from Medea, never dropped.
   "star-candy",
   // Boboku's spare cap: he sells it (BOBOKU_STOCK), it never drops.
@@ -1435,7 +1505,7 @@ export const BOSS_LOOT_EXCLUDED_ITEM_IDS = ["cd"];
 /** What a boss's random loot is drawn from, and how likely each is: every
  * item that drops from listening (not in NON_DROPPABLE_ITEM_IDS, no
  * seasonal window, not in BOSS_LOOT_EXCLUDED_ITEM_IDS), weighted per BOSS_LOOT_RARITY_BOOST. settle_boss_fight
- * rolls from a copy of this list (boss_loot_roll, last in 00151_class_set_drops.sql);
+ * rolls from a copy of this list (boss_loot_roll, last in 00158_sailors_starter_pack.sql);
  * items.test.ts checks the two agree, so a new droppable item needs adding
  * there too. */
 export function bossLootWeights(): { itemId: string; weight: number }[] {
@@ -1481,17 +1551,24 @@ export const RARITY_LUCK_WEIGHT_BONUS: Record<Rarity, number> = {
 /** Weighted-random pick from a rarity-tagged candidate pool. `luck` (default
  * 0, a herzie's summed luck stat — see getHerzieStats) biases which
  * candidate wins via RARITY_LUCK_WEIGHT_BONUS. `rng` returns a float in
- * [0, 1) — inject Math.random in production, a seeded fn in tests. */
+ * [0, 1) — inject Math.random in production, a seeded fn in tests. `lean`
+ * multiplies each rarity's weight on top (a Tower drop's: towerLootLean in
+ * tower.ts); a rarity it leaves out keeps its own. */
 export function pickWeightedDrop<T extends { id: string; rarity: Rarity }>(
   candidates: T[],
   luck = 0,
   rng: () => number = Math.random,
+  lean: Partial<Record<Rarity, number>> = {},
 ): T | undefined {
   if (candidates.length === 0) return undefined;
   const weights = candidates.map((c) => {
     const base =
       ITEM_DROP_WEIGHT_OVERRIDES[c.id] ?? RARITY_DROP_WEIGHTS[c.rarity];
-    return base * (1 + luck * RARITY_LUCK_WEIGHT_BONUS[c.rarity]);
+    return (
+      base *
+      (1 + luck * RARITY_LUCK_WEIGHT_BONUS[c.rarity]) *
+      (lean[c.rarity] ?? 1)
+    );
   });
   const total = weights.reduce((a, b) => a + b, 0);
   let r = rng() * total;
@@ -2352,76 +2429,158 @@ function segDist(
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
-function luteCardIcon(u: number, v: number): TexSample | null {
-  const [ix, iy] = iconUV(u, v);
-  // Pear body low-left, neck up-right to the pegbox.
-  const bx = -0.06,
-    by = 0.08;
-  const body = Math.hypot((ix - bx) / 0.17, (iy - by) / 0.15);
-  if (body < 1) {
-    if (Math.hypot(ix - bx, iy - by + 0.02) < 0.045)
-      return { bright: 0.15, color: "#2b1a0e" };
-    return { bright: 0.85 - body * 0.3, color: "#c98a4b" };
-  }
-  if (segDist(ix, iy, bx + 0.1, by - 0.08, 0.2, -0.24) < 0.03)
-    return { bright: 0.6, color: "#6b4226" };
-  if (segDist(ix, iy, 0.2, -0.24, 0.26, -0.22) < 0.035)
-    return { bright: 0.45, color: "#4a2c18" };
-  return null;
+/** The colours a class instrument's card icon is drawn in: the class's own
+ * and, recoloured, the Wilds' build of it. */
+interface LuteIconColors {
+  body: string;
+  hole: string;
+  neck: string;
+  pegbox: string;
 }
+const LUTE_ICON: LuteIconColors = {
+  body: "#c98a4b",
+  hole: "#2b1a0e",
+  neck: "#6b4226",
+  pegbox: "#4a2c18",
+};
+/** Wildwood Lute: green-gold tonewood, a sky-blue neck. */
+const WILDWOOD_LUTE_ICON: LuteIconColors = {
+  body: "#9fbf5a",
+  hole: "#16240e",
+  neck: "#4f8fc0",
+  pegbox: "#2c5a80",
+};
 
-function discsCardIcon(u: number, v: number): TexSample | null {
-  const [ix, iy] = iconUV(u, v);
-  for (const [cx, cy] of [
-    [-0.1, 0.05],
-    [0.1, -0.05],
-  ] as const) {
-    const r = Math.hypot(ix - cx, iy - cy);
-    const R = 0.15;
-    if (r < R && r > R * 0.18) {
-      const band = ((r / R) * 6) % 1;
-      return {
-        bright: band < 0.5 ? 0.9 : 0.55,
-        color: cx < 0 ? "#d9d9e8" : "#e8d9f0",
-      };
+function luteCardIcon(c: LuteIconColors) {
+  return (u: number, v: number): TexSample | null => {
+    const [ix, iy] = iconUV(u, v);
+    // Pear body low-left, neck up-right to the pegbox.
+    const bx = -0.06,
+      by = 0.08;
+    const body = Math.hypot((ix - bx) / 0.17, (iy - by) / 0.15);
+    if (body < 1) {
+      if (Math.hypot(ix - bx, iy - by + 0.02) < 0.045)
+        return { bright: 0.15, color: c.hole };
+      return { bright: 0.85 - body * 0.3, color: c.body };
     }
-  }
-  return null;
+    if (segDist(ix, iy, bx + 0.1, by - 0.08, 0.2, -0.24) < 0.03)
+      return { bright: 0.6, color: c.neck };
+    if (segDist(ix, iy, 0.2, -0.24, 0.26, -0.22) < 0.035)
+      return { bright: 0.45, color: c.pegbox };
+    return null;
+  };
 }
 
-function stickCardIcon(u: number, v: number): TexSample | null {
-  const [ix, iy] = iconUV(u, v);
-  if (Math.hypot(ix - 0.17, iy + 0.19) < 0.04)
-    return { bright: 0.75, color: "#e6cfa3" };
-  if (segDist(ix, iy, -0.18, 0.2, 0.17, -0.19) < 0.028)
-    return { bright: 0.7, color: "#c8a46e" };
-  return null;
+/** The two discs' colours, back one and front one. */
+type DiscsIconColors = readonly [string, string];
+const DISCS_ICON: DiscsIconColors = ["#d9d9e8", "#e8d9f0"];
+/** Stormcut Discs: pressed in a thunderstorm, electric blue. */
+const STORMCUT_DISCS_ICON: DiscsIconColors = ["#7fb4ff", "#c4ecff"];
+
+function discsCardIcon(c: DiscsIconColors) {
+  return (u: number, v: number): TexSample | null => {
+    const [ix, iy] = iconUV(u, v);
+    for (const [cx, cy] of [
+      [-0.1, 0.05],
+      [0.1, -0.05],
+    ] as const) {
+      const r = Math.hypot(ix - cx, iy - cy);
+      const R = 0.15;
+      if (r < R && r > R * 0.18) {
+        const band = ((r / R) * 6) % 1;
+        return {
+          bright: band < 0.5 ? 0.9 : 0.55,
+          color: cx < 0 ? c[0] : c[1],
+        };
+      }
+    }
+    return null;
+  };
 }
 
-function cymbalCardIcon(u: number, v: number): TexSample | null {
-  const [ix, iy] = iconUV(u, v);
-  const r = Math.hypot(ix, iy / 0.55);
-  if (r > 0.27) return null;
-  if (r < 0.05) return { bright: 0.55, color: "#8a6a2a" };
-  // Old: patches of verdigris at the rim.
-  const green = r > 0.2 && Math.sin(Math.atan2(iy, ix) * 5) > 0.6;
-  const band = ((r / 0.27) * 8) % 1;
-  return {
-    bright: band < 0.5 ? 0.85 : 0.65,
-    color: green ? "#6fa38a" : "#d4b04c",
+interface StickIconColors {
+  tip: string;
+  shaft: string;
+}
+const STICK_ICON: StickIconColors = { tip: "#e6cfa3", shaft: "#c8a46e" };
+/** Thunderhide Sticks: storm-grey hide wrap, a lightning-yellow tip. */
+const THUNDERHIDE_STICKS_ICON: StickIconColors = {
+  tip: "#ffe066",
+  shaft: "#6a7290",
+};
+
+function stickCardIcon(c: StickIconColors) {
+  return (u: number, v: number): TexSample | null => {
+    const [ix, iy] = iconUV(u, v);
+    if (Math.hypot(ix - 0.17, iy + 0.19) < 0.04)
+      return { bright: 0.75, color: c.tip };
+    if (segDist(ix, iy, -0.18, 0.2, 0.17, -0.19) < 0.028)
+      return { bright: 0.7, color: c.shaft };
+    return null;
+  };
+}
+
+interface CymbalIconColors {
+  metal: string;
+  bell: string;
+  /** The patches at the rim: verdigris on the old one. */
+  rim: string;
+}
+const CYMBAL_ICON: CymbalIconColors = {
+  metal: "#d4b04c",
+  bell: "#8a6a2a",
+  rim: "#6fa38a",
+};
+/** Storm Cymbal: blued steel, lightning-struck at the rim. */
+const STORM_CYMBAL_ICON: CymbalIconColors = {
+  metal: "#9fb8d8",
+  bell: "#4a5a7a",
+  rim: "#ffe066",
+};
+
+function cymbalCardIcon(c: CymbalIconColors) {
+  return (u: number, v: number): TexSample | null => {
+    const [ix, iy] = iconUV(u, v);
+    const r = Math.hypot(ix, iy / 0.55);
+    if (r > 0.27) return null;
+    if (r < 0.05) return { bright: 0.55, color: c.bell };
+    const patch = r > 0.2 && Math.sin(Math.atan2(iy, ix) * 5) > 0.6;
+    const band = ((r / 0.27) * 8) % 1;
+    return {
+      bright: band < 0.5 ? 0.85 : 0.65,
+      color: patch ? c.rim : c.metal,
+    };
   };
 }
 
 function renderLuteFrame(yAngle: number): string[] {
-  return renderIconCard(yAngle, "#e0a96d", "#8a5a30", "#4a2c18", luteCardIcon);
+  return renderIconCard(
+    yAngle,
+    "#e0a96d",
+    "#8a5a30",
+    "#4a2c18",
+    luteCardIcon(LUTE_ICON),
+  );
 }
 
 function renderDiscsFrame(yAngle: number): string[] {
-  return renderIconCard(yAngle, "#d0d0e8", "#7a7a9a", "#44445a", discsCardIcon);
+  return renderIconCard(
+    yAngle,
+    "#d0d0e8",
+    "#7a7a9a",
+    "#44445a",
+    discsCardIcon(DISCS_ICON),
+  );
 }
 
 function renderStickFrame(yAngle: number): string[] {
-  return renderIconCard(yAngle, "#e6cfa3", "#8a7350", "#4a3c26", stickCardIcon);
+  return renderIconCard(
+    yAngle,
+    "#e6cfa3",
+    "#8a7350",
+    "#4a3c26",
+    stickCardIcon(STICK_ICON),
+  );
 }
 
 function renderCymbalFrame(yAngle: number): string[] {
@@ -2430,8 +2589,134 @@ function renderCymbalFrame(yAngle: number): string[] {
     "#e8c860",
     "#8a7020",
     "#4a3c10",
-    cymbalCardIcon,
+    cymbalCardIcon(CYMBAL_ICON),
   );
+}
+
+// --- Wilds instruments: the class instruments' cards, recoloured ---
+function renderWildwoodLuteFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#8fd0ff",
+    "#4f6f3a",
+    "#22381c",
+    luteCardIcon(WILDWOOD_LUTE_ICON),
+  );
+}
+
+function renderStormcutDiscsFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#ffe066",
+    "#3f5a8a",
+    "#1c2a48",
+    discsCardIcon(STORMCUT_DISCS_ICON),
+  );
+}
+
+function renderThunderhideSticksFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#ffe066",
+    "#4a5070",
+    "#22263a",
+    stickCardIcon(THUNDERHIDE_STICKS_ICON),
+  );
+}
+
+function renderStormCymbalFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#ffe066",
+    "#4a5a7a",
+    "#1e2638",
+    cymbalCardIcon(STORM_CYMBAL_ICON),
+  );
+}
+
+// --- Wilds bits: crafting materials, each card in its rarity's colour ---
+/** Tonewood: a plank on the slant, grain along it and a knot. */
+function tonewoodCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // Along the plank and across it, turned some 30°.
+  const a = -0.52;
+  const along = ix * Math.cos(a) - iy * Math.sin(a);
+  const across = ix * Math.sin(a) + iy * Math.cos(a);
+  if (Math.abs(along) > 0.27 || Math.abs(across) > 0.075) return null;
+  if (Math.abs(across) > 0.06) return { bright: 0.45, color: "#7a4e28" };
+  if (Math.hypot(along - 0.08, across + 0.01) < 0.022)
+    return { bright: 0.3, color: "#5a3518" };
+  const grain = Math.sin(across * 90 + Math.sin(along * 14) * 1.5) > 0.55;
+  return {
+    bright: grain ? 0.55 : 0.85,
+    color: grain ? "#9a6a3a" : "#d6a868",
+  };
+}
+
+/** Sky String: a coil of pale-blue string, its end trailing off. */
+function skyStringCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const r = Math.hypot(ix, iy / 0.8);
+  // Three turns of the coil, thin rings.
+  for (const R of [0.09, 0.14, 0.19])
+    if (Math.abs(r - R) < 0.016)
+      return { bright: 0.65 + R, color: R > 0.15 ? "#e6f6ff" : "#a8dcff" };
+  if (segDist(ix, iy, 0.17, 0.08, 0.26, 0.24) < 0.014)
+    return { bright: 0.8, color: "#e6f6ff" };
+  return null;
+}
+
+/** Storm Hide: a stretched pelt, slate grey, a lightning streak across. */
+function stormHideCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // A rounded square, pinched in at the sides, with four leg tabs.
+  const pinch = 0.2 - 0.04 * Math.cos(iy * 9);
+  const inBody = Math.abs(ix) < pinch && Math.abs(iy) < 0.22;
+  const inLeg = Math.abs(Math.abs(ix) - 0.21) < 0.04 && Math.abs(iy) > 0.15;
+  if (!inBody && !(inLeg && Math.abs(iy) < 0.27)) return null;
+  if (
+    segDist(ix, iy, -0.08, -0.16, 0.03, -0.01) < 0.018 ||
+    segDist(ix, iy, 0.03, -0.01, -0.03, 0.02) < 0.018 ||
+    segDist(ix, iy, -0.03, 0.02, 0.08, 0.17) < 0.018
+  )
+    return { bright: 1, color: "#ffe066" };
+  const fur = Math.sin(ix * 60 + iy * 25) > 0.6;
+  return { bright: fur ? 0.5 : 0.7, color: fur ? "#3e4a62" : "#66789a" };
+}
+
+/** Resonite: a tall crystal, faceted, glowing amber. */
+function resoniteCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // A long hexagon: points top and bottom, flat sides.
+  const w = 0.14 * Math.min(1, (0.3 - Math.abs(iy)) / 0.1);
+  if (Math.abs(iy) > 0.3 || Math.abs(ix) > w) return null;
+  if (Math.abs(ix) < 0.012) return { bright: 1, color: "#fff1c8" };
+  const lit = ix < 0;
+  return {
+    bright: lit ? 0.95 : 0.65,
+    color: lit ? "#ffb347" : "#d06a00",
+  };
+}
+
+/** The bits' cards: accent and chrome in their rarity's colour
+ * (RARITY_COLORS), the face dimmed from it, the back darker still. */
+const BIT_CARD_SHADES: Record<
+  "common" | "uncommon" | "rare" | "legendary",
+  readonly [dim: string, back: string]
+> = {
+  common: ["#6a6a6a", "#3a3a3a"],
+  uncommon: ["#2f8a22", "#18451a"],
+  rare: ["#24508a", "#142a48"],
+  legendary: ["#a0561a", "#4a2a0e"],
+};
+
+function renderBitFrame(
+  yAngle: number,
+  rarity: keyof typeof BIT_CARD_SHADES,
+  icon: (u: number, v: number) => TexSample | null,
+): string[] {
+  const [dim, back] = BIT_CARD_SHADES[rarity];
+  return renderIconCard(yAngle, RARITY_COLORS[rarity], dim, back, icon);
 }
 
 // --- Cloak cards ---
@@ -3679,6 +3964,65 @@ function renderFangsFrame(yAngle: number): string[] {
   return renderIconCard(yAngle, "#E05050", "#8a3a3a", "#4a2020", fangsCardIcon);
 }
 
+/** The Sailor's Starter Pack: a white walrus moustache, drooping at the
+ * tips, and below it a briar pipe, its ember lit and smoke curling up. */
+function sailorsStarterPackCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // Smoke, rising from the bowl in three swelling puffs.
+  for (const [cx, cy, r] of [
+    [-0.31, -0.02, 0.03],
+    [-0.335, -0.11, 0.04],
+    [-0.31, -0.21, 0.045],
+  ] as const) {
+    const d = Math.hypot(ix - cx, iy - cy);
+    if (d < r)
+      return d < r * 0.55 && iy < cy
+        ? { bright: 0.95, color: "#F2EFEA" }
+        : { bright: 0.75, color: "#C9C5BF" };
+  }
+  // The moustache: thickest either side of its parting, drooping to tips.
+  const mx = ix - 0.05;
+  const a = Math.abs(mx) / 0.27;
+  if (a <= 1) {
+    const cy = -0.09 + 0.13 * a ** 2.4;
+    const th =
+      0.05 + 0.025 * Math.sin(Math.PI * Math.min(a / 0.9, 1)) - 0.035 * a ** 4;
+    const parting = Math.abs(mx) < 0.014 && iy < cy - th * 0.2;
+    if (Math.abs(iy - cy) < th && !parting)
+      return iy > cy + th * 0.45
+        ? { bright: 0.8, color: "#DAD5CC" }
+        : { bright: 1, color: "#F7F5F0" };
+  }
+  // The pipe: its ember, the bowl's rim, the bowl, a gold band, the stem.
+  if (ix > -0.35 && ix < -0.25) {
+    if (iy > 0.04 && iy < 0.065 && Math.abs(ix + 0.3) < 0.04)
+      return { bright: 1, color: "#FF7A2C" };
+    if (iy >= 0.065 && iy < 0.085) return { bright: 0.7, color: "#5A3520" };
+    const bottom = 0.2 - 0.03 * ((ix + 0.3) / 0.05) ** 2;
+    if (iy >= 0.085 && iy < bottom) return { bright: 0.85, color: "#8A552C" };
+  }
+  // The stem, from the bowl's side up to the mouth.
+  const t = (ix + 0.25) / 0.17;
+  if (t >= 0 && t <= 1) {
+    const sy = 0.15 - t * 0.1;
+    if (Math.abs(iy - sy) < 0.018)
+      return t < 0.12
+        ? { bright: 0.95, color: "#C9A24A" }
+        : { bright: 0.55, color: "#2A2422" };
+  }
+  return null;
+}
+
+function renderSailorsStarterPackFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#F2EFEA",
+    "#3E5A78",
+    "#14243A",
+    sailorsStarterPackCardIcon,
+  );
+}
+
 function ghostCardIcon(u: number, v: number): TexSample | null {
   const [ix, iy] = iconUV(u, v);
   const inHead = ix * ix + (iy + 0.08) ** 2 < 0.17 ** 2;
@@ -3861,6 +4205,22 @@ const drumhideCloakFrames = generateFrames(renderDrumhideCloakFrame);
 const tailwindCloakFrames = generateFrames(renderTailwindCloakFrame);
 const stickFrames = generateFrames(renderStickFrame);
 const cymbalFrames = generateFrames(renderCymbalFrame);
+const wildwoodLuteFrames = generateFrames(renderWildwoodLuteFrame);
+const stormcutDiscsFrames = generateFrames(renderStormcutDiscsFrame);
+const thunderhideSticksFrames = generateFrames(renderThunderhideSticksFrame);
+const stormCymbalFrames = generateFrames(renderStormCymbalFrame);
+const tonewoodFrames = generateFrames((a) =>
+  renderBitFrame(a, "common", tonewoodCardIcon),
+);
+const skyStringFrames = generateFrames((a) =>
+  renderBitFrame(a, "uncommon", skyStringCardIcon),
+);
+const stormHideFrames = generateFrames((a) =>
+  renderBitFrame(a, "rare", stormHideCardIcon),
+);
+const resoniteFrames = generateFrames((a) =>
+  renderBitFrame(a, "legendary", resoniteCardIcon),
+);
 const witchHatFrames = generateFrames(renderWitchHatFrame);
 const sixpenceFrames = generateFrames(renderSixpenceFrame);
 const plutusCrownFrames = generateFrames(renderPlutusCrownFrame);
@@ -3888,6 +4248,7 @@ const fyllingsCapeFrames = generateFrames(renderFyllingsCapeFrame);
 const fyllingsMonocleFrames = generateFrames(renderFyllingsMonocleFrame);
 const fyllingsBlackFrames = generateFrames(renderFyllingsBlackFrame);
 const fangsFrames = generateFrames(renderFangsFrame);
+const sailorsStarterPackFrames = generateFrames(renderSailorsStarterPackFrame);
 const pumpkinSpiceFrames = generateFrames(renderPumpkinSpiceFrame);
 const ghostFrames = generateFrames(renderGhostFrame);
 const sleptwellFrames = generateFrames(renderSleptwellFrame);
@@ -4488,6 +4849,108 @@ export const ITEMS: ItemDef[] = [
     requiredClass: "percussionist",
     stats: { def: 10 },
   },
+  // The Wilds' loot (wilds-loot.ts). Bits: crafting materials that drop
+  // only there (a cache, a herzie taken down, listening on the island),
+  // spent on the Wilds instruments and on tuning; plain stackable cards.
+  // Wilds instruments: each crafted from its class instrument (used up, its
+  // upgrade level carried over) and bits (WILDS_RECIPES), about half as
+  // strong again, and played exactly like it (classes.ts instrumentsOf).
+  // None of the eight ever drop from the normal pools
+  // (NON_DROPPABLE_ITEM_IDS), and no shop sells them.
+  {
+    id: "tonewood",
+    name: "Tonewood",
+    description:
+      "Crafting bit from the Wilds. Crafts Wilds instruments and tunes instruments up to +3 at the Crafting Station.",
+    rarity: "common",
+    frames: tonewoodFrames,
+    stackable: true,
+    sellPrice: 3,
+  },
+  {
+    id: "sky-string",
+    name: "Sky String",
+    description:
+      "Crafting bit from the Wilds. Crafts Wilds instruments and tunes instruments from +2 to +5 at the Crafting Station.",
+    rarity: "uncommon",
+    frames: skyStringFrames,
+    stackable: true,
+    sellPrice: 8,
+  },
+  {
+    id: "storm-hide",
+    name: "Storm Hide",
+    description:
+      "Crafting bit from the Wilds. Crafts Wilds instruments and tunes instruments from +3 to +6 at the Crafting Station.",
+    rarity: "rare",
+    frames: stormHideFrames,
+    stackable: true,
+    sellPrice: 25,
+  },
+  {
+    id: "resonite",
+    name: "Resonite",
+    description:
+      "Crafting bit from the Wilds. Tunes instruments from +5 to +6 at the Crafting Station.",
+    rarity: "legendary",
+    frames: resoniteFrames,
+    stackable: true,
+    sellPrice: 80,
+  },
+  {
+    id: "wildwood-lute",
+    name: "Wildwood Lute",
+    description:
+      "Carved from Wilds tonewood and strung with sky. It's never out of tune.",
+    rarity: "rare",
+    sellPrice: 40,
+    frames: wildwoodLuteFrames,
+    equipable: true,
+    equipSlot: "main_hand",
+    minStage: 2,
+    requiredClass: "bard",
+    stats: { euphony: 18, sonicPower: 5 },
+  },
+  {
+    id: "stormcut-discs",
+    name: "Stormcut Discs",
+    description: "Pressed in a thunderstorm. They spin with a crackle.",
+    rarity: "rare",
+    sellPrice: 40,
+    frames: stormcutDiscsFrames,
+    equipable: true,
+    equipSlot: "main_hand",
+    minStage: 2,
+    requiredClass: "record_slinger",
+    stats: { sonicPower: 12, critChance: 8, critDamage: 38 },
+  },
+  {
+    id: "thunderhide-sticks",
+    name: "Thunderhide Sticks",
+    description: "Wrapped in storm hide. Every rimshot lands like thunder.",
+    rarity: "rare",
+    sellPrice: 40,
+    frames: thunderhideSticksFrames,
+    equipable: true,
+    equipSlot: "main_hand",
+    minStage: 2,
+    requiredClass: "percussionist",
+    stats: { sonicPower: 6, critChance: 3 },
+  },
+  {
+    id: "storm-cymbal",
+    name: "Storm Cymbal",
+    description:
+      "Hammered in the eye of a storm. Rings loud enough to turn a blow.",
+    rarity: "rare",
+    sellPrice: 40,
+    frames: stormCymbalFrames,
+    equipable: true,
+    equipSlot: "off_hand",
+    minStage: 2,
+    requiredClass: "percussionist",
+    stats: { def: 15 },
+  },
   // Cloaks (the back slot): simulated cloth in the 3D view (cloak-physics.ts,
   // CLOAK_STYLES in creature-renderer.ts). Stage 3, where a herzie has a back
   // to hang one from. The three class cloaks are locked to their class
@@ -4854,6 +5317,20 @@ export const ITEMS: ItemDef[] = [
     requiredClass: "percussionist",
     sellPrice: 500,
     stats: { def: 6, stamina: 4 },
+  },
+  // An old salt's moustache and pipe: the skipper's (npc-looks.ts), and
+  // anyone's who finds one. Drop-only.
+  {
+    id: "sailors-starter-pack",
+    name: "Sailor's Starter Pack",
+    description:
+      "A walrus moustache and a briar pipe. Sea legs sold separately",
+    rarity: "uncommon",
+    frames: sailorsStarterPackFrames,
+    equipable: true,
+    equipSlot: "face",
+    sellPrice: 100,
+    stats: { luck: 10 },
   },
 ];
 

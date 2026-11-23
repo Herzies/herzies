@@ -69,7 +69,12 @@ function StoreViewImpl({
   const focused = useWindowFocused();
   const prevFocusedRef = useRef(focused);
 
+  // Fetched the first time the store opens rather than at launch: it stays
+  // mounted while closed, and most sessions never open it.
+  const premiumRequestedRef = useRef(false);
   useEffect(() => {
+    if (!active || premiumRequestedRef.current) return;
+    premiumRequestedRef.current = true;
     // Falls back to an empty list so a broken feed can't blank the store —
     // but says so first. Silently swallowing made "the call failed" and
     // "nothing is for sale" look identical, which is precisely the case you
@@ -81,7 +86,7 @@ function StoreViewImpl({
         console.error("[store] fetchPremiumItems failed:", e);
         setPremium([]);
       });
-  }, []);
+  }, [active]);
 
   // Currency purchases complete in the browser and are credited by a
   // webhook — there is no synchronous "done" signal. Once the window regains

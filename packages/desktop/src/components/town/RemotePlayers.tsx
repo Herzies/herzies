@@ -1,5 +1,6 @@
 import {
   basicAttack,
+  blankState,
   TOWN_FLAG_AFK,
   TOWN_FLAG_COMBAT,
   TOWN_FLAG_DANCING,
@@ -9,15 +10,25 @@ import {
 import {
   BOSS_STAND,
   HEAL_LOCK_ANGLE,
+  HERZIE_BODY,
   healTarget,
   meleeReaches,
 } from "@herzies/shared/combat";
-import { HerzieModel } from "@herzies/shared/gl";
+import { HerzieModel, ICE_SPEED } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
-import { type Group, Vector3 } from "three";
+import {
+  type Group,
+  type Object3D,
+  Raycaster,
+  Sphere,
+  Vector2,
+  Vector3,
+} from "three";
 import { GmMark } from "../GmMark";
+import { standY } from "./airship/boarding";
+import { onDeck } from "./airship/deck";
 import { ambient, seasonNow } from "./ambient";
 import { SEAT_Y } from "./Benches";
 import { BUBBLE_RANGE, type ChatBubble, type ChatBubbles } from "./chatBubbles";
@@ -29,7 +40,7 @@ import {
   discField,
   nextHand as nextFreeHand,
 } from "./combat/discs";
-import { DUMMY, hitDummy } from "./combat/dummy";
+import { DUMMY, type DummyState, hitDummy, newTarget } from "./combat/dummy";
 import { bossFight, bossNow } from "./combat/fight";
 import {
   attackSpeedOf,
@@ -43,15 +54,43 @@ import { stance } from "./combat/stance";
 import { shake } from "./combat/state";
 import { assistTarget, type Vec3, waveField } from "./combat/waves";
 import { applyDowned, entityDown } from "./downed";
+import { fighterPace, poseFighter } from "./duel/fx";
+import { PlayerMenu } from "./duel/PlayerMenu";
+import {
+  duel,
+  duelFighting,
+  duelOf,
+  myOpponent,
+  openPlayerMenu,
+  ringOf,
+  useDuelValue,
+} from "./duel/store";
 import { footprints, Trail } from "./footprints";
 import { HeadBubble } from "./HeadBubble";
-import { groundY, petWalkable, type TownMap, worldRadius } from "./map";
-import { ICE_SPEED, onIce } from "./movement";
-import { NAME_SHADOW, nameOpacity } from "./nameFade";
+import { groundY, type TownMap, worldRadius } from "./map";
+import { onIce, petFooting } from "./movement";
+import { NAME_SHADOW, nearestIds, REMOTE_LABEL, remoteLabel } from "./nameFade";
 import type { RemotePlayer, TownConnection } from "./net/TownConnection";
 import { useTownNetVersion } from "./net/townNet";
 import { townSave, useTownRuntime } from "./runtime";
 import { sfxRimshotSlam } from "./sfx";
+import { titleName, WORN_TITLE_COLOUR } from "./TitleLine";
+import { wildsBarOf, wildsDown, wildsFoe } from "./wilds/store";
+
+/** What every label reads: the herzie the pointer's on, and the nearest
+ * few, who are named (REMOTE_LABEL.nearest). */
+const labels = {
+  hovered: null as number | null,
+  ranked: new Set<number>(),
+};
+/** How often the nearest are worked out again (ms). */
+const RANK_MS = 250;
+
+/** Out of the dummies' list. */
+function dropTarget(t: DummyState) {
+  const i = liveDummies.indexOf(t);
+  if (i >= 0) liveDummies.splice(i, 1);
+}
 
 /** Everyone else in the Town. */
 export function RemotePlayers({
@@ -59,18 +98,23 @@ export function RemotePlayers({
   net,
   bubbles,
   onOpenProfile,
+  frame = null,
 }: {
   /** The island they're on with you: its ground's ups and downs. */
   map: TownMap;
   net: TownConnection;
-  /** Clicking a name opens that player's profile (by friend code). */
+  /** Their menu's "Profile" opens it (by friend code). */
   onOpenProfile?: (friendCode: string) => void;
   /** What people are saying, by friend code. */
   bubbles?: ChatBubbles;
+  /** On a sky ship's deck: the deck's group (they're drawn inside it, in
+   * its coordinates), the space their cats and companions live in. */
+  frame?: Object3D | null;
 }) {
   useTownNetVersion(net);
   return (
     <>
+      <LabelTracker net={net} />
       {[...net.remotes.values()].map((r) => (
         <RemoteHerzie
           key={r.id}
@@ -79,10 +123,100 @@ export function RemotePlayers({
           net={net}
           bubble={bubbles?.get(r.look.seed)}
           onOpenProfile={onOpenProfile}
+          frame={frame}
         />
       ))}
     </>
   );
+}
+
+/**
+ * Keeps {@link labels} up: which herzies are nearest (every RANK_MS), and
+ * which one the pointer's over (its body, roughly a ball round its middle;
+ * the name tag says so itself).
+ */
+function LabelTracker({ net }: { net: TownConnection }) {
+  const camera = useThree((s) => s.camera);
+  const surface = useThree((s) => s.gl.domElement);
+  const rankedAt = useRef(0);
+  const spots = useMemo<[number, { x: number; z: number }][]>(() => [], []);
+  useFrame(() => {
+    const now = performance.now();
+    if (now - rankedAt.current < RANK_MS) return;
+    rankedAt.current = now;
+    spots.length = 0;
+    for (const id of net.remotes.keys()) {
+      const at = entityAt.get(id);
+      if (at) spots.push([id, at]);
+    }
+    nearestIds(
+      spots,
+      townSave.x,
+      townSave.z,
+      REMOTE_LABEL.nearest,
+      labels.ranked,
+    );
+  });
+  useEffect(() => {
+    const host = surface.parentElement;
+    if (!host) return;
+    const ray = new Raycaster();
+    const ndc = new Vector2();
+    const ball = new Sphere();
+    const onMove = (e: PointerEvent) => {
+      // Over a name tag: that one says (see its pointerenter).
+      if (e.target !== surface) return;
+      const r = surface.getBoundingClientRect();
+      ndc.set(
+        ((e.clientX - r.left) / r.width) * 2 - 1,
+        -((e.clientY - r.top) / r.height) * 2 + 1,
+      );
+      ray.setFromCamera(ndc, camera);
+      let best: number | null = null;
+      let bestAlong = Number.POSITIVE_INFINITY;
+      for (const id of net.remotes.keys()) {
+        const at = entityAt.get(id);
+        if (!at) continue;
+        ball.center.set(at.x, at.top - 0.6, at.z);
+        ball.radius = 0.75;
+        if (!ray.ray.intersectsSphere(ball)) continue;
+        const along = ray.ray.origin.distanceTo(ball.center);
+        if (along < bestAlong) {
+          bestAlong = along;
+          best = id;
+        }
+      }
+      labels.hovered = best;
+    };
+    const onLeave = () => {
+      labels.hovered = null;
+    };
+    host.addEventListener("pointermove", onMove);
+    surface.addEventListener("pointerleave", onLeave);
+    return () => {
+      host.removeEventListener("pointermove", onMove);
+      surface.removeEventListener("pointerleave", onLeave);
+    };
+  }, [camera, surface, net]);
+  return null;
+}
+
+/** The labels' styles, written only when they change: every remote's
+ * are set every frame, and a style written is the page's to restyle. */
+function setStyle(
+  el: HTMLElement,
+  prop: "display" | "visibility" | "pointerEvents",
+  value: string,
+) {
+  if (el.style[prop] !== value) el.style[prop] = value;
+}
+
+/** The opacity last written to each label (read back, it's a string). */
+const opacities = new WeakMap<HTMLElement, number>();
+function setOpacity(el: HTMLElement, value: number) {
+  if (opacities.get(el) === value) return;
+  opacities.set(el, value);
+  el.style.opacity = String(value);
 }
 
 /**
@@ -98,12 +232,14 @@ function RemoteHerzie({
   net,
   bubble,
   onOpenProfile,
+  frame,
 }: {
   map: TownMap;
   remote: RemotePlayer;
   net: TownConnection;
   bubble?: ChatBubble;
   onOpenProfile?: (friendCode: string) => void;
+  frame: Object3D | null;
 }) {
   const { look } = remote;
   const lookKey = JSON.stringify(look);
@@ -114,9 +250,18 @@ function RemoteHerzie({
     [lookKey, remote.id],
   );
   useEffect(() => {
-    // Its cat spirit (if it has one) walks the same ground, round water.
+    herzie.setFrame(frame);
+  }, [herzie, frame]);
+  useEffect(() => {
+    // Its cat spirit (if it has one) walks the same ground, round water
+    // (or out on it, frozen over, where its feet slip) — or, on a deck,
+    // inside the rail.
     herzie.groundAt = (x, z) => groundY(map, x, z);
-    herzie.walkable = petWalkable(map, worldRadius(map));
+    const footing = map.ship
+      ? null
+      : petFooting(map, worldRadius(map), () => seasonNow.look.ice);
+    herzie.walkable = footing?.walkable ?? onDeck;
+    herzie.icy = footing?.icy ?? null;
   }, [herzie, map]);
   useEffect(() => {
     herzie.root.visible = false;
@@ -160,17 +305,56 @@ function RemoteHerzie({
   const downed = useRef(0);
   const hand = useMemo(() => new Vector3(), []);
   const trail = useMemo(() => new Trail(herzie.footSpread), [herzie]);
+  const labelBox = useRef<HTMLDivElement>(null);
+  const labelScale = useRef(1);
+  const titleLine = useRef<HTMLDivElement>(null);
+  const duelMark = useRef<HTMLSpanElement>(null);
+  /** Standing in the dummies' list while you duel it (see below). */
+  const target = useRef<DummyState | null>(null);
+  useEffect(
+    () => () => {
+      if (target.current) dropTarget(target.current);
+    },
+    [],
+  );
+  const menuOpen = useDuelValue(() => duel.menu?.id === remote.id);
+  /** Where it's drawn this frame (filled, not made, each frame). */
+  const drawn = useMemo(blankState, []);
 
   useFrame(({ camera }, dt) => {
     const drawnAt = net.clock.renderTime(performance.now());
-    const s = remote.buffer.sample(drawnAt);
+    const s = remote.buffer.sample(drawnAt, drawn);
     if (!s) return;
     herzie.root.visible = true;
-    if (tag.current) tag.current.style.visibility = "visible";
-    // Sitting on a bench: on its seat, not the ground.
+    if (tag.current) setStyle(tag.current, "visibility", "visible");
+    // Sitting on a bench: on its seat, not the ground. On a gangplank: on
+    // the plank.
     const seated = (s.flags & TOWN_FLAG_SITTING) !== 0;
-    const ground = groundY(map, s.x, s.z);
+    const ground = standY(map, s.x, s.z);
     herzie.root.position.set(s.x, ground + (seated ? SEAT_Y : 0), s.z);
+    // Your duel's opponent, or anyone you may fight in the Wilds: aimed at
+    // and struck like a dummy (the server judges it), while the fight's on.
+    const now = performance.now();
+    const facing =
+      (myOpponent() === remote.id && duelFighting(now)) ||
+      wildsFoe(remote.id, s, townSave, now);
+    if (facing && !target.current) {
+      const t = newTarget(`duel${remote.id}`, s.x, s.z, s.heading);
+      t.herzie = remote.id;
+      t.body = herzie;
+      t.size = HERZIE_BODY.radius / DUMMY.radius;
+      target.current = t;
+      liveDummies.push(t);
+    } else if (!facing && target.current) {
+      dropTarget(target.current);
+      target.current = null;
+    }
+    if (target.current) {
+      target.current.x = s.x;
+      target.current.y = ground;
+      target.current.z = s.z;
+      target.current.yaw = s.heading;
+    }
     // Their prints in the snow, as ours (see footprints.ts).
     if (!seated) {
       trail.step(
@@ -271,8 +455,9 @@ function RemoteHerzie({
     // while they're away.
     herzie.pathClear = rt.petClear ?? null;
     herzie.afk = (s.flags & TOWN_FLAG_AFK) !== 0;
+    // A duel's hit-stop and finishing slow-down hold its pose, not the room.
     herzie.update(
-      dt,
+      dt * fighterPace(remote.id, now),
       onIce(map, s.x, s.z, seasonNow.look.ice) ? s.speed / ICE_SPEED : s.speed,
     );
     if (herzie.released && throwsDiscs) {
@@ -286,7 +471,7 @@ function RemoteHerzie({
         mine: false,
         owner: herzie,
         hand: h,
-        target: assistTarget(from, dir, liveDummies),
+        target: assistTarget(from, dir, liveDummies, herzie),
         quick: attackSpeedOf(remote.id, performance.now()),
         bounces: shuffleOf(remote.id, performance.now()),
       });
@@ -301,7 +486,9 @@ function RemoteHerzie({
       const from = { x: s.x, z: s.z };
       const height = ground + herzie.height * 0.5;
       const targets = [
-        ...liveDummies.map((d) => ({ d, radius: DUMMY.radius })),
+        ...liveDummies
+          .filter((d) => d.body !== herzie)
+          .map((d) => ({ d, radius: DUMMY.radius * (d.size ?? 1) })),
         ...(bossFight.on && !bossFight.tower
           ? [{ d: null, radius: BOSS_STAND.radius }]
           : []),
@@ -327,7 +514,8 @@ function RemoteHerzie({
       herzie.handWorldPosition(hand);
       const from: Vec3 = [hand.x, hand.y, hand.z];
       const dir: Vec3 = [Math.sin(s.heading), 0, Math.cos(s.heading)];
-      if (stance.healers.has(remote.id)) {
+      // A Bard's lute only attacks in a duel.
+      if (stance.healers.has(remote.id) && !duelOf(remote.id)) {
         // A Bard healing: a green bolt, to whoever it most likely aimed at
         // (only its heading travels), homing on them.
         const allies: { id: number; x: number; z: number }[] = [];
@@ -343,14 +531,20 @@ function RemoteHerzie({
       } else
         waveField.cast(from, dir, {
           mine: false,
-          target: assistTarget(from, dir, liveDummies),
+          owner: herzie,
+          target: assistTarget(from, dir, liveDummies, herzie),
         });
     }
     // Knocked out (in the cave, or anywhere outside a fight): lying where
-    // it fell, with a mark a Bard can spot from across the room.
-    const down = entityDown(remote.id) || remote.down;
+    // it fell, with a mark a Bard can spot from across the room. Taken down
+    // in the Wilds it lies there too, with no mark: it gets up by itself.
+    const ko = entityDown(remote.id) || !!remote.down;
+    const down = ko || wildsDown(remote.id);
     downed.current = applyDowned(herzie, down, downed.current, dt);
-    if (downMark.current) downMark.current.style.display = down ? "" : "none";
+    // A duel's blows and its end, on this herzie (see duel/fx).
+    poseFighter(herzie, remote.id, now, dt);
+    if (downMark.current)
+      setStyle(downMark.current, "display", ko ? "" : "none");
     // A thrown disc isn't in the hand.
     herzie.setHeldHidden("held-l", discField.isOut(herzie, "held-l"));
     herzie.setHeldHidden("held-r", discField.isOut(herzie, "held-r"));
@@ -370,12 +564,22 @@ function RemoteHerzie({
     if (bubbleBox.current) {
       const near =
         Math.hypot(s.x - townSave.x, s.z - townSave.z) <= BUBBLE_RANGE;
-      bubbleBox.current.style.display = near ? "" : "none";
+      setStyle(bubbleBox.current, "display", near ? "" : "none");
     }
-    // In a fight, a small health bar under the name.
+    // In a fight, a small health bar under the name: a duel's for its two
+    // (bigger over your opponent), the boss fight's for everyone, the
+    // Wilds' once it's been hurt.
+    const ring = ringOf(remote.id);
+    const opponent = myOpponent() === remote.id;
     if (hpBox.current && hpFill.current) {
-      const h = bossFight.on ? bossFight.health.get(remote.id) : undefined;
-      hpBox.current.style.display = h ? "" : "none";
+      const h = ring
+        ? ring.health.get(remote.id)
+        : bossFight.on
+          ? bossFight.health.get(remote.id)
+          : wildsBarOf(remote.id, now);
+      setStyle(hpBox.current, "display", h ? "" : "none");
+      const big = opponent ? "1" : "";
+      if (hpBox.current.dataset.big !== big) hpBox.current.dataset.big = big;
       if (h) {
         // Written only when it moved a whole percent.
         const pct = Math.round(Math.max(0, Math.min(1, h.hp / h.maxHp)) * 100);
@@ -388,27 +592,47 @@ function RemoteHerzie({
         }
       }
     }
-    // Names (and health bars) fade in as you come near; away dims them.
+    // Names, titles (and health bars) fade in as you come near; away dims
+    // them. Only the nearest few are named; a duel's two carry far.
     const away = (s.flags & TOWN_FLAG_AFK) !== 0;
-    const fade = nameOpacity(Math.hypot(s.x - townSave.x, s.z - townSave.z));
+    const label = remoteLabel(Math.hypot(s.x - townSave.x, s.z - townSave.z), {
+      duelist: !!duelOf(remote.id),
+      hovered: labels.hovered === remote.id,
+      ranked: labels.ranked.size === 0 || labels.ranked.has(remote.id),
+    });
+    const dim = away ? 0.45 : 1;
     if (tag.current) {
-      tag.current.style.opacity = String(fade * (away ? 0.45 : 1));
+      setOpacity(tag.current, label.name * dim);
       // Faded out, so not clickable either.
-      tag.current.style.pointerEvents = fade < 0.1 ? "none" : "";
+      setStyle(tag.current, "pointerEvents", label.name < 0.1 ? "none" : "");
       if (away !== afk.current) {
         afk.current = away;
         tag.current.dataset.afk = away ? "1" : "";
       }
     }
-    if (hpBox.current) hpBox.current.style.opacity = String(fade);
+    if (titleLine.current) setOpacity(titleLine.current, label.title * dim);
+    if (
+      labelBox.current &&
+      Math.abs(label.scale - labelScale.current) > 0.005
+    ) {
+      labelScale.current = label.scale;
+      labelBox.current.style.transform = `scale(${label.scale})`;
+    }
+    if (hpBox.current) setOpacity(hpBox.current, label.hp);
+    if (duelMark.current) {
+      const shown = ring && ring.endedAt === null ? "" : "none";
+      setStyle(duelMark.current, "display", shown);
+    }
   });
 
+  const title = titleName(remote.title);
   return (
     <>
       <primitive object={herzie.root} />
       <group ref={tagAnchor}>
         <Html zIndexRange={[19, 0]}>
-          {/* Stacked up from the anchor: the bubble over the name. */}
+          {/* Stacked up from the anchor: the bubble over the title, the
+              title over the name. */}
           <div className="flex -translate-x-1/2 -translate-y-full flex-col items-center">
             <div
               ref={downMark}
@@ -422,25 +646,57 @@ function RemoteHerzie({
             <div ref={bubbleBox}>
               {bubble ? <HeadBubble key={bubble.key} bubble={bubble} /> : null}
             </div>
-            <button
-              type="button"
-              ref={tag}
-              onClick={() => onOpenProfile?.(look.seed)}
-              className="cursor-pointer whitespace-nowrap border-0 bg-transparent p-0 text-[11px] font-medium leading-tight text-white hover:underline"
-              // Hidden until the first state arrives, rather than at the origin.
-              style={{ textShadow: NAME_SHADOW, visibility: "hidden" }}
-            >
-              {remote.gm ? <GmMark className="[text-shadow:none]" /> : null}
-              {remote.name}
-            </button>
             <div
-              ref={hpBox}
-              className="pointer-events-none mt-px h-[3px] w-10 overflow-hidden rounded-sm bg-black/60 data-[low=1]:animate-pulse data-[low=1]:outline data-[low=1]:outline-1 data-[low=1]:outline-red-400/70 motion-reduce:animate-none"
-              style={{ display: "none" }}
+              ref={labelBox}
+              className="flex origin-bottom flex-col items-center"
             >
-              <div ref={hpFill} className="h-full" />
+              {title ? (
+                <div
+                  ref={titleLine}
+                  className="pointer-events-none whitespace-nowrap text-[9px] font-medium leading-tight"
+                  style={{ color: WORN_TITLE_COLOUR, textShadow: NAME_SHADOW }}
+                >
+                  {title}
+                </div>
+              ) : null}
+              <button
+                type="button"
+                ref={tag}
+                onClick={(e) => openPlayerMenu(remote.id, e.clientX, e.clientY)}
+                onPointerEnter={() => {
+                  labels.hovered = remote.id;
+                }}
+                onPointerLeave={() => {
+                  if (labels.hovered === remote.id) labels.hovered = null;
+                }}
+                className="cursor-pointer whitespace-nowrap border-0 bg-transparent p-0 text-[11px] font-medium leading-tight text-white hover:underline"
+                // Hidden until the first state arrives, rather than at the origin.
+                style={{ textShadow: NAME_SHADOW, visibility: "hidden" }}
+              >
+                <span
+                  ref={duelMark}
+                  role="img"
+                  aria-label="In a duel"
+                  className="mr-0.5 text-[#ffd84a]"
+                  style={{ display: "none" }}
+                >
+                  ⚔
+                </span>
+                {remote.gm ? <GmMark className="[text-shadow:none]" /> : null}
+                {remote.name}
+              </button>
+              <div
+                ref={hpBox}
+                className="pointer-events-none mt-px h-[3px] w-10 overflow-hidden rounded-sm bg-black/60 data-[big=1]:mt-0.5 data-[big=1]:h-[5px] data-[big=1]:w-16 data-[low=1]:animate-pulse data-[low=1]:outline data-[low=1]:outline-1 data-[low=1]:outline-red-400/70 motion-reduce:animate-none"
+                style={{ display: "none" }}
+              >
+                <div ref={hpFill} className="h-full" />
+              </div>
             </div>
           </div>
+          {menuOpen ? (
+            <PlayerMenu remote={remote} onOpenProfile={onOpenProfile} />
+          ) : null}
         </Html>
       </group>
     </>

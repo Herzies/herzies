@@ -6,6 +6,7 @@ import {
   type HerzieModel,
 } from "@herzies/shared/gl";
 import { Vector3 } from "three";
+import { clamp01, smooth } from "../easing";
 
 /**
  * A Percussionist's strikes, as the eye sees them: a swipe over the ground
@@ -97,12 +98,6 @@ export type Slash = {
 };
 
 const _at = new Vector3();
-
-const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
-const smooth = (a: number, b: number, v: number) => {
-  const t = clamp01((v - a) / (b - a));
-  return t * t * (3 - 2 * t);
-};
 
 export class SlashField {
   readonly slashes: Slash[] = Array.from({ length: MAX_SLASHES }, () => ({

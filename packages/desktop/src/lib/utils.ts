@@ -11,16 +11,6 @@ export function formatAmount(n: number): string {
     .replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
-const nokFormatter = new Intl.NumberFormat("nb-NO", {
-  style: "currency",
-  currency: "NOK",
-});
-
-/** Formats a whole-øre amount as a NOK price string (e.g. 2000 -> "20,00 kr"). */
-export function formatNok(ore: number): string {
-  return nokFormatter.format(ore / 100);
-}
-
 /**
  * Formats a minor-unit amount in whatever currency Stripe reports, so nothing
  * client-side has to assume NOK — switching the store to USD or EUR is then a

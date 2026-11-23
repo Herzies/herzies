@@ -211,6 +211,9 @@ function drawTag(ctx: CanvasRenderingContext2D, hp: number, maxHp: number) {
   ctx.fillRect(x, 28, w * Math.max(0, Math.min(1, hp / maxHp)), 6);
 }
 
+/** Where each mob is this frame (see mobAt): one, reused by them all. */
+const _at = { x: 0, z: 0, yaw: 0 };
+
 /** Re-rendered only when its own props change, not on every fight update. */
 const Mob = memo(function Mob({ id }: { id: number }) {
   const group = useRef<THREE.Group>(null);
@@ -285,7 +288,7 @@ const Mob = memo(function Mob({ id }: { id: number }) {
     if (!m || !g) return;
     const dt = Math.min(frameDt, 0.1);
     const now = performance.now();
-    const at = mobAt(m, now - drawDelayMs());
+    const at = mobAt(m, now - drawDelayMs(), _at);
     g.position.set(at.x, 0, at.z);
     g.rotation.y = at.yaw;
 

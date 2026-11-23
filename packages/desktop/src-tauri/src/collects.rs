@@ -204,6 +204,7 @@ fn add_unit(units: &mut Vec<ItemUnit>, drop: &PendingDrop) {
         item_id: drop.item_id.clone(),
         upgrade_level: 0,
         equipped_slot: None,
+        held_by: None,
     });
 }
 
@@ -217,6 +218,7 @@ mod tests {
             id: id.into(),
             item_id: item.into(),
             dropped_at: "2026-11-05T00:00:00Z".into(),
+            wilds: false,
         }
     }
 
@@ -226,6 +228,7 @@ mod tests {
             item_id: item.into(),
             upgrade_level: 0,
             equipped_slot: None,
+            held_by: None,
         }
     }
 

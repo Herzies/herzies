@@ -4,6 +4,7 @@ import {
   type HerzieStats,
   type ItemUnit,
   isTownMapId,
+  MADAS_KEY,
   TOWER_GUARD_KEY,
 } from "@herzies/shared";
 import {
@@ -32,6 +33,8 @@ import {
 } from "./PlayerBars";
 import { type EventCard, formatIn, isDown } from "./TownScene";
 import { TownVitals } from "./TownVitals";
+import { useAboardNear } from "./town/airship/frames";
+import { SkyDockHud } from "./town/airship/SkyDockHud";
 import { BossHud, MusicBonus } from "./town/BossHud";
 import { BossResults } from "./town/BossResults";
 import { setCave } from "./town/cave";
@@ -41,16 +44,27 @@ import { bossFight, resetBossFight, useBossFight } from "./town/combat/fight";
 import { onLootLog } from "./town/combat/lootFeed";
 import { useBossResultsShown } from "./town/combat/results";
 import { useCombat } from "./town/combat/state";
+import { DuelHud } from "./town/duel/DuelHud";
 import { drawn, useFpsShown } from "./town/fps";
 import { Hotbar } from "./town/Hotbar";
 import { homeMode, markWorldSettled } from "./town/homeMode";
 import { Key } from "./town/Key";
+import { LocationTitle } from "./town/LocationTitle";
 import type { TownMap } from "./town/map";
 import { markMet } from "./town/met";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
-import { spotsOf, type TownSpot, townLive, useTownMap } from "./town/runtime";
+import {
+  mapById,
+  spotsOf,
+  type TownSpot,
+  townLive,
+  townSave,
+  useTownMap,
+} from "./town/runtime";
 import { CastBar, SkillHud } from "./town/SkillHud";
+import type { BenchPrompt } from "./town/TownCanvas";
 import { useTuneSender } from "./town/tune";
+import { WildsHud } from "./town/wilds/WildsHud";
 
 // three.js, Rapier's WASM and friends: loaded the first time someone opens
 // the Town, not at app start.
@@ -58,6 +72,10 @@ const TownCanvas = lazy(() => import("./town/TownCanvas"));
 
 const spotKey = (card: EventCard) =>
   `${card.type}-${card.eventId ?? card.status}`;
+
+/** Who stands only where a map gives them a spot of their own (never on a
+ * spare one), and doesn't bring the visitors along with them. */
+const PINNED: ReadonlySet<string> = new Set([TOWER_GUARD_KEY, MADAS_KEY]);
 
 /**
  * The Town as a place you walk around in third person: your own herzie on
@@ -103,6 +121,9 @@ export function TownWorld({
     multipliers?: ActiveMultiplier[] | null;
     /** The class's name ("Bard"), after the level. */
     classLabel?: string;
+    /** The title it wears (titles.ts), over your herzie's name and on the
+     * duel's cards (not on this card). */
+    title?: string | null;
     /** What's playing, under the card. */
     nowPlaying?: AppState["nowPlaying"];
   };
@@ -148,9 +169,7 @@ export function TownWorld({
   useEffect(() => onLootLog((message) => onLog?.(message)), [onLog]);
   const [near, setNear] = useState<TownSpot | null>(null);
   const endScreen = useBossResultsShown() !== null;
-  const [bench, setBench] = useState<
-    "sit" | "stand" | "read" | "attune" | "upgrade" | null
-  >(null);
+  const [bench, setBench] = useState<BenchPrompt | null>(null);
   const [portalTo, setPortalTo] = useState<TownMap | null>(null);
   const fighting = useCombat();
   const fpsShown = useFpsShown();
@@ -177,13 +196,15 @@ export function TownWorld({
   // A backdrop runs until that first frame is up.
   const canvasPaused = paused && !(backdrop && !ready);
 
-  // The visitors stand on islands with spots for them (home), not out on
-  // the training grounds.
+  // The visitors stand on islands with spots for them (home), not out in
+  // the Tower or the cave.
   const map = useTownMap();
-  // Everyone else on the island you're on.
+  // Everyone else on the island you're on (aboard a sky ship: that ship's
+  // room, its shard the ship).
   useEffect(() => {
-    if (isTownMapId(map.id)) net.setMap(map.id);
-  }, [map.id, net]);
+    if (isTownMapId(map.id))
+      net.setMap(map.id, map.ship ? townSave.ship : undefined);
+  }, [map.id, map.ship, net]);
   // Out of the boss room (or the Tower), the fight is forgotten.
   useEffect(() => {
     if (map.id !== "bossroom" && map.id !== "tower") resetBossFight();
@@ -207,25 +228,29 @@ export function TownWorld({
       setCave({ kind: "soon", startsAt: at });
     else setCave({ kind: "sealed" });
   }, [bossStatus, bossAt, bossDown]);
+  // Aboard a sky ship, the island it's nearest is the one drawn (see
+  // TownCanvas), and its visitors with it: they're there before you step
+  // ashore, not made the moment you do.
+  const aboardNear = useAboardNear();
+  const island = map.ship ? mapById(aboardNear) : map;
   const spots = useMemo<TownSpot[]>(() => {
-    if (Object.keys(map.spots).length === 0) return [];
-    const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(map);
+    if (Object.keys(island.spots).length === 0) return [];
+    const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(island);
     // A map with visitors on it has a spot for one of them; the Tower
-    // Guard's alone (the Tower's door, say) brings only him.
-    const visitorMap = Object.keys(map.spots).some(
-      (k) => k !== TOWER_GUARD_KEY,
-    );
+    // Guard's or Madas's alone (the Tower's door, the Wilds' camp) brings
+    // only them.
+    const visitorMap = Object.keys(island.spots).some((k) => !PINNED.has(k));
     let spare = 0;
     return (
       cards
         // The boss isn't in town: it's in its cave (see CaveTimer).
         .filter((c) => c.type !== "boss_fight")
         .filter((c) => c.type !== "treat_trader" || c.status !== "idle")
-        // The Tower Guard stands only where a map gives him a spot (the
-        // map editor): never on a spare one. Everyone else only on a
-        // visitor map, and only with somewhere to stand.
+        // The Tower Guard and Madas stand only where a map gives them a
+        // spot (the map editor): never on a spare one. Everyone else only
+        // on a visitor map, and only with somewhere to stand.
         .filter((c) =>
-          c.type === TOWER_GUARD_KEY
+          PINNED.has(c.type)
             ? !!SPOTS[c.type]
             : visitorMap && (!!SPOTS[c.type] || SPARE_SPOTS.length > 0),
         )
@@ -248,7 +273,7 @@ export function TownWorld({
           };
         })
     );
-  }, [cards, map]);
+  }, [cards, island]);
 
   const equippedKey = JSON.stringify(player.equipped ?? null);
   // Ground accessories (the boombox) belong to the herzie's Home, not to a
@@ -328,12 +353,7 @@ export function TownWorld({
       )}
     >
       {net.status === "outdated" ? (
-        <div
-          className={cn(
-            // Top right.
-            "pointer-events-none absolute top-[calc(var(--hud-top,0px)+0.75rem)] right-3 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70",
-          )}
-        >
+        <div className="pointer-events-none absolute top-[calc(var(--hud-top,0px)+0.75rem)] right-3 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70">
           Update Herzies to see other players
         </div>
       ) : null}
@@ -375,8 +395,15 @@ export function TownWorld({
                 multipliers={profile.multipliers ?? null}
                 tint={cn(PLAYER_CARD_TOWN, "backdrop-blur-md")}
               />
-              <MusicBonus />
-              {!hudHidden ? <SkillHud stacked className="" /> : null}
+              {/* One stacked list under it: where you stand on the Wilds
+                  and the Sky Dock's board first (they stay), then the
+                  music bonus and your buffs (they come and go). */}
+              <div className="pointer-events-none flex flex-col self-start">
+                <WildsHud />
+                <SkyDockHud />
+                <MusicBonus />
+                {!hudHidden ? <SkillHud stacked className="" /> : null}
+              </div>
             </div>
             <div
               className={cn(
@@ -449,6 +476,8 @@ export function TownWorld({
               net={net}
               bubbles={bubbles}
               player={look}
+              playerName={profile?.name}
+              playerTitle={profile?.title}
               paused={canvasPaused}
               onOpen={onOpen}
               onOpenProfile={onOpenProfile}
@@ -467,6 +496,10 @@ export function TownWorld({
           <div className={hudFade}>
             <TownVitals inFight={!!map.combat} chatOverlay={chatOverlay} />
             <BossHud name={bossCard?.title ?? "The boss"} />
+            {profile ? (
+              <DuelHud me={{ name: profile.name, title: profile.title }} />
+            ) : null}
+            <LocationTitle />
           </div>
           <BossResults interactive={!windowOpen} />
         </>
@@ -508,7 +541,7 @@ export function TownWorld({
             : `${
                 portalTo.id === "home"
                   ? "Back to "
-                  : portalTo.room
+                  : portalTo.room === "dark"
                     ? "Enter "
                     : "Enter the "
               }${portalTo.name}`}{" "}
@@ -525,15 +558,21 @@ export function TownWorld({
             promptAt,
           )}
         >
-          {bench === "sit"
-            ? "Sit down"
-            : bench === "read"
-              ? "Read the bulletin board"
-              : bench === "attune"
-                ? "Attune to the Crystal"
-                : bench === "upgrade"
-                  ? "Upgrade crystal"
-                  : "Stand up"}{" "}
+          {typeof bench === "object"
+            ? `Pick up ${bench.name}`
+            : bench === "sit"
+              ? "Sit down"
+              : bench === "read"
+                ? "Read the bulletin board"
+                : bench === "attune"
+                  ? "Attune to the Crystal"
+                  : bench === "upgrade"
+                    ? "Upgrade crystal"
+                    : bench === "crafting"
+                      ? "Crafting Station"
+                      : bench === "hunt"
+                        ? "Talk to the Hunt Crystal"
+                        : "Stand up"}{" "}
           <span className="text-text-dim">[E]</span>
         </button>
       ) : null}
@@ -575,11 +614,10 @@ class TownBoundary extends Component<
   }
 }
 
-/** A key, as the hints show it. */
-/** Frames drawn per second, counted over each half second: the Town's,
- * counted from the canvas's own draws (it slows down unfocused). Shown from Settings →
- * Controls. Top right; in a raid the boss's card has that corner, so it
- * sits just left of it (the card's width, BossHud's BOSS_CARD). */
+/** Frames drawn per second, counted over each half second from the Town
+ * canvas's own draws. Shown from Settings → Controls. Top right; in a raid
+ * the boss's card has that corner, so it sits just left of it (the card's
+ * width, BossHud's BOSS_CARD). */
 function FrameRate({ className }: { className?: string }) {
   useBossFight();
   const bossCard = bossFight.on && !bossFight.tower;

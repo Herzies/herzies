@@ -9,6 +9,7 @@ import {
   SPARK_SECONDS,
 } from "../combat/discs";
 import type { Vec3 } from "../combat/waves";
+import { easeOut } from "../easing";
 import { distortionScene } from "./distortion";
 import {
   FxLayer,
@@ -17,6 +18,7 @@ import {
   NOTES,
   SPARK,
   scatter,
+  upload,
   useMotes,
   WHITE,
 } from "./SonicVFX";
@@ -66,8 +68,6 @@ const _normal: Vec3 = [0, 1, 0];
 const _v: Vec3 = [0, 0, 0];
 const _at: Vec3 = [0, 0, 0];
 const Y = new THREE.Vector3(0, 1, 0);
-
-const easeOut = (t: number) => 1 - (1 - t) ** 3;
 
 /** How it's turned: heading the way it's going, banked, nose up, spun. */
 function orient(d: Disc, out: THREE.Quaternion): THREE.Quaternion {
@@ -248,8 +248,12 @@ export function DiscVFX() {
     }
     for (const m of [disc, hub, glint]) {
       m.count = n;
-      m.instanceMatrix.needsUpdate = true;
+      if (n > 0) upload(m.instanceMatrix, n);
     }
+    // Hidden with none in flight; but not the disc itself, which casts a
+    // shadow: drawn into the shadow map, empty or not, its shadow shader
+    // is ready for the first throw.
+    hub.visible = glint.visible = n > 0;
 
     for (const s of discField.sparks) {
       if (!s.alive) continue;

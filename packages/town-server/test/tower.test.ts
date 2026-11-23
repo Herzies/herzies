@@ -1,3 +1,4 @@
+import { IN_TUNE } from "@herzies/shared/boss-fight";
 import { DOME, discChain } from "@herzies/shared/combat";
 import {
   RIMSHOT,
@@ -12,6 +13,7 @@ import {
   MOB_KINDS,
   MOB_SWING,
   mobsOnFloor,
+  TOWER_CHEST,
   towerMob,
 } from "@herzies/shared/tower";
 import {
@@ -613,5 +615,171 @@ describe("FightRuntime in the Tower", () => {
   it("won't go on before the floor's cleared", () => {
     const f = tower();
     expect(f.next("u", T0)).toEqual([]);
+  });
+
+  it("music is the cave's bonus here too: in after the settle, out after the linger", () => {
+    const f = FightRuntime.tower(claim, "u", 5, ARENA, T0, 3);
+    const tough = { hp: { hp: 1e6, maxHp: 1e6, down: false } };
+    f.join("u", 1, ticket({ cls: "record_slinger", ...tough }), { x: 0, z: 0 }, T0);
+    const steps = (from: number, until: number) => {
+      const out: Outbound[] = [];
+      for (let t = from; t <= until; t += 50) out.push(...f.step(t));
+      return out;
+    };
+    f.tune("u", true, T0);
+    expect(said(steps(T0, T0 + IN_TUNE.settleMs - 100), "buff")).toEqual([]);
+    const on = steps(T0 + IN_TUNE.settleMs - 50, T0 + IN_TUNE.settleMs + 100);
+    expect(said(on, "buff").map((o) => o.msg)).toMatchObject([
+      { id: 1, buff: "in_tune", kind: "damage", value: IN_TUNE.damage },
+    ]);
+    // The engine has it, so the Tower's hits are that much harder.
+    const at = T0 + IN_TUNE.settleMs + 200;
+    expect(f.tower?.buffsOf("u", at)).toMatchObject([
+      { id: "in_tune", kind: "damage", value: IN_TUNE.damage },
+    ]);
+    f.tune("u", false, at);
+    expect(said(steps(at, at + IN_TUNE.lingerMs - 100), "buffOff")).toEqual([]);
+    const off = steps(at + IN_TUNE.lingerMs - 50, at + IN_TUNE.lingerMs + 100);
+    expect(said(off, "buffOff").map((o) => o.msg)).toMatchObject([
+      { id: 1, buff: "in_tune" },
+    ]);
+    expect(f.tower?.buffsOf("u", at + IN_TUNE.lingerMs + 200)).toEqual([]);
+  });
+
+  it("an in-tune Record Slinger hits a Tower mob a quarter harder", () => {
+    const dealt = (tuned: boolean) => {
+      const e = engine(10, 10);
+      if (tuned)
+        e.buff("u", { id: "in_tune", kind: "damage", value: IN_TUNE.damage, until: T0 + 1e7 });
+      const mob = e.wireMobs()[0];
+      const from = { x: mob.x, z: mob.z - 6 };
+      e.cast("u", from, aimAt(from, mob), 0, { ...STATS, sonicPower: 200 }, T0);
+      const hit = run(e, T0, T0 + 1_000, []).find((x) => x.t === "hit");
+      if (hit?.t !== "hit") throw new Error("no hit");
+      return hit.damage;
+    };
+    const plain = dealt(false);
+    expect(plain).toBeGreaterThan(20);
+    expect(Math.abs(dealt(true) - plain * IN_TUNE.damage)).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("the Warden's chest", () => {
+  /** Hard enough to fell a Warden in a few waves. */
+  const BIG = { sonicPower: 5_000, critChance: 0, critDamage: 0 };
+
+  /** Fires at whatever's left from out of its reach, stepping with `step`,
+   * till the floor's cleared. Returns when it was. */
+  function clearWith(
+    tw: TowerEngine,
+    from: number,
+    step: (t: number) => void,
+  ): number {
+    let t = from;
+    while (!tw.isCleared && t < from + 120_000) {
+      const mob = tw.wireMobs()[0];
+      const at = { x: mob.x - 5, z: mob.z };
+      tw.cast("u", at, aimAt(at, mob), 0, BIG, t);
+      for (let i = 0; i < 10 && !tw.isCleared; i++) step((t += 50));
+    }
+    if (!tw.isCleared) throw new Error("not cleared");
+    return t;
+  }
+
+  it("stands only on a cleared 10th floor", () => {
+    for (const floor of [9, 10, 11, 20]) {
+      const e = engine(floor, 99);
+      expect(e.view().chest).toBeUndefined();
+      clearWith(e, T0, (t) => e.update(t, []));
+      expect(e.view().chest).toEqual(
+        floor % 10 === 0 ? TOWER_CHEST.at : undefined,
+      );
+    }
+  });
+
+  it("opens once to a herzie who walks up, after it's landed", () => {
+    const e = engine(10, 99);
+    const cleared = clearWith(e, T0, (t) => e.update(t, []));
+    const near = player(() => ({ x: TOWER_CHEST.reach - 0.2, z: 0 }));
+    const far = player(() => ({ x: TOWER_CHEST.reach + 0.5, z: 0 }));
+    const chests = (evs: TowerEvent[]) => evs.filter((x) => x.t === "chest");
+    // Landing: even on the star, it waits.
+    expect(chests(run(e, cleared, cleared + TOWER_CHEST.settleMs - 100, [near]))).toEqual([]);
+    const after = cleared + TOWER_CHEST.settleMs;
+    expect(chests(run(e, after, after + 2_000, [far]))).toEqual([]);
+    expect(e.view().chest).toEqual(TOWER_CHEST.at);
+    expect(chests(run(e, after + 2_050, after + 6_000, [near]))).toEqual([
+      { t: "chest", floor: 10, x: TOWER_CHEST.at.x, z: TOWER_CHEST.at.z },
+    ]);
+    expect(e.view().chest).toBeUndefined();
+    expect(e.openChest()).toBeNull();
+    // On to 11: none there.
+    expect(e.next(after + 6_100)).toBe(true);
+    expect(e.view().chest).toBeUndefined();
+  });
+
+  function fight() {
+    const claim = { event: "tower-1", until: (T0 + 3_600_000) / 1000, floor: 10 };
+    const f = FightRuntime.tower(claim, "u", 99, ARENA, T0, 3);
+    f.join("u", 1, ticket({ lv: 99 }), ARENA.entry, T0);
+    const tw = f.tower;
+    if (!tw) throw new Error("not a tower");
+    const out: Outbound[] = [];
+    let at: { x: number; z: number } = ARENA.entry;
+    const step = (t: number) => {
+      f.onState("u", at.x, at.z, t);
+      out.push(...f.step(t));
+    };
+    const t = clearWith(tw, T0, step);
+    const goTo = (to: { x: number; z: number }) => {
+      at = to;
+    };
+    return { f, tw, out, step, goTo, t };
+  }
+
+  it("in a fight: walked up to, it opens once and its loot comes out of it", () => {
+    const { f, out, step, goTo, t } = fight();
+    const floors = () =>
+      said(out, "floor").map((o) => (o.msg.t === "floor" ? o.msg : null));
+    expect(floors().at(-1)?.chest).toEqual(TOWER_CHEST.at);
+    const first = f.report(t, true);
+    expect(first?.tower?.cleared).toBe(10);
+    expect(first?.tower?.chest).toBeUndefined();
+    if (first) f.reported(first);
+
+    goTo(TOWER_CHEST.at);
+    let now = t;
+    while (now < t + TOWER_CHEST.settleMs + 500) step((now += 50));
+    expect(floors().at(-1)?.chest).toBeUndefined();
+    const report = f.report(now, true);
+    const batch = report?.tower;
+    expect(batch?.chest).toEqual({ floor: 10, ...TOWER_CHEST.at });
+    if (!report || !batch) throw new Error("no batch");
+    const loot = f.towerLoot(
+      { drops: [], chest: [{ id: "d1", item: "ghost" }] },
+      batch,
+    );
+    expect(loot.map((o) => o.msg)).toEqual([
+      { t: "loot", drops: [{ id: "d1", item: "ghost" }], at: TOWER_CHEST.at },
+    ]);
+    f.reported(report);
+    // Standing on, or going on: no second chest.
+    while (now < t + 5_000) step((now += 50));
+    expect(f.report(now, true)?.tower?.chest).toBeUndefined();
+    f.next("u", now);
+    expect(f.report(now + 50, true)?.tower?.chest).toBeUndefined();
+  });
+
+  it("in a fight: going on with it shut opens it on the way", () => {
+    const { f, tw, t } = fight();
+    expect(tw.view().chest).toEqual(TOWER_CHEST.at);
+    const next = f.next("u", t);
+    expect(tw.floor).toBe(11);
+    const floor = said(next, "floor")[0]?.msg;
+    expect(floor?.t === "floor" && floor.chest).toBeUndefined();
+    expect(f.report(t + 50, true)?.tower?.chest).toEqual({
+      floor: 10,
+      ...TOWER_CHEST.at,
+    });
   });
 });

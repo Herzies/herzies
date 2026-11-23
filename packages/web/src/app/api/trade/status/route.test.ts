@@ -41,7 +41,10 @@ function adminWithTrade(state: string, expiresAt: string) {
                 created_at: "2026-09-14T00:00:00Z",
                 expires_at: expiresAt,
               }
-            : { name: "Someone", friend_code: "HERZ-X" },
+            : [
+                { user_id: "user-me", name: "Me" },
+                { user_id: "user-them", name: "Someone" },
+              ],
         error: null,
       });
     return chain;

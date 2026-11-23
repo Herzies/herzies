@@ -1,6 +1,7 @@
 import {
   BOBOKU_SCHEME_ID,
   GOLD_SCHEME_ID,
+  MADAS_SCHEME_ID,
   MEDEA_SCHEME_ID,
   NAKATA_SCHEME_ID,
   NANDOR_SCHEME_ID,
@@ -86,4 +87,29 @@ export const PIP_STAGE = 1;
 export const PIP_EQUIPPED: Equipped = {
   head: "headphones",
   color: PIP_SCHEME_ID,
+};
+
+/** Blåmann the skipper's look: grown up (stage 3), sea blue (Poseidon's
+ * Gift), in a red sailor's beanie (his alone, for now) and the Sailor's
+ * Starter Pack — a white walrus moustache and his pipe, smoking: an old
+ * hand who's crossed the sky more times than he's crossed the street. */
+export const SKIPPER_SEED = "npc:skipper";
+export const SKIPPER_STAGE = 3;
+export const SKIPPER_EQUIPPED: Equipped = {
+  head: "sailors-beanie",
+  face: "sailors-starter-pack",
+  color: "poseidons-gift",
+};
+
+/** Madas's look: grown up (stage 3), gold from the feet up and still
+ * grubby at the crown (MADAS_RAMP), under Plutus' Crown (or one just like
+ * it: he swears it's his), with Ludvig's Lariat round his neck and a
+ * monocle for counting it all. */
+export const MADAS_SEED = "npc:madas";
+export const MADAS_STAGE = 3;
+export const MADAS_EQUIPPED: Equipped = {
+  head: "plutus-crown",
+  face: "fyllings-monocle",
+  body: "gold-chain",
+  color: MADAS_SCHEME_ID,
 };

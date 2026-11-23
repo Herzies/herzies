@@ -118,8 +118,10 @@ export class EntityBuffer {
     return this.samples.length === 0;
   }
 
-  /** Where to draw the herzie at server time `t`. */
-  sample(t: number): TownState | null {
+  /** Where to draw the herzie at server time `t`, written into `out` and
+   * returned: a caller drawing every frame keeps one to fill, rather than
+   * a new state a frame. */
+  sample(t: number, out: TownState = blankState()): TownState | null {
     const n = this.samples.length;
     if (n === 0) return null;
     // Drop states nobody will draw again, keeping the one just before `t`.
@@ -133,38 +135,51 @@ export class EntityBuffer {
     if (drop) this.samples.splice(0, drop);
 
     const first = this.samples[0];
-    if (t <= first.t) return first.s;
+    if (t <= first.t) return copyState(first.s, out);
     for (let i = 1; i < this.samples.length; i++) {
       const b = this.samples[i];
       if (t >= b.t) continue;
       const a = this.samples[i - 1];
       if (Math.hypot(b.s.x - a.s.x, b.s.z - a.s.z) > TELEPORT_DISTANCE)
-        return a.s;
+        return copyState(a.s, out);
       const k = (t - a.t) / (b.t - a.t);
-      return {
-        x: a.s.x + (b.s.x - a.s.x) * k,
-        z: a.s.z + (b.s.z - a.s.z) * k,
-        heading: a.s.heading + angleDelta(a.s.heading, b.s.heading) * k,
-        speed: a.s.speed + (b.s.speed - a.s.speed) * k,
-        flags: a.s.flags,
-      };
+      out.x = a.s.x + (b.s.x - a.s.x) * k;
+      out.z = a.s.z + (b.s.z - a.s.z) * k;
+      out.heading = a.s.heading + angleDelta(a.s.heading, b.s.heading) * k;
+      out.speed = a.s.speed + (b.s.speed - a.s.speed) * k;
+      out.flags = a.s.flags;
+      return out;
     }
     // Past the newest state: a herzie that was walking keeps going a moment
     // along its last movement (covers a late packet), then stops there.
     const last = this.samples[this.samples.length - 1];
     const prev = this.samples[this.samples.length - 2];
-    if (!prev || last.s.speed === 0) return last.s;
+    if (!prev || last.s.speed === 0) return copyState(last.s, out);
     const span = last.t - prev.t;
     const dx = last.s.x - prev.s.x;
     const dz = last.s.z - prev.s.z;
-    if (span <= 0 || Math.hypot(dx, dz) > TELEPORT_DISTANCE) return last.s;
+    if (span <= 0 || Math.hypot(dx, dz) > TELEPORT_DISTANCE)
+      return copyState(last.s, out);
     const ahead = Math.min(t - last.t, EXTRAPOLATE_MS);
     const k = ahead / span;
-    return {
-      ...last.s,
-      x: last.s.x + dx * k,
-      z: last.s.z + dz * k,
-      speed: t - last.t >= EXTRAPOLATE_MS ? 0 : last.s.speed,
-    };
+    copyState(last.s, out);
+    out.x = last.s.x + dx * k;
+    out.z = last.s.z + dz * k;
+    out.speed = t - last.t >= EXTRAPOLATE_MS ? 0 : last.s.speed;
+    return out;
   }
+}
+
+/** A state to fill (see EntityBuffer.sample). */
+export function blankState(): TownState {
+  return { x: 0, z: 0, heading: 0, speed: 0, flags: 0 };
+}
+
+function copyState(from: TownState, to: TownState): TownState {
+  to.x = from.x;
+  to.z = from.z;
+  to.heading = from.heading;
+  to.speed = from.speed;
+  to.flags = from.flags;
+  return to;
 }

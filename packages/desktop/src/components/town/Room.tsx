@@ -7,9 +7,10 @@ const WALL_COLOR = "#2b2536";
 const WALL_HEIGHT = 11;
 
 /**
- * A room instead of an island: a ring of rough rock round the floor, open
- * to a dark ceiling you never see. What's inside (the gravel floor, lamps,
- * rocks) is the map's own; the dark is DayLight's.
+ * A dark room (the boss's cave) instead of an island: a ring of rough
+ * rock round the floor, open to a dark ceiling you never see. What's
+ * inside (the gravel floor, lamps, rocks) is the map's own; the dark is
+ * DayLight's. (The Tower's hall is TowerHall.)
  */
 export function Room({ map }: { map: TownMap }) {
   const geometry = useMemo(() => wallGeometry(islandRadius(map) - 0.6), [map]);

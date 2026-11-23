@@ -109,7 +109,7 @@ export function useTownInput(
       );
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      // Tab is the game's (it starts a fight on the training grounds), not the
+      // Tab is the game's (it goes into combat mode), not the
       // browser's: don't let it walk focus along the buttons and links. In
       // a text field it still moves between fields.
       if (e.code === "Tab" && !typing(e.target)) e.preventDefault();

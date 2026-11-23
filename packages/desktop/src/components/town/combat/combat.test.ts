@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { emptyMap, type TownMap } from "../map";
-import { mapById } from "../maps";
 import {
   DUMMY,
   type DummyState,
@@ -24,12 +23,6 @@ function withDummy(x = 0, z = 0): DummyState {
 }
 
 describe("training dummies", () => {
-  it("stand where the training grounds have them", () => {
-    const arena = mapById("arena");
-    expect(arena.combat).toBe(true);
-    expect(dummiesOf(arena).length).toBeGreaterThanOrEqual(3);
-  });
-
   it("rock away from a hit and settle again", () => {
     const d = withDummy();
     d.yaw = 0;

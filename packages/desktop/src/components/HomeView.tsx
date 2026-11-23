@@ -108,12 +108,10 @@ export function HomeView({
   const hasSpirit = hasPickupSpiritEquipped(equipped);
   const bankFull = isBankFull(inventory, equipped, capacity);
   // Any number of drops can be pending at once — every item is independently
-  // collectible.
-  const dropItems: GroundDrop[] = pendingDrops.map((d) => ({
-    id: d.id,
-    itemId: d.itemId,
-    x: realDropX(d.id),
-  }));
+  // collectible. Not the Wilds' own, which are only picked up there.
+  const dropItems: GroundDrop[] = pendingDrops.flatMap((d) =>
+    d.wilds ? [] : [{ id: d.id, itemId: d.itemId, x: realDropX(d.id) }],
+  );
 
   // Returns whether the drop was actually collected — the Rust side already
   // updates pendingDrops/inventory optimistically before its own network

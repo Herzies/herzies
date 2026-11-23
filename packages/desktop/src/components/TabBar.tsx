@@ -45,10 +45,10 @@ export function TabBar({
   onEvents,
   unspentPoints = 0,
   homeBlocked = false,
-  hasStats = false,
   hasSkills = false,
   landing = null,
   windowSize = null,
+  fullscreen = null,
   compact = false,
 }: {
   /** The open window, else the screen under it (Home, the Town). */
@@ -70,13 +70,15 @@ export function TabBar({
   /** Home can't be gone to from here (an island you fight on): the button
    * stays, greyed. */
   homeBlocked?: boolean;
-  /** The server knows stat points / the herzie has a class. */
-  hasStats?: boolean;
+  /** The herzie has a class: Skills is in the menu. */
   hasSkills?: boolean;
   landing?: MenuLanding | null;
   /** The Town's bigger window, while the Town is on screen: a toggle at the
    * menu's foot (Z does the same). */
   windowSize?: { expanded: boolean; onToggle: () => void } | null;
+  /** Real OS full screen, in the app: at the menu's foot, over the window
+   * size (main.tsx drops that while it's on). */
+  fullscreen?: { on: boolean; onToggle: () => void } | null;
   /** The big window: Events and Menu only, at the right; Home/World is the
    * menu's first item. */
   compact?: boolean;
@@ -101,7 +103,7 @@ export function TabBar({
     { id: "profile", label: "Profile", key: "o" },
     { id: "deck", label: "Deck", key: "i" },
     { id: "bag", label: "Bag", key: "b" },
-    ...(hasStats ? [{ id: "stats" as const, label: "Stats", key: "j" }] : []),
+    { id: "stats", label: "Stats", key: "j" },
     ...(hasSkills
       ? [{ id: "skills" as const, label: "Skills", key: "k" }]
       : []),
@@ -266,23 +268,36 @@ export function TabBar({
               </button>
             );
           })}
+          {(windowSize || fullscreen) && (
+            <div className="mx-2 my-1 border-t border-white/15" />
+          )}
+          {fullscreen && (
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                fullscreen.onToggle();
+              }}
+              className="flex w-full cursor-pointer items-center gap-2 rounded-md border-none bg-transparent px-2 py-1 text-left text-ui text-text hover:bg-white/8"
+            >
+              <span className="w-7 shrink-0" />
+              {fullscreen.on ? "Exit full screen" : "Full screen"}
+            </button>
+          )}
           {windowSize && (
-            <>
-              <div className="mx-2 my-1 border-t border-white/15" />
-              <button
-                type="button"
-                onClick={() => {
-                  setMenuOpen(false);
-                  windowSize.onToggle();
-                }}
-                className="flex w-full cursor-pointer items-center gap-2 rounded-md border-none bg-transparent px-2 py-1 text-left text-ui text-text hover:bg-white/8"
-              >
-                <span className="w-7 shrink-0 text-[10px] text-text-dim">
-                  [z]
-                </span>
-                {windowSize.expanded ? "Smaller window" : "Bigger window"}
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                windowSize.onToggle();
+              }}
+              className="flex w-full cursor-pointer items-center gap-2 rounded-md border-none bg-transparent px-2 py-1 text-left text-ui text-text hover:bg-white/8"
+            >
+              <span className="w-7 shrink-0 text-[10px] text-text-dim">
+                [z]
+              </span>
+              {windowSize.expanded ? "Smaller window" : "Bigger window"}
+            </button>
           )}
         </MenuTray>
       )}

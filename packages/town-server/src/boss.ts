@@ -48,9 +48,9 @@ import {
   MELEE_CLEAVE,
   MELEE_REACH,
   meleeReaches,
+  mitigatedDamage,
   pushOutOfDomes,
   STRIKE_DAMAGE,
-  stunMs,
   WAVE_HAND_HEIGHT,
   WAVE_SPEED,
 } from "@herzies/shared/combat";
@@ -64,12 +64,12 @@ import {
   type BuffId,
   buffMultiplier,
   buffReductions,
-  mitigate,
   RIMSHOT,
   shuffleOn,
 } from "@herzies/shared/skills";
-import { defReduction, timingAttackSpeed } from "@herzies/shared/stats";
+import { timingAttackSpeed } from "@herzies/shared/stats";
 import type { TowerMob } from "@herzies/shared/town-net";
+import { CastBudget, StunReturns } from "./budgets";
 import { DiscHands } from "./hands";
 import { type Mob, type MobJudge, MobPack, SEEN_LAG_MS } from "./mobs";
 
@@ -387,8 +387,8 @@ export class BossEngine {
   private readonly nextId: () => number;
   private telegraphs: Telegraph[] = [];
   private pending: PendingHit[] = [];
-  /** Cast tokens per player: refill one per `castEveryMs`, up to the burst. */
-  private casts = new Map<string, { tokens: number; at: number }>();
+  /** Cast tokens per player (see CastBudget). */
+  private casts = new CastBudget(TUNING.castEveryMs, TUNING.castBurst);
   /** A Slinger's discs: a hand throws once its disc is back. */
   private hands = new DiscHands();
   private invulnUntil = new Map<string, number>();
@@ -447,10 +447,10 @@ export class BossEngine {
   private rattled = new Map<string, { stacks: number; until: number }>();
   /** Cymbrella domes standing (or about to), oldest first. */
   private domes: ShelterDome[] = [];
-  /** Stunned until (server ms), and when its recent stuns began (for the
-   * diminishing returns). */
+  /** Stunned until (server ms), and its recent stuns (for the diminishing
+   * returns). */
   private stunnedUntil = 0;
-  private stuns: number[] = [];
+  private stunReturns = new StunReturns();
   /** Its own shapes a stun took off the floor, to say so next update. */
   private cancelled: number[] = [];
   private nextScatterAt = 0;
@@ -643,7 +643,7 @@ export class BossEngine {
   }
 
   forget(uid: string): void {
-    this.casts.delete(uid);
+    this.casts.forget(uid);
     this.hands.forget(uid);
     this.invulnUntil.delete(uid);
     this.safeUntil.delete(uid);
@@ -745,9 +745,7 @@ export class BossEngine {
    */
   stun(now: number, base: number): number {
     if (this.killed || this.sleeping || now < this.stunnedUntil) return 0;
-    this.stuns = this.stuns.filter((t) => t > now - RIMSHOT.drWindowMs);
-    const ms = stunMs(base * RIMSHOT.bossStunScale, this.stuns.length);
-    this.stuns.push(now);
+    const ms = this.stunReturns.take(now, base * RIMSHOT.bossStunScale);
     this.stunnedUntil = now + ms;
     for (const t of this.telegraphs)
       if (t.mob === undefined && !t.lethal && !t.doom)
@@ -901,22 +899,11 @@ export class BossEngine {
    * one per `castEveryMs`, quicker hasted and with Timing, up to a short
    * burst. False if it's empty: too fast. */
   spendCast(uid: string, now: number, timing = 0): boolean {
-    const bucket = this.casts.get(uid) ?? {
-      tokens: TUNING.castBurst,
-      at: now,
-    };
-    bucket.tokens = Math.min(
-      TUNING.castBurst,
-      bucket.tokens +
-        (Math.max(0, now - bucket.at) / TUNING.castEveryMs) *
-          castSpeed(this.buffs.get(uid) ?? [], now) *
-          (1 + timingAttackSpeed(timing)),
+    return this.casts.spend(
+      uid,
+      now,
+      quickness(this.buffs.get(uid) ?? [], now, timing),
     );
-    bucket.at = now;
-    this.casts.set(uid, bucket);
-    if (bucket.tokens < 1) return false;
-    bucket.tokens -= 1;
-    return true;
   }
 
   /**
@@ -997,8 +984,7 @@ export class BossEngine {
         now,
         hit?.dist ?? null,
         // As quick as the app flies it: Haste and Timing both.
-        castSpeed(this.buffs.get(uid) ?? [], now) *
-          (1 + timingAttackSpeed(stats.timing ?? 0)),
+        quickness(this.buffs.get(uid) ?? [], now, stats.timing),
       )
     )
       return "miss";
@@ -1818,8 +1804,10 @@ export function mitigatedHit(
 ): BossHit {
   const raw = tg.damage * (opts.mult ?? 1);
   const fromBuffs = buffReductions(buffs, tg.hitAt);
-  const reductions = [defReduction(p.def ?? 0), ...fromBuffs];
-  const damage = Math.max(1, Math.round(mitigate(raw, reductions)));
+  const damage = Math.max(
+    1,
+    Math.round(mitigatedDamage(raw, p.def ?? 0, fromBuffs)),
+  );
   const absorbed = Math.max(0, Math.round(raw) - damage);
   return {
     uid: p.uid,
@@ -1835,10 +1823,7 @@ export function mitigatedHit(
  * with only their Def to soften it (never buffs, never below 1). */
 export function doomHit(p: BossPlayer, tg: Telegraph): BossHit {
   const raw = tg.damage;
-  const damage = Math.max(
-    1,
-    Math.round(mitigate(raw, [defReduction(p.def ?? 0)])),
-  );
+  const damage = Math.max(1, Math.round(mitigatedDamage(raw, p.def ?? 0)));
   return {
     uid: p.uid,
     damage,
@@ -1857,6 +1842,16 @@ export function castSpeed(buffs: readonly Buff[], now: number): number {
     attackSpeed(buffs, now - g),
     attackSpeed(buffs, now + g),
   );
+}
+
+/** How much quicker than its base pace a herzie attacks at `now`: its
+ * Haste (see castSpeed) and its Timing. */
+export function quickness(
+  buffs: readonly Buff[],
+  now: number,
+  timing = 0,
+): number {
+  return castSpeed(buffs, now) * (1 + timingAttackSpeed(timing));
 }
 
 /** Whether a telegraph covers a point. A buster covers its target, not a

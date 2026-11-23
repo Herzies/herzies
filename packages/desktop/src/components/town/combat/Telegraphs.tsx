@@ -46,90 +46,174 @@ const reduced = () =>
   typeof matchMedia === "function" &&
   matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+/** Every shape's material is a clone of this, so they share one program,
+ * and it can be compiled before the first shape (see telegraphWarmup). */
+const SHAPE_MATERIAL = new THREE.ShaderMaterial({
+  uniforms: {
+    uR: { value: 1 },
+    uInner: { value: 0 },
+    uRing: { value: 0 },
+    uProgress: { value: 0 },
+    uFlash: { value: 0 },
+    uTime: { value: 0 },
+    uMotion: { value: 1 },
+    uTone: { value: 0 },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform float uR;
+    uniform float uInner;
+    uniform float uRing;
+    uniform float uProgress;
+    uniform float uFlash;
+    uniform float uTime;
+    uniform float uMotion;
+    uniform float uTone;
+    varying vec2 vUv;
+    void main() {
+      vec2 p = (vUv - 0.5) * 2.0 * uR;
+      float d = length(p);
+      if (d > uR + 0.2) discard;
+      float inside = step(uInner, d) * step(d, uR);
+      // How far it has filled: out from the middle, or out from the
+      // ring's safe middle.
+      float edge = mix(uR * uProgress, uInner + (uR - uInner) * uProgress, uRing);
+      float filled = step(d, edge) * inside;
+      // Hatching, so the area reads without its colour.
+      float hatch = step(0.5, fract((p.x + p.y) * 1.3));
+      // A dashed outline.
+      float ang = atan(p.y, p.x);
+      float dash = step(0.35, fract(ang * uR * 0.9));
+      float line = smoothstep(0.14, 0.02, abs(d - uR)) * dash
+        + uRing * smoothstep(0.14, 0.02, abs(d - uInner)) * dash;
+      float pulse = mix(1.0, 0.8 + 0.2 * sin(uTime * 12.0), uMotion);
+      // The boss's: red to gold. A minion's: green. The pulse: violet.
+      vec3 warm = uTone > 3.5 ? vec3(0.8, 0.05, 0.1)
+        : uTone > 2.5 ? vec3(0.25, 0.72, 1.0)
+        : uTone > 1.5 ? vec3(0.55, 0.18, 0.95)
+        : uTone > 0.5 ? vec3(0.45, 0.9, 0.25) : vec3(1.0, 0.32, 0.2);
+      vec3 hot = uTone > 3.5 ? vec3(1.0, 0.85, 0.3)
+        : uTone > 2.5 ? vec3(0.8, 0.95, 1.0)
+        : uTone > 1.5 ? vec3(0.95, 0.75, 1.0)
+        : uTone > 0.5 ? vec3(0.85, 1.0, 0.55) : vec3(1.0, 0.82, 0.55);
+      vec3 col = mix(warm, hot, filled * 0.7);
+      float a = inside * (0.1 + 0.1 * hatch) + filled * (0.3 + 0.14 * hatch) + line * 0.95 * pulse;
+      col = mix(col, vec3(1.0), uFlash);
+      a = clamp(a + uFlash * inside * 0.6, 0.0, 1.0);
+      gl_FragColor = vec4(col, a);
+    }
+  `,
+  transparent: true,
+  depthWrite: false,
+  fog: false,
+  polygonOffset: true,
+  polygonOffsetFactor: -2,
+  polygonOffsetUnits: -2,
+});
+
+/** As SHAPE_MATERIAL, for the charge's lane. */
+const LANE_MATERIAL = new THREE.ShaderMaterial({
+  uniforms: {
+    uLen: { value: 1 },
+    uHalf: { value: 1 },
+    uProgress: { value: 0 },
+    uFlash: { value: 0 },
+    uTime: { value: 0 },
+    uMotion: { value: 1 },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform float uLen;
+    uniform float uHalf;
+    uniform float uProgress;
+    uniform float uFlash;
+    uniform float uTime;
+    uniform float uMotion;
+    varying vec2 vUv;
+    void main() {
+      // Across (-half..half, with a margin) and along (0 at the boss).
+      float across = (vUv.x - 0.5) * 2.0 * (uHalf + 0.2);
+      float along = (1.0 - vUv.y) * uLen;
+      float inside = step(abs(across), uHalf);
+      float filled = step(along, uLen * uProgress) * inside;
+      float hatch = step(0.5, fract((along + across) * 1.3));
+      // Dashed edges down both sides, and chevrons pointing the way
+      // it'll come, sliding toward the far end.
+      float edge = smoothstep(0.14, 0.02, abs(abs(across) - uHalf));
+      float dash = step(0.35, fract(along * 0.9));
+      float chev = step(0.75, fract((along - abs(across) * 0.8) * 0.45 - uTime * 1.6 * uMotion));
+      float pulse = mix(1.0, 0.8 + 0.2 * sin(uTime * 12.0), uMotion);
+      vec3 warm = vec3(1.0, 0.32, 0.2);
+      vec3 hot = vec3(1.0, 0.82, 0.55);
+      vec3 col = mix(warm, hot, filled * 0.7);
+      float a = inside * (0.1 + 0.1 * hatch + 0.22 * chev)
+        + filled * (0.3 + 0.14 * hatch)
+        + edge * dash * 0.95 * pulse;
+      col = mix(col, vec3(1.0), uFlash);
+      a = clamp(a + uFlash * inside * 0.6, 0.0, 1.0);
+      gl_FragColor = vec4(col, a);
+    }
+  `,
+  transparent: true,
+  depthWrite: false,
+  fog: false,
+  polygonOffset: true,
+  polygonOffsetFactor: -2,
+  polygonOffsetUnits: -2,
+});
+
+/** The "!" over a marked herzie: shared by every mark, never disposed. */
+const MARK_BAR = new THREE.BoxGeometry(0.12, 0.42, 0.12);
+const MARK_DOT = new THREE.BoxGeometry(0.12, 0.12, 0.12);
+const MARK_BUSTER = new THREE.MeshBasicMaterial({
+  color: 0xff3b30,
+  fog: false,
+});
+const MARK_SCATTER = new THREE.MeshBasicMaterial({
+  color: 0x5ec8ff,
+  fog: false,
+});
+
+/** Never drawn: for Precompile to compile the telegraphs' shaders before
+ * the first one lands. */
+export const telegraphWarmup: readonly THREE.Object3D[] = [
+  new THREE.Mesh(MARK_DOT, SHAPE_MATERIAL),
+  new THREE.Mesh(MARK_DOT, LANE_MATERIAL),
+  new THREE.Mesh(MARK_DOT, MARK_BUSTER),
+];
+
 /** Re-rendered only when its own props change, not on every fight update. */
 const Shape = memo(function Shape({ shape }: { shape: FloorShape }) {
-  const material = useMemo(
-    () =>
-      new THREE.ShaderMaterial({
-        uniforms: {
-          uR: { value: shape.r },
-          uInner: { value: shape.inner },
-          uRing: { value: shape.kind === "ring" ? 1 : 0 },
-          uProgress: { value: 0 },
-          uFlash: { value: 0 },
-          uTime: { value: 0 },
-          uMotion: { value: reduced() ? 0 : 1 },
-          uTone: {
-            value: shape.doom
-              ? 4
-              : shape.lethal
-                ? 2
-                : shape.kind === "scatter"
-                  ? 3
-                  : shape.mob !== undefined
-                    ? 1
-                    : 0,
-          },
-        },
-        vertexShader: /* glsl */ `
-          varying vec2 vUv;
-          void main() {
-            vUv = uv;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          }
-        `,
-        fragmentShader: /* glsl */ `
-          uniform float uR;
-          uniform float uInner;
-          uniform float uRing;
-          uniform float uProgress;
-          uniform float uFlash;
-          uniform float uTime;
-          uniform float uMotion;
-          uniform float uTone;
-          varying vec2 vUv;
-          void main() {
-            vec2 p = (vUv - 0.5) * 2.0 * uR;
-            float d = length(p);
-            if (d > uR + 0.2) discard;
-            float inside = step(uInner, d) * step(d, uR);
-            // How far it has filled: out from the middle, or out from the
-            // ring's safe middle.
-            float edge = mix(uR * uProgress, uInner + (uR - uInner) * uProgress, uRing);
-            float filled = step(d, edge) * inside;
-            // Hatching, so the area reads without its colour.
-            float hatch = step(0.5, fract((p.x + p.y) * 1.3));
-            // A dashed outline.
-            float ang = atan(p.y, p.x);
-            float dash = step(0.35, fract(ang * uR * 0.9));
-            float line = smoothstep(0.14, 0.02, abs(d - uR)) * dash
-              + uRing * smoothstep(0.14, 0.02, abs(d - uInner)) * dash;
-            float pulse = mix(1.0, 0.8 + 0.2 * sin(uTime * 12.0), uMotion);
-            // The boss's: red to gold. A minion's: green. The pulse: violet.
-            vec3 warm = uTone > 3.5 ? vec3(0.8, 0.05, 0.1)
-              : uTone > 2.5 ? vec3(0.25, 0.72, 1.0)
-              : uTone > 1.5 ? vec3(0.55, 0.18, 0.95)
-              : uTone > 0.5 ? vec3(0.45, 0.9, 0.25) : vec3(1.0, 0.32, 0.2);
-            vec3 hot = uTone > 3.5 ? vec3(1.0, 0.85, 0.3)
-              : uTone > 2.5 ? vec3(0.8, 0.95, 1.0)
-              : uTone > 1.5 ? vec3(0.95, 0.75, 1.0)
-              : uTone > 0.5 ? vec3(0.85, 1.0, 0.55) : vec3(1.0, 0.82, 0.55);
-            vec3 col = mix(warm, hot, filled * 0.7);
-            float a = inside * (0.1 + 0.1 * hatch) + filled * (0.3 + 0.14 * hatch) + line * 0.95 * pulse;
-            col = mix(col, vec3(1.0), uFlash);
-            a = clamp(a + uFlash * inside * 0.6, 0.0, 1.0);
-            gl_FragColor = vec4(col, a);
-          }
-        `,
-        transparent: true,
-        depthWrite: false,
-        fog: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
-      }),
-    [shape.r, shape.inner, shape.kind, shape.lethal, shape.doom, shape.mob],
-  );
+  const material = useMemo(() => {
+    const m = SHAPE_MATERIAL.clone();
+    const u = m.uniforms;
+    u.uR.value = shape.r;
+    u.uInner.value = shape.inner;
+    u.uRing.value = shape.kind === "ring" ? 1 : 0;
+    u.uMotion.value = reduced() ? 0 : 1;
+    u.uTone.value = shape.doom
+      ? 4
+      : shape.lethal
+        ? 2
+        : shape.kind === "scatter"
+          ? 3
+          : shape.mob !== undefined
+            ? 1
+            : 0;
+    return m;
+  }, [shape.r, shape.inner, shape.kind, shape.lethal, shape.doom, shape.mob]);
   useEffect(() => () => material.dispose(), [material]);
 
   const mesh = useMemo(() => {
@@ -149,27 +233,13 @@ const Shape = memo(function Shape({ shape }: { shape: FloorShape }) {
   const mark = useMemo(() => {
     if (shape.kind !== "buster" && shape.kind !== "scatter") return null;
     const g = new THREE.Group();
-    const red = new THREE.MeshBasicMaterial({
-      color: shape.kind === "scatter" ? 0x5ec8ff : 0xff3b30,
-      fog: false,
-    });
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.42, 0.12), red);
+    const color = shape.kind === "scatter" ? MARK_SCATTER : MARK_BUSTER;
+    const bar = new THREE.Mesh(MARK_BAR, color);
     bar.position.y = 0.32;
-    const dot = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), red);
+    const dot = new THREE.Mesh(MARK_DOT, color);
     g.add(bar, dot);
     return g;
   }, [shape.kind]);
-  useEffect(
-    () => () => {
-      mark?.traverse((o) => {
-        if (o instanceof THREE.Mesh) {
-          o.geometry.dispose();
-          (o.material as THREE.Material).dispose();
-        }
-      });
-    },
-    [mark],
-  );
 
   useFrame(({ clock }) => {
     const now = performance.now();
@@ -207,65 +277,13 @@ const Shape = memo(function Shape({ shape }: { shape: FloorShape }) {
 const Lane = memo(function Lane({ shape }: { shape: FloorShape }) {
   const len = shape.len ?? 0;
   const half = shape.r;
-  const material = useMemo(
-    () =>
-      new THREE.ShaderMaterial({
-        uniforms: {
-          uLen: { value: len },
-          uHalf: { value: half },
-          uProgress: { value: 0 },
-          uFlash: { value: 0 },
-          uTime: { value: 0 },
-          uMotion: { value: reduced() ? 0 : 1 },
-        },
-        vertexShader: /* glsl */ `
-          varying vec2 vUv;
-          void main() {
-            vUv = uv;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          }
-        `,
-        fragmentShader: /* glsl */ `
-          uniform float uLen;
-          uniform float uHalf;
-          uniform float uProgress;
-          uniform float uFlash;
-          uniform float uTime;
-          uniform float uMotion;
-          varying vec2 vUv;
-          void main() {
-            // Across (-half..half, with a margin) and along (0 at the boss).
-            float across = (vUv.x - 0.5) * 2.0 * (uHalf + 0.2);
-            float along = (1.0 - vUv.y) * uLen;
-            float inside = step(abs(across), uHalf);
-            float filled = step(along, uLen * uProgress) * inside;
-            float hatch = step(0.5, fract((along + across) * 1.3));
-            // Dashed edges down both sides, and chevrons pointing the way
-            // it'll come, sliding toward the far end.
-            float edge = smoothstep(0.14, 0.02, abs(abs(across) - uHalf));
-            float dash = step(0.35, fract(along * 0.9));
-            float chev = step(0.75, fract((along - abs(across) * 0.8) * 0.45 - uTime * 1.6 * uMotion));
-            float pulse = mix(1.0, 0.8 + 0.2 * sin(uTime * 12.0), uMotion);
-            vec3 warm = vec3(1.0, 0.32, 0.2);
-            vec3 hot = vec3(1.0, 0.82, 0.55);
-            vec3 col = mix(warm, hot, filled * 0.7);
-            float a = inside * (0.1 + 0.1 * hatch + 0.22 * chev)
-              + filled * (0.3 + 0.14 * hatch)
-              + edge * dash * 0.95 * pulse;
-            col = mix(col, vec3(1.0), uFlash);
-            a = clamp(a + uFlash * inside * 0.6, 0.0, 1.0);
-            gl_FragColor = vec4(col, a);
-          }
-        `,
-        transparent: true,
-        depthWrite: false,
-        fog: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
-      }),
-    [len, half],
-  );
+  const material = useMemo(() => {
+    const m = LANE_MATERIAL.clone();
+    m.uniforms.uLen.value = len;
+    m.uniforms.uHalf.value = half;
+    m.uniforms.uMotion.value = reduced() ? 0 : 1;
+    return m;
+  }, [len, half]);
   useEffect(() => () => material.dispose(), [material]);
 
   const group = useMemo(() => {

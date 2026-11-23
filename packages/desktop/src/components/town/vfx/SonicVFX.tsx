@@ -11,6 +11,7 @@ import {
   waveField,
   waveRadius,
 } from "../combat/waves";
+import { easeOut } from "../easing";
 import { distortionMaterial, distortionScene } from "./distortion";
 
 /**
@@ -160,13 +161,17 @@ export class FxLayer {
     this.n++;
   }
 
+  /** Hidden when there's none (so not set up for drawing, in the scene or
+   * the distortion buffer); else only the ones drawn go up to the GPU. */
   end() {
-    for (const m of [this.bend, this.glow]) {
-      m.count = this.n;
-      m.instanceMatrix.needsUpdate = true;
-    }
-    this.fx.needsUpdate = true;
-    this.colors.needsUpdate = true;
+    const n = this.n;
+    this.bend.count = this.glow.count = n;
+    this.bend.visible = this.glow.visible = n > 0;
+    if (n === 0) return;
+    upload(this.bend.instanceMatrix, n);
+    upload(this.glow.instanceMatrix, n);
+    upload(this.fx, n);
+    upload(this.colors, n);
   }
 
   dispose() {
@@ -176,6 +181,13 @@ export class FxLayer {
   }
 }
 
+/** Flags the first `n` items of `a` for upload, and only those. */
+export function upload(a: THREE.BufferAttribute, n: number): void {
+  a.clearUpdateRanges();
+  a.addUpdateRange(0, n * a.itemSize);
+  a.needsUpdate = true;
+}
+
 const FORWARD = new THREE.Vector3(0, 0, 1);
 const _pos = new THREE.Vector3();
 const _dir = new THREE.Vector3();
@@ -183,8 +195,6 @@ const _quat = new THREE.Quaternion();
 const _scale = new THREE.Vector3();
 const _matrix = new THREE.Matrix4();
 const _color = new THREE.Color();
-
-const easeOut = (t: number) => 1 - (1 - t) ** 3;
 
 /** How strong a wave is now: in quickly at the hand, out as it runs out
  * of reach. */
@@ -304,7 +314,14 @@ export function useMotes() {
     });
     const points = new THREE.Points(geometry, material);
     points.frustumCulled = false;
+    points.visible = false;
 
+    // How many were alive at the last update, and the last of them; and
+    // whether any have been spawned since. All dead and none new: nothing
+    // to do, and the points are hidden.
+    let live = 0;
+    let lastHi = -1;
+    let spawned = false;
     const spawn = (
       at: Readonly<Vec3>,
       vel: Readonly<Vec3>,
@@ -317,6 +334,7 @@ export function useMotes() {
         drag?: number;
       },
     ) => {
+      spawned = true;
       let m = motes[0];
       for (const x of motes) {
         if (!x.alive) {
@@ -342,10 +360,22 @@ export function useMotes() {
     };
 
     const a = geometry.attributes;
+    const attrs = [
+      a.position,
+      a.aSize,
+      a.aAlpha,
+      a.aKind,
+      a.aColor,
+    ] as THREE.BufferAttribute[];
     const update = (dt: number) => {
+      if (live === 0 && !spawned) return;
+      spawned = false;
       const fov = (camera as THREE.PerspectiveCamera).fov ?? 55;
       material.uniforms.uPixels.value =
         gl.domElement.height / (2 * Math.tan((fov * Math.PI) / 360));
+      const wasLive = live;
+      let hi = -1;
+      live = 0;
       for (let i = 0; i < MOTES; i++) {
         const m = motes[i];
         if (m.alive) {
@@ -363,6 +393,8 @@ export function useMotes() {
         m.pos[0] += m.vel[0] * dt;
         m.pos[1] += m.vel[1] * dt;
         m.pos[2] += m.vel[2] * dt;
+        live++;
+        hi = i;
         const t = m.age / m.life;
         // Pop in, linger, fade.
         const alpha = Math.min(1, t * 8) * (1 - t) ** 1.5;
@@ -380,9 +412,14 @@ export function useMotes() {
           m.color.b,
         );
       }
-      for (const name of ["position", "aSize", "aAlpha", "aKind", "aColor"]) {
-        (a[name] as THREE.BufferAttribute).needsUpdate = true;
+      points.visible = live > 0;
+      // What died since the last upload goes up too, as unseen, so past
+      // the last one drawn there's nothing but unseen ones.
+      if (live > 0 || wasLive > 0) {
+        const n = Math.max(hi, lastHi) + 1;
+        for (const x of attrs) upload(x, n);
       }
+      lastHi = hi;
     };
     const dispose = () => {
       geometry.dispose();
@@ -424,11 +461,11 @@ export function SonicVFX() {
     }),
     [],
   );
+  const all = useMemo(() => Object.values(layers), [layers]);
   const motes = useMotes();
   const scene = useThree((s) => s.scene);
 
   useLayoutEffect(() => {
-    const all = Object.values(layers);
     for (const l of all) {
       distortionScene.add(l.bend);
       scene.add(l.glow);
@@ -444,12 +481,12 @@ export function SonicVFX() {
       motes.dispose();
       waveField.clear();
     };
-  }, [layers, motes, scene]);
+  }, [all, motes, scene]);
 
   useFrame(({ clock }, dt) => {
     const time = clock.elapsedTime;
     const { shells, wakes, bursts, muzzles } = layers;
-    for (const l of Object.values(layers)) l.begin();
+    for (const l of all) l.begin();
 
     for (const w of waveField.waves) {
       if (!w.alive) continue;
@@ -587,7 +624,7 @@ export function SonicVFX() {
       }
     }
 
-    for (const l of Object.values(layers)) l.end();
+    for (const l of all) l.end();
     motes.update(dt);
   });
 

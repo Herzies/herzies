@@ -4,6 +4,7 @@ import {
   getItem,
   ItemTypeIcon,
   type ItemUnit,
+  isInBag,
   SKILL_DEFS,
   type SkillId,
 } from "@herzies/shared";
@@ -267,7 +268,7 @@ export function Hotbar({
   const options = useMemo(() => {
     const counts = new Map<string, PickerOption>();
     for (const u of units) {
-      if (u.equippedSlot || !getItem(u.itemId)?.consumable) continue;
+      if (!isInBag(u) || !getItem(u.itemId)?.consumable) continue;
       const row = counts.get(u.itemId);
       if (row) row.count = (row.count ?? 0) + 1;
       else
@@ -307,7 +308,7 @@ export function Hotbar({
         const itemId = slots[key];
         const item = itemId ? getItem(itemId) : undefined;
         const count = itemId
-          ? units.filter((u) => u.itemId === itemId && !u.equippedSlot).length
+          ? units.filter((u) => u.itemId === itemId && isInBag(u)).length
           : 0;
         return (
           <Tooltip

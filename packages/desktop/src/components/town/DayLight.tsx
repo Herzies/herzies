@@ -13,6 +13,7 @@ import {
 import { CLOUD_SHADE, townLook } from "./depth";
 import { skyUniforms } from "./Islands";
 import { nightLights } from "./Lamps";
+import { hash01, type RoomKind } from "./map";
 import { ISLAND_RADIUS } from "./runtime";
 import { dayOfYear, type Season, seasonLook } from "./Seasons";
 import { lightning } from "./weather";
@@ -39,6 +40,11 @@ function shadowMapSize(reach: number): number {
 const SUN_SHADOW_SOFTNESS = 2;
 /** Moonlight casts paler shadows than the sun. */
 const MOON_SHADOW = 0.7;
+/** Scratch for following a focus (see DayLight's `focus`). */
+const UP = new THREE.Vector3(0, 1, 0);
+const axisX = new THREE.Vector3();
+const axisY = new THREE.Vector3();
+const centre = new THREE.Vector3();
 
 /** A dark room: no sun, a faint cool glow from nowhere, and the lamps
  * (which come on in the dark) doing the real lighting. Applied after the
@@ -72,6 +78,49 @@ function applyRoomLook(
 }
 
 const ROOM_AIR = "#09070e";
+
+/**
+ * The Tower's hall inside: warm at any hour. A soft gold light falls from
+ * high up (the windows' light, gathered: one shadow-casting light, aimed
+ * the same way always), the bounce off the pale stone fills the rest, and
+ * the air up in the vault is a dim warm brown. Only the windows show the
+ * sky as the clock has it (see TowerHall); the torches are the hall's
+ * own. Applied after the day's look, overriding what makes it the open sky.
+ */
+function applyTowerLook(
+  scene: THREE.Scene,
+  hemi: THREE.HemisphereLight | null,
+  sun: THREE.DirectionalLight | null,
+  distance: number,
+) {
+  if (scene.background instanceof THREE.Color) {
+    scene.background.set(TOWER_AIR);
+  }
+  if (scene.fog instanceof THREE.Fog) {
+    scene.fog.color.set(TOWER_AIR);
+    scene.fog.far = 0.45;
+  }
+  if (hemi) {
+    hemi.color.set("#ffe9cc");
+    hemi.groundColor.set("#6e4f38");
+    hemi.intensity = 1.35;
+  }
+  if (sun) {
+    sun.color.set("#ffd9a6");
+    sun.intensity = 0.85;
+    sun.position.copy(TOWER_LIGHT).multiplyScalar(distance);
+    sun.shadow.intensity = 0.55;
+  }
+  townLook.w = 0;
+  nightLights.level = 0;
+  ambient.uNight.value = 0;
+  ambient.uSun.value.copy(TOWER_LIGHT);
+  ambient.uLight.value.set(1, 0.88, 0.74);
+}
+
+const TOWER_AIR = "#2b2119";
+/** Where the hall's light comes from (unit, toward it). */
+const TOWER_LIGHT = new THREE.Vector3(0.35, 0.85, 0.4).normalize();
 
 /** The herzies lit by a lightning stroke: white, a touch of blue. */
 const FLASH_LIGHT = new THREE.Color("#e8ecff");
@@ -121,7 +170,7 @@ export function auroraTonight(dayOfYear: number): number {
   // Nights span midnight: 18:00 of one day and 06:00 of the next are
   // the same night.
   const night = Math.floor(dayOfYear + 0.25);
-  const h = Math.abs(Math.sin(night * 12.9898 + 78.233) * 43758.5453) % 1;
+  const h = hash01(night, 1);
   return h < 0.35 ? 0.6 + (h / 0.35) * 0.4 : 0;
 }
 
@@ -139,6 +188,14 @@ function applySeason(year: ReturnType<typeof seasonLook>) {
   ambient.uIce.value = year.ice;
 }
 
+/** Where the sun's shadow box should be this frame: its middle on the
+ * ground (x, z, in the scene) and how far it reaches round that. */
+export type ShadowFocus = (out: {
+  x: number;
+  z: number;
+  reach: number;
+}) => void;
+
 /**
  * The time of day, applied: the sky, the fog and background, the haze
  * and cloud shadows, the lights, the windows and the herzies' tint, from
@@ -148,16 +205,23 @@ function applySeason(year: ReturnType<typeof seasonLook>) {
 export function DayLight({
   hour,
   season,
-  room = false,
+  room,
   radius = ISLAND_RADIUS,
+  focus,
 }: {
   hour?: Hour;
   /** The time of year to show (default: the local calendar). */
   season?: Season;
-  room?: boolean;
+  /** Inside, not under the sky: "dark", the cave's lamp-lit night;
+   * "tower", the Tower hall's warm light. */
+  room?: RoomKind;
   /** The island's radius, for the shadow box (default: home's). Fixed for
    * the light's life: remount it (a `key`) for another island. */
   radius?: number;
+  /** Where the shadows fall, asked every frame (a sky ship flying, the
+   * island beside it while it's moored). The box follows it, snapped to
+   * whole shadow-map texels so its edges don't crawl as it moves. */
+  focus?: ShadowFocus;
 }) {
   const reach = shadowReach(radius);
   const distance = sunDistance(reach);
@@ -173,18 +237,71 @@ export function DayLight({
     },
     [],
   );
+  /** Which way the light comes from (unit, toward the sun), as last read. */
+  const sunDir = useRef(new THREE.Vector3(0, 1, 0));
+  /** `applied`: the box's reach its shadow camera was last fitted to, in
+   * hundredths. */
+  const box = useRef({ x: 0, z: 0, reach, applied: Number.NaN });
 
   /** What the lights were set to, before the lightning's flash. */
   const base = useRef({ hemi: 0, light: new THREE.Color(), flash: 0 });
 
+  // Following a focus: the box and the light moved there, every frame.
+  useFrame(() => {
+    const light = sun.current;
+    if (!focus || !light || room) return;
+    const b = box.current;
+    focus(b);
+    const cam = light.shadow.camera;
+    // As sharp on a big island as on home (the light isn't remounted for
+    // another island when it's following a focus).
+    const size = shadowMapSize(reach);
+    if (light.shadow.mapSize.x !== size) {
+      light.shadow.mapSize.set(size, size);
+      light.shadow.map?.dispose();
+      light.shadow.map = null;
+    }
+    const r = Math.max(4, b.reach);
+    // Snap the middle to whole texels, across the light's view.
+    const texel = (2 * r) / light.shadow.mapSize.x;
+    const dir = sunDir.current;
+    axisX.crossVectors(UP, dir);
+    if (axisX.lengthSq() < 1e-6) axisX.set(1, 0, 0);
+    axisX.normalize();
+    axisY.crossVectors(dir, axisX);
+    centre.set(b.x, 0, b.z);
+    const sx = centre.dot(axisX);
+    const sy = centre.dot(axisY);
+    centre
+      .addScaledVector(axisX, Math.round(sx / texel) * texel - sx)
+      .addScaledVector(axisY, Math.round(sy / texel) * texel - sy);
+    const d = sunDistance(r);
+    light.target.position.copy(centre);
+    light.target.updateMatrixWorld();
+    light.position.copy(centre).addScaledVector(dir, d);
+    const key = Math.round(r * 100);
+    if (key !== b.applied) {
+      b.applied = key;
+      cam.left = -r;
+      cam.right = r;
+      cam.top = r;
+      cam.bottom = -r;
+      cam.near = d - r;
+      cam.far = d + r;
+      cam.updateProjectionMatrix();
+    }
+  });
+
   useFrame(({ clock }) => {
     const t = clock.elapsedTime;
-    // A room is always the dead of night, whatever the clock says.
-    const h = room
-      ? 0
-      : typeof hour === "function"
-        ? hour()
-        : (hour ?? localHours());
+    // The cave is always the dead of night, whatever the clock says. (The
+    // Tower's windows show the hour; its own light doesn't follow it.)
+    const h =
+      room === "dark"
+        ? 0
+        : typeof hour === "function"
+          ? hour()
+          : (hour ?? localHours());
     const d = typeof season === "function" ? season() : (season ?? dayOfYear());
     // Lightning, every frame: the sky's light and the herzies' jump with
     // each stroke.
@@ -206,6 +323,12 @@ export function DayLight({
     last.current = { at: t, hour: h, day: d };
     const look = dayLook(h);
     const year = seasonLook(d);
+    // No snow lies indoors.
+    if (room === "tower") {
+      year.snow = 0;
+      year.ice = 0;
+      year.snowfall = 0;
+    }
     applySeason(year);
     look.sun.multiply(year.light);
     look.hemiSky.multiply(year.light);
@@ -240,7 +363,9 @@ export function DayLight({
     if (sun.current) {
       sun.current.color.copy(look.sun);
       sun.current.intensity = look.sunIntensity * lights.strength;
-      sun.current.position.copy(lights.light).multiplyScalar(distance);
+      sunDir.current.copy(lights.light).normalize();
+      if (!focus)
+        sun.current.position.copy(lights.light).multiplyScalar(distance);
       sun.current.shadow.intensity =
         lights.strength * (1 - look.night * (1 - MOON_SHADOW));
     }
@@ -249,7 +374,10 @@ export function DayLight({
     nightLights.level = look.windows;
     ambient.uNight.value = look.night;
     ambient.uLight.value.copy(look.herzieLight);
-    if (room) applyRoomLook(look.night, scene, hemi.current, sun.current);
+    if (room === "dark")
+      applyRoomLook(look.night, scene, hemi.current, sun.current);
+    else if (room === "tower")
+      applyTowerLook(scene, hemi.current, sun.current, distance);
   });
 
   return (

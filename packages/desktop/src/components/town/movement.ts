@@ -1,8 +1,8 @@
 import { TOWN_SPRINT_SPEED } from "@herzies/shared";
-import { turnToward, WALK_SPEED } from "@herzies/shared/gl";
+import { ICE_SPEED, turnToward, WALK_SPEED } from "@herzies/shared/gl";
 import { MathUtils } from "three";
 import type { TownInput } from "./input";
-import { cellAt, type TownMap, terrainAt } from "./map";
+import { cellAt, petWalkable, type TownMap, terrainAt } from "./map";
 
 /** Speeding up and slowing down (per second, MathUtils.damp rates):
  * quick to start, quicker to stop, so it feels responsive but not
@@ -12,9 +12,6 @@ const DECELERATION = 14;
 /** How much grip the ice gives, times the ground's: slow to get going,
  * and gliding on a good while after you let go. */
 export const ICE_GRIP = 0.15;
-/** On ice its legs go as fast as ever as it pushes off, but its feet
- * slip: it gets this much of the way for them, at most. */
-export const ICE_SPEED = 0.6;
 /** Letting go on ice: it slows this much more gently again than its
  * grip alone would have it — a long glide. */
 const ICE_GLIDE = 0.55;
@@ -23,6 +20,22 @@ const ICE_GLIDE = 0.55;
  * half; see Seasons.ts). Bridges aren't. */
 export function onIce(map: TownMap, x: number, z: number, ice: number) {
   return ice > 0.5 && terrainAt(map, ...cellAt(map, x, z)) === "~";
+}
+
+/** Where a pet on foot (the cat spirit) may walk on an island, and where
+ * its feet slip: dry land within `reach` (petWalkable), and the water too
+ * while it's frozen over (`ice()`, read as it goes: see onIce). */
+export function petFooting(
+  map: TownMap,
+  reach: number,
+  ice: () => number,
+): {
+  walkable: (x: number, z: number) => boolean;
+  icy: (x: number, z: number) => boolean;
+} {
+  const dry = petWalkable(map, reach);
+  const icy = (x: number, z: number) => onIce(map, x, z, ice());
+  return { walkable: (x, z) => dry(x, z) || icy(x, z), icy };
 }
 /** Turning to face where it walks: eased, but never faster than this. */
 const TURN_RATE = 14;

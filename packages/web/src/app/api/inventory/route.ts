@@ -1,7 +1,7 @@
 import { normalizeEquipped } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
-import { loadUnits } from "@/lib/item-units";
+import { loadLoadouts, loadUnits } from "@/lib/item-units";
 import { createAdminClient } from "@/lib/supabase-admin";
 
 export async function GET(request: Request) {
@@ -23,8 +23,19 @@ export async function GET(request: Request) {
 
   const inventory: Record<string, number> = data.inventory_v2 ?? {};
 
-  // Fetch item details for all owned items
-  const itemIds = Object.keys(inventory).filter((id) => inventory[id] > 0);
+  const [units, loadouts] = await Promise.all([
+    loadUnits(admin, auth.userId),
+    loadLoadouts(admin, auth.userId),
+  ]);
+
+  // Details for every owned item: the units too, since `inventory` leaves out
+  // copies put away in the other loadout (00152), which are still owned.
+  const itemIds = [
+    ...new Set([
+      ...Object.keys(inventory).filter((id) => inventory[id] > 0),
+      ...units.map((u) => u.itemId),
+    ]),
+  ];
   const { data: items } = await admin
     .from("items")
     .select("*")
@@ -33,7 +44,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     // Every owned copy, with its own upgrade level and worn slot. The three
     // id-keyed fields below are derived from these, kept for older clients.
-    units: await loadUnits(admin, auth.userId),
+    units,
     inventory,
     currency: data.currency ?? 0,
     items: items ?? [],
@@ -44,5 +55,7 @@ export async function GET(request: Request) {
     bankExpansions: data.bank_expansions ?? 0,
     // Emotes owned (EMOTES ids): unlocked for good, played from the Alt bar.
     emotes: (data.emotes ?? []) as string[],
+    // The two loadouts (00152): which is worn, and the other one's pieces.
+    loadouts,
   });
 }

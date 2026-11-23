@@ -151,8 +151,11 @@ export function PageLoader() {
   return (
     <>
       <style>{CSS}</style>
+      {/* data-nosnippet: every page starts with this "loading", and Google
+          would otherwise quote it as the page's text. */}
       <div
         data-page-loader=""
+        data-nosnippet=""
         data-state={state}
         role="status"
         aria-live="polite"

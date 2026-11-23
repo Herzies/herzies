@@ -17,6 +17,7 @@ import {
   FYLLINGS_BLACK_RAMP,
   GOLD_RAMP,
   LIGHT,
+  MADAS_RAMP,
   MEDEA_RAMP,
   NAKATA_RAMP,
   NANDOR_RAMP,
@@ -283,6 +284,10 @@ export interface Sphere {
   /** Where the Evasive Pair's sparkles come from: a wing tip (the trail)
    * or a foot (footfalls). See gl/shoeSparkles.ts. */
   sparkle?: "wing" | "foot";
+  /** Where the Sailor's Starter Pack's smoke comes from: the ember in the
+   * pipe's bowl (its wisps and puffs) or the stem at the mouth (what's
+   * blown out). See gl/pipeSmoke.ts. */
+  smoke?: "bowl" | "mouth";
   /** Part of a prop the 3D renderer draws as a model of its own (see
    * gl/props.ts) rather than as these spheres, which only the ray caster
    * draws. Every sphere of the prop shares the one object. */
@@ -290,7 +295,43 @@ export interface Sphere {
 }
 
 /** A prop drawn as a model in 3D (see Sphere.prop). */
-export type PropModel = BoomboxProp | ShoeProp | TieProp | FeatherProp;
+export type PropModel =
+  | BoomboxProp
+  | ShoeProp
+  | TieProp
+  | FeatherProp
+  | MoustacheProp
+  | BeanieProp;
+
+/** The Sailor's Starter Pack's moustache, drawn as a model in 3D
+ * (gl/props.ts): one tapering tube along `spine`, laid on the face. */
+export interface MoustacheProp {
+  kind: "moustache";
+  /** Its parting, in creature space (y down). */
+  center: V3;
+  yaw: number;
+  /** Down its middle from tip to tip, from `center`; how thick it is at
+   * each point; and the way out of the face there (unit). */
+  spine: V3[];
+  radii: number[];
+  normals: V3[];
+  /** Its hair, and its tips. */
+  colors: { hair: string; tips: string };
+}
+
+/** A knitted watch cap, drawn as a model in 3D (gl/props.ts): a ribbed
+ * cuff turned up, and a crown rounded over the head above it. */
+export interface BeanieProp {
+  kind: "beanie";
+  /** The middle of the cuff's lower edge, in creature space (y down). */
+  center: V3;
+  yaw: number;
+  /** The cuff's radius and height, and the crown's height above it. */
+  radius: number;
+  cuff: number;
+  crown: number;
+  colors: { crown: string; cuff: string };
+}
 
 /** A feather (the Troubadour's Plume's), drawn as a model in 3D
  * (gl/props.ts): a quill along `spine` and a flat vane either side of it. */
@@ -2364,6 +2405,63 @@ function headReachAt(spheres: Sphere[], x: number, z: number, y: number) {
   return reach;
 }
 
+/** The sailor's beanie (the skipper's; not out among the items yet): a red
+ * knitted watch cap worn high, docker style, its ribbed cuff turned up
+ * above the eyes and its crown rounded snug over the top of the head. The
+ * 3D view knits it (gl/props.ts: ribs down the cuff and crown, a fold at
+ * the cuff's top); the ray caster gets a band and a domed crown. */
+function buildSailorBeanieSpheres(spheres: Sphere[]): Sphere[] {
+  const head = getHeadBounds(spheres);
+  if (!head) return [];
+  const [hx, hy, hz] = head.center;
+  const hr = head.radius;
+  // Creature space is y down: up is −y. The cuff's lower edge sits where a
+  // cap's bill would, above the eyes, and hugs the head there.
+  const bottom = capBillY(spheres, head);
+  const cuff = hr * 0.3;
+  const radius = Math.max(
+    hr * 0.7,
+    headReachAt(spheres, hx, hz, bottom) + hr * 0.04,
+  );
+  const top = bottom - cuff;
+  // The crown rises clear over the top of the head.
+  const crown = Math.max(hr * 0.28, top - (hy - hr * 1.2));
+  const prop: BeanieProp = {
+    kind: "beanie",
+    center: [hx, bottom, hz],
+    yaw: 0,
+    radius,
+    cuff,
+    crown,
+    colors: { crown: "#C9302A", cuff: "#B42924" },
+  };
+  const crownLow = crown * 0.3;
+  return [
+    {
+      center: [hx, bottom - cuff / 2, hz],
+      radius: radius * 1.03,
+      zone: "wearable",
+      part: "head",
+      color: prop.colors.cuff,
+      shape: { kind: "cylinder", axis: [0, -cuff / 2, 0] },
+      prop,
+    },
+    {
+      center: [hx, top - crownLow / 2, hz],
+      radius: radius * 0.97,
+      zone: "wearable",
+      part: "head",
+      color: prop.colors.crown,
+      shape: {
+        kind: "cylinder",
+        axis: [0, -crownLow / 2, 0],
+        dome: crown - crownLow,
+      },
+      prop,
+    },
+  ];
+}
+
 /** Troubadour's Plume: a purple velvet beret, tipped down over one side,
  * on a gold band, with a long cream feather sweeping up and back from a
  * gold clasp on the other. The 3D view draws the feather as a model of its
@@ -2949,6 +3047,162 @@ function buildMonocleSpheres(spheres: Sphere[]): Sphere[] {
   return result;
 }
 
+/** The Sailor's Starter Pack: a thick white walrus moustache over where
+ * the mouth would be, fullest either side of its parting and drooping at
+ * the tips, with a shaggy fringe; and a briar pipe clenched at one corner,
+ * its black stem running out and down to a gold band and a bowl that rises
+ * in front of the chin, an ember glowing in it (where its smoke comes from:
+ * Sphere.smoke). Laid on the head's front, measured off its eyes as the
+ * fangs are, so it fits any head. The 3D view draws the moustache as one
+ * model (gl/props.ts: a tapering tube, combed into strands, its lower edge
+ * in tufts); the ray caster gets capsules along it and tufts under it. */
+function buildSailorsPackSpheres(spheres: Sphere[]): Sphere[] {
+  const head = largestPart(spheres, "head");
+  const eyes = spheres.filter((s) => s.part === "eye");
+  if (!head || eyes.length < 2) return [];
+  const [hx, hy, hz] = head.center;
+  const hr = head.radius;
+  const er = Math.max(...eyes.map((e) => e.radius));
+  const eyeBottom = Math.max(...eyes.map((e) => e.center[1] + e.radius));
+  const xs = eyes.map((e) => e.center[0]);
+  const spread = (Math.max(...xs) - Math.min(...xs)) / 2;
+  const result: Sphere[] = [];
+  const push = (sphere: Omit<Sphere, "zone" | "part">) =>
+    result.push({ ...sphere, zone: "wearable", part: "head" });
+  /** The point on the head's front over (x, y), moved `out` along its
+   * surface's normal: so what's laid on the face hugs its curve, out to
+   * the cheeks, rather than standing off them. */
+  const onFace = (x: number, y: number, out: number): V3 => {
+    const dx = x - hx;
+    const dy = y - hy;
+    const dz = -Math.sqrt(Math.max(0, hr * hr - dx * dx - dy * dy));
+    const k = (hr + out) / hr;
+    return [hx + dx * k, hy + dy * k, hz + dz * k];
+  };
+
+  // The moustache: a tube across the face, `a` 0 at the parting to 1 at
+  // either tip. Fullest a little out from the middle, thinning to the tips,
+  // which droop well down (a walrus, not a handlebar).
+  const halfWidth = Math.min(hr * 0.7, spread + er * 1.7);
+  const top = eyeBottom + er * 0.5;
+  const thick = (a: number) =>
+    er * (0.5 + 0.18 * Math.sin(Math.PI * Math.min(a / 0.9, 1)) - 0.3 * a ** 4);
+  const droop = (a: number) => top + er * (1.1 * a ** 2.4 - 0.1 * (1 - a));
+  const SEGMENTS = 12;
+  const along: { at: V3; r: number }[] = [];
+  for (let i = 0; i <= SEGMENTS; i++) {
+    const u = (i / SEGMENTS) * 2 - 1;
+    const a = Math.abs(u);
+    const r = thick(a);
+    along.push({ at: onFace(hx + u * halfWidth, droop(a), r * 0.05), r });
+  }
+  const WHITE = "#F4F1EA";
+  const GREY = "#DAD5CC";
+  const parting = along[SEGMENTS / 2].at;
+  const prop: MoustacheProp = {
+    kind: "moustache",
+    center: parting,
+    yaw: 0,
+    spine: along.map((p) => sub(p.at, parting)),
+    radii: along.map((p) => p.r),
+    normals: along.map((p) => norm(sub(p.at, head.center))),
+    colors: { hair: WHITE, tips: GREY },
+  };
+  const first = result.length;
+  for (let i = 0; i < SEGMENTS; i++) {
+    const a = along[i];
+    const b = along[i + 1];
+    // The tips a shade greyer, as an old salt's are.
+    const tip = i === 0 || i === SEGMENTS - 1;
+    result.push(
+      capsuleBetween(a.at, b.at, (a.r + b.r) / 2, tip ? GREY : WHITE),
+    );
+  }
+  // The fringe: tufts along its lower edge, so it reads as hair.
+  for (const u of [-0.82, -0.6, -0.38, -0.16, 0.16, 0.38, 0.6, 0.82]) {
+    const a = Math.abs(u);
+    const r = thick(a);
+    push({
+      center: onFace(hx + u * halfWidth, droop(a) + r * 0.72, r * 0.1),
+      radius: r * 0.48,
+      color: "#E8E3D9",
+    });
+  }
+  for (let k = first; k < result.length; k++) result[k].prop = prop;
+
+  // The pipe, at the corner of the mouth on the herzie's right (the
+  // viewer's left), tucked under the moustache.
+  const side = -1;
+  const cornerA = 0.55;
+  const corner = onFace(
+    hx + side * cornerA * halfWidth,
+    droop(cornerA) + thick(cornerA) * 0.55,
+    -er * 0.1,
+  );
+  // Its stem: out from the face (−z), a little out to the side and down.
+  const stemEnd: V3 = [
+    corner[0] + side * er * 0.55,
+    corner[1] + er * 0.4,
+    corner[2] - er * 1.7,
+  ];
+  const stem = capsuleBetween(corner, stemEnd, er * 0.13, "#26211F");
+  stem.smoke = "mouth";
+  result.push(stem);
+  // A gold band where the stem meets the briar.
+  const dir = sub(stemEnd, corner);
+  const length = Math.hypot(...dir) || 1;
+  push({
+    center: stemEnd,
+    radius: er * 0.18,
+    color: "#C9A24A",
+    finish: "metal",
+    shape: {
+      kind: "cylinder",
+      axis: [
+        (dir[0] / length) * er * 0.07,
+        (dir[1] / length) * er * 0.07,
+        (dir[2] / length) * er * 0.07,
+      ],
+    },
+  });
+  // The shank, on to the foot of the bowl.
+  const BRIAR = "#8A552C";
+  const foot: V3 = [
+    stemEnd[0] + side * er * 0.15,
+    stemEnd[1] + er * 0.12,
+    stemEnd[2] - er * 0.5,
+  ];
+  result.push(capsuleBetween(stemEnd, foot, er * 0.21, BRIAR));
+  // The bowl: upright (up is −y), its bottom rounded, a darker rim, and
+  // the ember domed just proud of it.
+  const bowlR = er * 0.5;
+  const bowl: V3 = [foot[0], foot[1] - er * 0.45, foot[2] - er * 0.18];
+  push({
+    center: bowl,
+    radius: bowlR,
+    color: BRIAR,
+    shape: { kind: "cylinder", axis: [0, er * 0.5, 0] },
+  });
+  push({
+    center: [bowl[0], bowl[1] + er * 0.5, bowl[2]],
+    radius: bowlR,
+    color: BRIAR,
+  });
+  push({
+    center: [bowl[0], bowl[1] - er * 0.5, bowl[2]],
+    radius: bowlR * 1.08,
+    color: "#5A3520",
+    shape: { kind: "cylinder", axis: [0, er * 0.05, 0] },
+  });
+  push({
+    center: [bowl[0], bowl[1] - er * 0.4, bowl[2]],
+    radius: bowlR * 0.74,
+    color: "#FF7A2C",
+    smoke: "bowl",
+  });
+  return result;
+}
+
 /** Whether the Greedy Spirit is the worn spirit. */
 export function hasSpiritEquipped(equipped?: Equipped): boolean {
   return equipped?.spirit === "spirit-orb";
@@ -3395,6 +3649,7 @@ function discIn(
   part: string,
   hand: Hand,
   onIt: V3,
+  size: number,
   thread?: HeldSocket["thread"],
 ): Sphere[] {
   const { at, side, r } = hand;
@@ -3417,16 +3672,19 @@ function discIn(
   const toShoulder = sub(hand.shoulder, onIt);
   const rim = add(
     onIt,
-    scale(norm(sub(toShoulder, scale(out, dot(toShoulder, out)))), r * 0.9),
+    scale(
+      norm(sub(toShoulder, scale(out, dot(toShoulder, out)))),
+      r * 0.9 * size,
+    ),
   );
   const disc = slung(
     hand,
     [
-      held(part, center, r * 0.95, "#d9d9e8", {
+      held(part, center, r * 0.95 * size, "#d9d9e8", {
         kind: "cylinder",
         axis: scale(face, r * 0.04),
       }),
-      held(part, center, r * 0.22, "#3a3a4a", {
+      held(part, center, r * 0.22 * size, "#3a3a4a", {
         kind: "cylinder",
         axis: scale(face, r * 0.06),
       }),
@@ -3447,43 +3705,56 @@ const DISC_LIFT: Record<string, number> = {
   [OFF_HELD]: 0.1,
 };
 
+/** How much lower than between the shoulders (torso radii) the discs
+ * hang on the back: any higher and the upper one's rim cuts into the
+ * head. */
+const DISC_DROP = 0.26;
+
 /**
  * Compact Discs: one item, a disc in each hand. On the back they hang down
  * the spine on invisible threads — the main hand's tied up between the
  * shoulders, the other tied to it — and swing as the herzie moves (see
  * thread-physics.ts). Built where they settle, so a still herzie shows them
- * as they'd really hang.
+ * as they'd really hang. `size`: the discs' radius, × the class pair's
+ * (held the same way, by the same palm, whatever their size).
  */
-const buildCompactDiscs: HeldBuilder = (spheres, part, hand) => {
-  const otherPart = part === MAIN_HELD ? OFF_HELD : MAIN_HELD;
-  const other = handOf(spheres, HELD_ARM[otherPart], hand.over);
-  const hung = [
-    { part, hand },
-    ...(other ? [{ part: otherPart, hand: other }] : []),
-  ].sort((a, b) => (a.part === MAIN_HELD ? -1 : b.part === MAIN_HELD ? 1 : 0));
-  const top = hung[0].hand;
-  const { center, radius } = top.torso;
-  const lift = (h: (typeof hung)[number]) => h.hand.r * DISC_LIFT[h.part];
-  // Where they'd hang: one above the other, down the spine.
-  const guess = hung.map((h, i) =>
-    onBack(h.hand, 0, i === 0 ? -0.32 : 0, lift(h)),
-  );
-  const knot = onBack(top, 0, -0.62, lift(hung[0]));
-  const rig: ThreadRig = {
-    knot,
-    lengths: guess.map((g, i) =>
-      Math.hypot(...sub(g, i === 0 ? knot : guess[i - 1])),
-    ),
-    rest: guess,
-    center,
-    clear: hung.map((h) => radius + lift(h)),
-    parts: hung.map((h) => h.part),
+const compactDiscs =
+  (size: number): HeldBuilder =>
+  (spheres, part, hand) => {
+    const otherPart = part === MAIN_HELD ? OFF_HELD : MAIN_HELD;
+    const other = handOf(spheres, HELD_ARM[otherPart], hand.over);
+    const hung = [
+      { part, hand },
+      ...(other ? [{ part: otherPart, hand: other }] : []),
+    ].sort((a, b) =>
+      a.part === MAIN_HELD ? -1 : b.part === MAIN_HELD ? 1 : 0,
+    );
+    const top = hung[0].hand;
+    const { center, radius } = top.torso;
+    const lift = (h: (typeof hung)[number]) => h.hand.r * DISC_LIFT[h.part];
+    // Where they'd hang: one above the other, down the spine — low enough
+    // that the upper one's rim clears the head, a bigger pair hung lower by
+    // as much as it's grown.
+    const drop = DISC_DROP + ((size - 1) * 0.95 * top.r) / radius;
+    const guess = hung.map((h, i) =>
+      onBack(h.hand, 0, (i === 0 ? -0.32 : 0) + drop, lift(h)),
+    );
+    const knot = onBack(top, 0, -0.62 + drop, lift(hung[0]));
+    const rig: ThreadRig = {
+      knot,
+      lengths: guess.map((g, i) =>
+        Math.hypot(...sub(g, i === 0 ? knot : guess[i - 1])),
+      ),
+      rest: guess,
+      center,
+      clear: hung.map((h) => radius + lift(h)),
+      parts: hung.map((h) => h.part),
+    };
+    rig.rest = settleThread(rig);
+    return hung.flatMap((h, index) =>
+      discIn(h.part, h.hand, rig.rest[index], size, { rig, index }),
+    );
   };
-  rig.rest = settleThread(rig);
-  return hung.flatMap((h, index) =>
-    discIn(h.part, h.hand, rig.rest[index], { rig, index }),
-  );
-};
 
 /** Lute: in the hand, its body at the palm and the neck pointing forward
  * and a little down — carried easy. On the back, slung across: the neck up
@@ -3544,11 +3815,48 @@ const buildLute: HeldBuilder = (_s, part, hand) => {
   );
 };
 
+/** A held builder with its colours swapped, `colors` from the base's to
+ * the new one's: how a Wilds instrument looks like the class instrument
+ * it's built on, the same shape, in its own wood and metal. */
+function recolored(
+  build: HeldBuilder,
+  colors: Readonly<Record<string, string>>,
+): HeldBuilder {
+  return (spheres, part, hand) =>
+    build(spheres, part, hand).map((s) =>
+      s.color && colors[s.color] ? { ...s, color: colors[s.color] } : s,
+    );
+}
+
 const HELD_ITEM_BUILDERS: Record<string, HeldBuilder> = {
   "worn-stick": buildWornStick,
   "old-cymbal": buildOldCymbal,
-  "compact-discs": buildCompactDiscs,
+  "compact-discs": compactDiscs(1),
   lute: buildLute,
+  // The Wilds instruments (wilds-loot.ts): their base's prop, recoloured
+  // (and the discs cut a size up).
+  "thunderhide-sticks": recolored(buildWornStick, {
+    // Storm-grey hide wrap, a lightning-yellow tip.
+    "#2a2422": "#4a5070",
+    "#3b3330": "#ffe066",
+  }),
+  "storm-cymbal": recolored(buildOldCymbal, {
+    // Blued steel, lightning at the rim for the verdigris.
+    "#d4b04c": "#9fb8d8",
+    "#b8923a": "#6f88aa",
+    "#6fa38a": "#ffe066",
+  }),
+  "stormcut-discs": recolored(compactDiscs(1.18), {
+    "#d9d9e8": "#7fb4ff",
+    "#3a3a4a": "#ffe066",
+  }),
+  "wildwood-lute": recolored(buildLute, {
+    // Green-gold tonewood, a sky-blue neck.
+    "#c98a4b": "#9fbf5a",
+    "#2b1a0e": "#16240e",
+    "#6b4226": "#4f8fc0",
+    "#4a2c18": "#2c5a80",
+  }),
 };
 
 function buildHeldSpheres(spheres: Sphere[], equipped: Equipped): Sphere[] {
@@ -4179,6 +4487,9 @@ function appendWearableSpheres(
   if (equipped.face === "fyllings-monocle") {
     spheres.push(...buildMonocleSpheres(spheres));
   }
+  if (equipped.face === "sailors-starter-pack") {
+    spheres.push(...buildSailorsPackSpheres(spheres));
+  }
   if (equipped.head === "headphones") {
     spheres.push(...buildHeadphoneSpheres(spheres));
   }
@@ -4202,6 +4513,9 @@ function appendWearableSpheres(
   }
   if (equipped.head === "guard-helm") {
     spheres.push(...buildGuardHelmSpheres(spheres));
+  }
+  if (equipped.head === "sailors-beanie") {
+    spheres.push(...buildSailorBeanieSpheres(spheres));
   }
   if (equipped.head === "troubadour-plume") {
     spheres.push(...buildPlumedBeretSpheres(spheres));
@@ -4254,6 +4568,9 @@ export const TOWER_GUARD_SCHEME_ID = "npc-tower-guard";
 export const PIP_SCHEME_ID = "npc-pip";
 /** Colour-scheme key for Nakata's greys, the same arrangement again. */
 export const NAKATA_SCHEME_ID = "npc-nakata";
+/** Colour-scheme key for Madas's gold, creeping up him from the feet, the
+ * same arrangement again. */
+export const MADAS_SCHEME_ID = "npc-madas";
 
 const COLOR_SCHEMES: Record<string, readonly string[]> = {
   prism: RAINBOW_RAMP,
@@ -4278,6 +4595,7 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
   [TOWER_GUARD_SCHEME_ID]: TOWER_GUARD_RAMP,
   [PIP_SCHEME_ID]: PIP_RAMP,
   [NAKATA_SCHEME_ID]: NAKATA_RAMP,
+  [MADAS_SCHEME_ID]: MADAS_RAMP,
 };
 
 /** Skins that make the body see-through: the 3D view draws whatever the

@@ -57,7 +57,7 @@ const queue: {
   key?: string;
   amount: number;
   crit: boolean;
-  kind: "hit" | "hurt" | "heal" | "stun";
+  kind: "hit" | "hurt" | "heal" | "stun" | "blocked";
   /** A word instead of a number ("Stunned"). */
   text?: string;
 }[] = [];
@@ -100,6 +100,18 @@ export function pushStunLabel(at: Readonly<Vec3>): void {
     });
 }
 
+/** A hit a dome turned away, popping off `at` (in a duel). */
+export function pushBlockedLabel(at: Readonly<Vec3>): void {
+  if (queue.length < QUEUE_MAX)
+    queue.push({
+      at: [at[0], at[1], at[2]],
+      amount: 0,
+      crit: false,
+      kind: "blocked",
+      text: "Blocked",
+    });
+}
+
 /** Damage you took, popping off your herzie's head. */
 export function pushHurtNumber(amount: number): void {
   if (amount > 0 && queue.length < QUEUE_MAX)
@@ -124,9 +136,10 @@ const STYLE = `
 .town-fx .dmg { position: absolute; left: 0; top: 0; will-change: transform, opacity; white-space: nowrap;
   font-weight: 800; font-size: 15px; color: #e9fbff; letter-spacing: -0.5px;
   text-shadow: 0 0 6px rgba(80, 200, 255, 0.55), 0 2px 0 #0b2233, 1px 0 0 #0b2233, -1px 0 0 #0b2233, 0 -1px 0 #0b2233; }
-.town-fx .dmg.crit { color: #ffe08a;
+.town-fx .dmg.crit { color: #ffe08a; font-size: 17px; font-weight: 900;
   text-shadow: 0 0 10px rgba(255, 190, 60, 0.75), 0 2px 0 #3a2200, 1px 0 0 #3a2200, -1px 0 0 #3a2200, 0 -1px 0 #3a2200; }
-.town-fx .dmg.crit::after { content: "!"; margin-left: 1px; }
+.town-fx .dmg.blocked { color: #b8bcc8; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase;
+  text-shadow: 0 2px 0 #1a1c22, 1px 0 0 #1a1c22, -1px 0 0 #1a1c22, 0 -1px 0 #1a1c22; }
 .town-fx .dmg.hurt { color: #ff6b6b;
   text-shadow: 0 0 8px rgba(255, 60, 60, 0.6), 0 2px 0 #3a0808, 1px 0 0 #3a0808, -1px 0 0 #3a0808, 0 -1px 0 #3a0808; }
 .town-fx .dmg.stun { color: #ffd36b; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase;
@@ -330,9 +343,11 @@ export function CombatOverlay() {
             ? "dmg heal"
             : n.kind === "stun"
               ? "dmg stun"
-              : n.crit
-                ? "dmg crit"
-                : "dmg";
+              : n.kind === "blocked"
+                ? "dmg blocked"
+                : n.crit
+                  ? "dmg crit"
+                  : "dmg";
     }
 
     for (const f of ui.floaters) {

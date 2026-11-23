@@ -4,9 +4,10 @@ import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import { prune, SLAM_AFTER_MS, type Slam, slams } from "../combat/slams";
 import type { Vec3 } from "../combat/waves";
+import { easeOutClamped as easeOut } from "../easing";
 import { groundY, type TownMap } from "../map";
 import { distortionScene } from "./distortion";
-import { FxLayer, SPARK, scatter, useMotes, WHITE } from "./SonicVFX";
+import { FxLayer, SPARK, scatter, upload, useMotes, WHITE } from "./SonicVFX";
 
 /** Slams drawn at once at most. */
 const MAX = 4;
@@ -29,7 +30,6 @@ const CRACK_GLOW_MS = 220;
 const DUST_MS = 900;
 const CRACK_SIZE = 4.6;
 
-const easeOut = (t: number) => 1 - (1 - Math.min(1, Math.max(0, t))) ** 3;
 const easeIn = (t: number) => Math.min(1, Math.max(0, t)) ** 2;
 
 const RING_VERT = /* glsl */ `
@@ -598,7 +598,8 @@ export function SlamVFX({ map }: { map: TownMap }) {
       parts.dust.setMatrixAt(n++, m4);
     }
     parts.dust.count = n;
-    parts.dust.instanceMatrix.needsUpdate = true;
+    parts.dust.visible = n > 0;
+    if (n > 0) upload(parts.dust.instanceMatrix, n);
     (parts.dust.material as THREE.MeshBasicMaterial).opacity = 0.22;
 
     // Chunks: hopping out under gravity, settling where they land.
@@ -629,8 +630,10 @@ export function SlamVFX({ map }: { map: TownMap }) {
       m4.compose(p3, q, s3);
       parts.debris.setMatrixAt(n++, m4);
     }
+    // Left visible when empty: it casts a shadow, and drawn into the shadow
+    // map, empty or not, its shadow shader is ready for the first slam.
     parts.debris.count = n;
-    parts.debris.instanceMatrix.needsUpdate = true;
+    if (n > 0) upload(parts.debris.instanceMatrix, n);
 
     motes.update(dt);
   });

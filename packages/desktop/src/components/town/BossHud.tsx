@@ -1,5 +1,5 @@
 import { BOSS_PHASE_AT, IN_TUNE, MINION_THRESHOLDS } from "@herzies/shared";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { cn } from "../../lib/utils";
 import { clock } from "./cave";
 import {
@@ -22,16 +22,64 @@ const bossCardObserver = new ResizeObserver(([entry]) => {
     `${(entry.target as HTMLElement).getBoundingClientRect().bottom}px`,
   );
 });
-function observeBossCard(el: HTMLElement | null) {
+export function observeBossCard(el: HTMLElement | null) {
   bossCardObserver.disconnect();
   if (el) bossCardObserver.observe(el);
   else document.documentElement.style.removeProperty("--boss-card-bottom");
 }
 
 /** The boss's card: top right, clear of your own (top left), as wide as
- * the space beside it allows. */
-const BOSS_CARD =
+ * the space beside it allows. A duel's opponent gets the same card. */
+export const BOSS_CARD =
   "pointer-events-none absolute top-[calc(var(--hud-top,0px)+0.75rem)] right-3 z-30 w-[min(15rem,calc(100%-174px-2.25rem))] rounded-xl border border-white/12 bg-black/45 px-2 pt-1 pb-2 text-white backdrop-blur-md";
+
+/** A foe's health on its card: the red bar, a white chip of what was just
+ * lost catching up a moment later (so each burst of damage reads), and
+ * the numbers under it with `right` beside them. `marks`: drawn over the
+ * bar (the boss's phases). */
+export function FoeHealth({
+  label,
+  hp,
+  maxHp,
+  right,
+  marks,
+}: {
+  label: string;
+  hp: number;
+  maxHp: number;
+  right?: ReactNode;
+  marks?: ReactNode;
+}) {
+  const frac = maxHp > 0 ? Math.max(0, Math.min(1, hp / maxHp)) : 0;
+  return (
+    <div
+      className="mt-0.5"
+      role="progressbar"
+      aria-label={`${label} health`}
+      aria-valuemin={0}
+      aria-valuemax={maxHp}
+      aria-valuenow={Math.round(hp)}
+    >
+      <div className="relative h-2 overflow-hidden rounded-sm bg-black/60 ring-1 ring-white/25">
+        <div
+          className="absolute inset-y-0 left-0 bg-white/70 transition-[width] duration-500 ease-out motion-reduce:transition-none"
+          style={{ width: `${frac * 100}%`, transitionDelay: "350ms" }}
+        />
+        <div
+          className="relative h-full bg-red-500 transition-[width] duration-100"
+          style={{ width: `${frac * 100}%` }}
+        />
+        {marks}
+      </div>
+      <div className="mt-0.5 flex text-[10px] leading-3 tabular-nums text-white/60">
+        <span>
+          {Math.ceil(hp).toLocaleString()} / {maxHp.toLocaleString()}
+        </span>
+        {right ? <span className="ml-auto">{right}</span> : null}
+      </div>
+    </div>
+  );
+}
 
 /**
  * What the boss room shows over the world. The boss has a card of its own,
@@ -60,7 +108,6 @@ export function BossHud({ name }: { name: string }) {
     return () => clearInterval(t);
   }, [counting]);
 
-  const frac = maxHp > 0 ? Math.max(0, Math.min(1, hp / maxHp)) : 0;
   const closes = closing ? Math.max(0, closing.at - now) : 0;
   return (
     <>
@@ -103,52 +150,32 @@ export function BossHud({ name }: { name: string }) {
             </div>
           ) : (
             <>
-              <div
-                className="mt-0.5"
-                role="progressbar"
-                aria-label={`${name} health`}
-                aria-valuemin={0}
-                aria-valuemax={maxHp}
-                aria-valuenow={Math.round(hp)}
-              >
-                <div className="relative h-2 overflow-hidden rounded-sm bg-black/60 ring-1 ring-white/25">
-                  {/* The chip: what was just lost, in white, catching up
-                      a moment later so each burst of damage reads. */}
-                  <div
-                    className="absolute inset-y-0 left-0 bg-white/70 transition-[width] duration-500 ease-out motion-reduce:transition-none"
-                    style={{
-                      width: `${frac * 100}%`,
-                      transitionDelay: "350ms",
-                    }}
-                  />
-                  <div
-                    className="relative h-full bg-red-500 transition-[width] duration-100"
-                    style={{ width: `${frac * 100}%` }}
-                  />
-                  {/* Where it changes gear (solid), and where it calls
-                      its minions (dotted). */}
-                  {BOSS_PHASE_AT.map((p) => (
-                    <span
-                      key={`p${p}`}
-                      className="absolute top-0 h-full w-px bg-white/60"
-                      style={{ left: `${p * 100}%` }}
-                    />
-                  ))}
-                  {MINION_THRESHOLDS.map((p) => (
-                    <span
-                      key={`m${p}`}
-                      className="absolute top-0 h-full w-px border-l border-dotted border-[#9be36b]/80"
-                      style={{ left: `${p * 100}%` }}
-                    />
-                  ))}
-                </div>
-                <div className="mt-0.5 flex text-[10px] leading-3 tabular-nums text-white/60">
-                  <span>
-                    {Math.ceil(hp).toLocaleString()} / {maxHp.toLocaleString()}
-                  </span>
-                  <span className="ml-auto">Phase {bossFight.phase}</span>
-                </div>
-              </div>
+              <FoeHealth
+                label={name}
+                hp={hp}
+                maxHp={maxHp}
+                right={`Phase ${bossFight.phase}`}
+                marks={
+                  <>
+                    {/* Where it changes gear (solid), and where it calls
+                        its minions (dotted). */}
+                    {BOSS_PHASE_AT.map((p) => (
+                      <span
+                        key={`p${p}`}
+                        className="absolute top-0 h-full w-px bg-white/60"
+                        style={{ left: `${p * 100}%` }}
+                      />
+                    ))}
+                    {MINION_THRESHOLDS.map((p) => (
+                      <span
+                        key={`m${p}`}
+                        className="absolute top-0 h-full w-px border-l border-dotted border-[#9be36b]/80"
+                        style={{ left: `${p * 100}%` }}
+                      />
+                    ))}
+                  </>
+                }
+              />
               {closing ? (
                 <div role="status" className="mt-1 text-[11px] leading-4">
                   <div className="font-medium">
@@ -310,13 +337,16 @@ function RaidLine({ raid, now }: { raid: RaidView; now: number }) {
   );
 }
 
-/** Under your now-playing box in the boss room, while your music is
- * getting to the boss: your class's bonus ("Healing: +30%"). */
+/** Under your now-playing box in the boss room or the Tower, while your
+ * music is getting to the boss (or the Tower's mobs): your class's bonus
+ * ("Healing: +30%"). */
 export function MusicBonus() {
   useBossFight();
   useSkills();
   const [now, setNow] = useState(() => performance.now());
-  const inRaid = bossFight.on && !!bossFight.raid && !bossFight.closing;
+  const inTower = !!bossFight.tower;
+  const inRaid =
+    bossFight.on && (!!bossFight.raid || inTower) && !bossFight.closing;
   useEffect(() => {
     if (!inRaid) return;
     const t = setInterval(() => setNow(performance.now()), 500);
@@ -336,7 +366,11 @@ export function MusicBonus() {
   return (
     <div
       role="status"
-      title="The boss hates music: yours makes you stronger"
+      title={
+        inTower
+          ? "Your music makes you stronger in the Tower"
+          : "The boss hates music: yours makes you stronger"
+      }
       className="pointer-events-none self-start px-0.5 text-ui font-bold text-[#ffd84a] [text-shadow:0_1px_2px_#000,0_0_6px_#000]"
     >
       ♪ {bonus}

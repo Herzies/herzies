@@ -29,21 +29,25 @@ import {
   meetsMinStage,
   RARITY_COLORS,
   RARITY_LABELS,
+  RARITY_RANK,
   requiredDiceForLevel,
   unitsBestFirst,
 } from "@herzies/shared";
 import { HerzieView } from "@herzies/shared/gl";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useLoadoutSwitch } from "../hooks/useLoadoutSwitch";
 import {
   pickGroundSide,
   type ToggleEquipResult,
 } from "../hooks/useOptimisticUnits";
 import { useEscape } from "../lib/escapeStack";
+import { useLoadouts } from "../lib/loadoutState";
 import { notify } from "../lib/notices";
 import { overlayHerzieStage } from "../lib/overlayStage";
 import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
+import { BagTilePreview } from "./BagTilePreview";
 import { Coin, CoinBalance } from "./Coin";
 import { ContextMenu } from "./ContextMenu";
 import {
@@ -59,10 +63,11 @@ import {
 import { DeckSlotPicker, type PickerOption } from "./DeckSlotPicker";
 import { DiceUpgradeOverlay } from "./DiceUpgradeOverlay";
 import { type Flight, ItemFlights } from "./ItemFlight";
-import ItemInspectOverlay, { CompactItemPreview } from "./ItemInspectOverlay";
+import ItemInspectOverlay from "./ItemInspectOverlay";
 import { DuplicatesIcon } from "./icons/DuplicatesIcon";
 import { SortIcon } from "./icons/SortIcon";
 import { List } from "./List";
+import { LoadoutTabs } from "./LoadoutTabs";
 import { NumberTicker } from "./NumberTicker";
 import { PromptOverlay } from "./PromptOverlay";
 import { TabButton } from "./TabButton";
@@ -513,6 +518,7 @@ function ItemGridCell({
   isDragOver,
   flying,
   equipped,
+  units,
   onPlace,
   onMenuRequest,
   onDragPointerDown,
@@ -529,6 +535,8 @@ function ItemGridCell({
   /** A copy is flying back onto this tile: hold its icon until it lands. */
   flying: boolean;
   equipped: Equipped;
+  /** Every copy owned: the Shift comparison weighs this one against them. */
+  units: readonly ItemUnit[];
   /** The tile is the exact copy that was clicked — there is no "which of the
    * identical cards" to work out — so no slot index has to be threaded through.
    * `inspect`: Shift was held — open Inspect instead. */
@@ -542,12 +550,19 @@ function ItemGridCell({
 
   return (
     // The condensed card: browsing the bag wants a glance, not the full art.
-    // Right-click → Inspect opens the full one.
+    // Right-click → Inspect opens the full one; Shift compares with what's
+    // worn.
     <HoverPreview
       estWidth={180}
       estHeight={80}
       content={
-        <CompactItemPreview itemId={itemId} equipped={equipped} level={level} />
+        <BagTilePreview
+          itemId={itemId}
+          unitId={unitIds[0]}
+          level={level}
+          equipped={equipped}
+          units={units}
+        />
       }
     >
       <button
@@ -645,22 +660,12 @@ function EmptyGridCell({
   );
 }
 
-// Typed on Rarity so a new tier can't be forgotten here again — mythic was,
-// and fell through to common.
-const RARITY_ORDER: Record<Rarity, number> = {
-  mythic: 0,
-  legendary: 1,
-  rare: 2,
-  uncommon: 3,
-  common: 4,
-};
-
 /** Rarity, then name, then — so an upgraded copy leads its plainer twins —
  * highest level first. The order fresh tiles are placed in and the order the
  * quick sort starts from. */
 function compareTiles(a: BankTile, b: BankTile): number {
-  const ra = RARITY_ORDER[getItem(a.itemId)?.rarity ?? "common"];
-  const rb = RARITY_ORDER[getItem(b.itemId)?.rarity ?? "common"];
+  const ra = RARITY_RANK[getItem(a.itemId)?.rarity ?? "common"];
+  const rb = RARITY_RANK[getItem(b.itemId)?.rarity ?? "common"];
   if (ra !== rb) return ra - rb;
   const byName = (getItem(a.itemId)?.name ?? a.itemId).localeCompare(
     getItem(b.itemId)?.name ?? b.itemId,
@@ -727,6 +732,30 @@ function InventoryViewImpl({
   wide?: boolean;
 }) {
   const capacity = bankCapacity(bankExpansions);
+  /** The two loadouts (null until the server's said): the Deck's 1 | 2
+   * tabs. */
+  const loadouts = useLoadouts();
+  const loadout = useLoadoutSwitch({
+    loadouts,
+    units,
+    stage: herzie.stage,
+    herzieClass: herzie.class ?? null,
+    capacity,
+    onPredictUnits,
+    onLog,
+  });
+  const loadoutTabs = (
+    <LoadoutTabs
+      loadouts={loadouts}
+      active={loadout.active}
+      switching={loadout.switching}
+      blocked={loadout.blocked}
+      units={units}
+      stage={herzie.stage}
+      herzieClass={herzie.class ?? null}
+      onSwitch={loadout.switchTo}
+    />
+  );
   // Crystal Shards, beside the coins in the footer.
   const crystal = useCrystal();
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
@@ -1320,7 +1349,9 @@ function InventoryViewImpl({
             returning ? deckSpot(unitId) : bagSpot(unitId),
           ),
         );
-      if (origin) {
+      // A held copy taken off stays put away in the other loadout: it has no
+      // tile to fly to.
+      if (origin && !(returning && unit.heldBy !== undefined)) {
         created.push({
           id: nextFlightId.current++,
           itemId: unit.itemId,
@@ -1337,7 +1368,9 @@ function InventoryViewImpl({
         for (const before of units) {
           if (before.id === unitId || before.equippedSlot === null) continue;
           const after = predicted.units.find((u) => u.id === before.id);
-          if (after?.equippedSlot !== null) continue;
+          if (after?.equippedSlot !== null || after.heldBy !== undefined) {
+            continue;
+          }
           const boxAt = centre(document.querySelector(deckSpot(before.id)));
           if (!boxAt) continue;
           created.push({
@@ -1640,7 +1673,10 @@ function InventoryViewImpl({
    * level: identical copies are one and the same move, a copy at another level
    * is a different one. An item that's already worn is left out — wearing a
    * second copy of it is a swap, which belongs to clicking that copy in the
-   * bank, not to filling an empty box. */
+   * bank, not to filling an empty box.
+   *
+   * After the bag's rows, the pieces the other loadout holds that fit, so a
+   * copy can be worn in both loadouts at once (it stays held there). */
   const wornItemIds = new Set(
     units.filter((u) => u.equippedSlot !== null).map((u) => u.itemId),
   );
@@ -1658,6 +1694,17 @@ function InventoryViewImpl({
         itemId: tile.itemId,
         unitId: tile.unitIds[0],
         upgradeLevel: tile.upgradeLevel,
+      });
+    }
+    for (const u of units) {
+      if (u.heldBy === undefined || u.equippedSlot !== null) continue;
+      if (getItem(u.itemId)?.equipSlot !== slotPicker.equipSlot) continue;
+      if (wornItemIds.has(u.itemId)) continue;
+      slotPickerOptions.push({
+        itemId: u.itemId,
+        unitId: u.id,
+        upgradeLevel: u.upgradeLevel,
+        note: `In loadout ${u.heldBy}`,
       });
     }
   }
@@ -1984,6 +2031,7 @@ function InventoryViewImpl({
                       }
                       flying={tile.unitIds.some((id) => flyingUnitIds.has(id))}
                       equipped={equipped}
+                      units={units}
                       onPlace={(inspect) => handleGridClick(tile, inspect)}
                       onMenuRequest={(x, y) =>
                         setTileMenu({ tileKey: tile.key, x, y })
@@ -2015,6 +2063,10 @@ function InventoryViewImpl({
           <div className="@container flex h-full min-h-0 flex-col">
             {wide ? (
               <>
+                {/* The loadouts, over the character screen. */}
+                <div className="flex h-5 shrink-0 items-center justify-center">
+                  {loadoutTabs}
+                </div>
                 {/* The character screen: drop a card anywhere on it and
                     it's placed. */}
                 <div {...{ [HERZIE_ZONE_ATTR]: "" }} className="shrink-0">
@@ -2046,13 +2098,8 @@ function InventoryViewImpl({
                       </span>
                     </TabButton>
                   ))}
-                  <div
-                    className={cn(
-                      "ml-auto flex items-center",
-                      panel !== "bag" && "invisible",
-                    )}
-                  >
-                    {bagTools}
+                  <div className="ml-auto flex items-center">
+                    {panel === "deck" ? loadoutTabs : bagTools}
                   </div>
                 </div>
                 {/* The bag sets the height (its filter row and three rows);
@@ -2182,8 +2229,9 @@ function InventoryViewImpl({
                 },
                 // Sells exactly the worn copy — a box holds one, so there's no
                 // quantity to pick. Selling it takes it off; rare and up still
-                // ask first (see requestSell).
-                ...(getItem(unit.itemId)?.sellPrice
+                // ask first (see requestSell). A copy the other loadout also
+                // holds can't be sold while it does, so no Sell for it.
+                ...(getItem(unit.itemId)?.sellPrice && unit.heldBy === undefined
                   ? [
                       {
                         label: "Sell",
@@ -2303,7 +2351,7 @@ function InventoryViewImpl({
                 of odds and ends can't outgrow the dialog. Nothing valuable
                 can hide behind "+N more": the batch is common and uncommon
                 only (see `duplicates`), and the tiles sort rarity-first (see
-                RARITY_ORDER) so the uncommons are the rows that do show. */}
+                RARITY_RANK) so the uncommons are the rows that do show. */}
             <div className="flex flex-col gap-0.5 text-ui-sm text-text-dim">
               {duplicates.slice(0, 6).map((d) => {
                 const def = getItem(d.itemId);
@@ -2399,11 +2447,13 @@ function InventoryViewImpl({
                 },
               ]}
             >
-              Are you sure you want to sell {qty > 1 ? `${qty}x ` : ""}
-              <span style={{ color: RARITY_COLORS[item.rarity] }}>
-                "{item.name}"
-              </span>{" "}
-              for <Coin amount={total} />?
+              <div>
+                Are you sure you want to sell {qty > 1 ? `${qty}x ` : ""}
+                <span style={{ color: RARITY_COLORS[item.rarity] }}>
+                  "{item.name}"
+                </span>{" "}
+                for <Coin amount={total} />?
+              </div>
             </PromptOverlay>
           );
         })()}

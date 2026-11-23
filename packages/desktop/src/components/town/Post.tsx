@@ -13,7 +13,7 @@ import { townLook } from "./depth";
 import { homeMode, markWorldSettled } from "./homeMode";
 import { skyUniforms } from "./Islands";
 import { SUPERSAMPLE, townSupersample } from "./pixelSize";
-import { warpAmount } from "./portal";
+import { warp, warpAmount } from "./portal";
 import { DistortionBuffer, SonicDistortionEffect } from "./vfx/distortion";
 import { HomeFadeEffect } from "./vfx/homeFade";
 import { LookEffect } from "./vfx/look";
@@ -170,6 +170,7 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
     if (distort) {
       effect.active = buffer.render(gl, camera);
       effect.warp = warpAmount();
+      effect.warpDoor = warp.door;
     }
     fade.fade = homeMode.worldFade;
     // The golden hour: the sun up but low, and no rain to grey it.

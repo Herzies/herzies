@@ -105,9 +105,9 @@ fn api_base() -> String {
     std::env::var("HERZIES_API_URL").unwrap_or_else(|_| "https://www.herzies.app/api".to_string())
 }
 
-/// Supabase project URL. Mirrors the resolution used by `get_auth_config` in
-/// lib.rs so the Edge Function and the rest of the app agree on the project.
-fn supabase_url() -> String {
+/// Supabase project URL: the one the Edge Functions and the webview's
+/// Realtime client (`get_auth_config`) both use.
+pub(crate) fn supabase_url() -> String {
     std::env::var("NEXT_PUBLIC_SUPABASE_URL")
         .or_else(|_| std::env::var("SUPABASE_URL"))
         .unwrap_or_else(|_| "https://ojqfqxolbjegorgoyond.supabase.co".to_string())
@@ -116,7 +116,7 @@ fn supabase_url() -> String {
 /// Public anon key — required as the `apikey` header on every Edge Function
 /// call so the Supabase API gateway routes the request (the user's JWT in the
 /// Authorization header is what actually authenticates the caller).
-fn supabase_anon_key() -> String {
+pub(crate) fn supabase_anon_key() -> String {
     std::env::var("NEXT_PUBLIC_SUPABASE_ANON_KEY")
         .or_else(|_| std::env::var("SUPABASE_ANON_KEY"))
         .unwrap_or_else(|_| "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qcWZxeG9sYmplZ29yZ295b25kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2NTcwMjgsImV4cCI6MjA5MzIzMzAyOH0.BBT77VK1ROJr57BJvMfCyra3lbycMA9u2-jxG-LhBJE".to_string())
@@ -794,6 +794,7 @@ pub async fn api_fetch_inventory(client: &Client) -> Option<ItemSnapshot> {
     let units = serde_json::from_value::<Vec<ItemUnit>>(data["units"].clone()).ok();
     let bank_expansions = data["bankExpansions"].as_u64().map(|n| n as u32);
     let emotes = serde_json::from_value::<Vec<String>>(data["emotes"].clone()).ok();
+    let loadouts = serde_json::from_value::<LoadoutState>(data["loadouts"].clone()).ok();
     Some(ItemSnapshot {
         inventory,
         currency,
@@ -802,8 +803,73 @@ pub async fn api_fetch_inventory(client: &Client) -> Option<ItemSnapshot> {
         units,
         bank_expansions,
         emotes,
+        loadouts,
         issued_at: Some(issued_at),
     })
+}
+
+/// Puts the other loadout on (1 or 2). On a refusal, errs with the server's
+/// reason code (`LoadoutRefusal`: same, too-soon, ...) when it gives one, so
+/// the UI can say it in its own words; otherwise with its message.
+pub async fn api_switch_loadout(client: &Client, loadout: u8) -> Result<serde_json::Value, String> {
+    api_post_with_reason(
+        client,
+        "/inventory/loadout",
+        serde_json::json!({ "loadout": loadout }),
+    )
+    .await
+}
+
+/// Every title: the one worn, those earned, the numbers they're earned on,
+/// and how many herzies hold each.
+pub async fn api_fetch_titles(client: &Client) -> Result<serde_json::Value, String> {
+    api_get(client, "/titles").await
+}
+
+/// Wears an earned title, or none (`None`). Errs with the reason code
+/// (not-earned, unknown) when the server gives one.
+pub async fn api_wear_title(
+    client: &Client,
+    title: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    api_post_with_reason(
+        client,
+        "/titles/wear",
+        serde_json::json!({ "title": title }),
+    )
+    .await
+}
+
+/// Marks titles as looked at: their NEW pill goes.
+pub async fn api_mark_titles_seen(
+    client: &Client,
+    ids: &[String],
+) -> Result<serde_json::Value, String> {
+    api_buy(client, "/titles/seen", serde_json::json!({ "ids": ids })).await
+}
+
+/// POSTs, erring with the refusal's `reason` code when there is one, else
+/// the server's message.
+async fn api_post_with_reason(
+    client: &Client,
+    path: &str,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let resp = api_fetch(client, reqwest::Method::POST, path, Some(body))
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
+    if !status.is_success() {
+        let msg = data["reason"]
+            .as_str()
+            .or_else(|| data["error"].as_str())
+            .unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+    Ok(data)
 }
 
 /// Wears or removes one specific copy. Surfaces the server's message (max
@@ -917,6 +983,55 @@ pub async fn api_apply_dice_upgrade(
         return Err(msg.to_string());
     }
     Ok(data)
+}
+
+/// POSTs `body` and surfaces the server's error message, like
+/// `api_apply_dice_upgrade`.
+async fn api_post_surfacing(
+    client: &Client,
+    path: &str,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let resp = api_fetch(client, reqwest::Method::POST, path, Some(body))
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
+    if !status.is_success() {
+        let msg = data["error"].as_str().unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+    Ok(data)
+}
+
+/// Crafts a Wilds instrument from a base instrument plus crafting bits.
+/// Errs with the server's reason (unknown recipe, not enough bits, bag full…).
+pub async fn api_craft_wilds_instrument(
+    client: &Client,
+    recipe: &str,
+) -> Result<serde_json::Value, String> {
+    api_post_surfacing(
+        client,
+        "/wilds/craft",
+        serde_json::json!({ "recipe": recipe }),
+    )
+    .await
+}
+
+/// Tunes one instrument copy up a level with crafting bits.
+/// Errs with the server's reason (not tunable, already maxed, not enough bits).
+pub async fn api_tune_instrument(
+    client: &Client,
+    unit_id: &str,
+) -> Result<serde_json::Value, String> {
+    api_post_surfacing(
+        client,
+        "/wilds/tune",
+        serde_json::json!({ "unitId": unit_id }),
+    )
+    .await
 }
 
 /// Sells the named copies.
@@ -1325,22 +1440,41 @@ pub async fn api_fetch_leaderboard(
     Some(data["entries"].clone())
 }
 
+/// Artist portraits already resolved this session, by lowercased artist.
+/// Albums and playlists repeat an artist track after track, and each lookup
+/// is a Vercel call plus a Spotify search. Only hits are kept, so a failed
+/// lookup is retried on the artist's next track.
+static ARTIST_IMAGES: std::sync::LazyLock<std::sync::Mutex<HashMap<String, String>>> =
+    std::sync::LazyLock::new(Default::default);
+/// Plenty for a listening session; past it the cache starts over.
+const ARTIST_IMAGES_MAX: usize = 256;
+
 /// Artist portrait photo for the now-playing bar's background, resolved
 /// server-side (Spotify search — the client credentials never ship in the app).
 pub async fn api_fetch_artist_image(client: &Client, artist: &str) -> Option<String> {
+    let key = artist.to_lowercase();
+    if let Some(url) = ARTIST_IMAGES.lock().unwrap().get(&key) {
+        return Some(url.clone());
+    }
     let path = format!("/artist-image?artist={}", urlencoding::encode(artist));
     let resp = api_fetch(client, reqwest::Method::GET, &path, None).await?;
     if !resp.status().is_success() {
         return None;
     }
     let data: serde_json::Value = resp.json().await.ok()?;
-    data["url"].as_str().map(str::to_string)
+    let url = data["url"].as_str()?.to_string();
+    let mut images = ARTIST_IMAGES.lock().unwrap();
+    if images.len() >= ARTIST_IMAGES_MAX {
+        images.clear();
+    }
+    images.insert(key, url.clone());
+    Some(url)
 }
 
 pub async fn api_fetch_active_events(client: &Client) -> Option<ActiveEventsResponse> {
     // Ported to a Supabase Edge Function (co-located with Postgres, off
-    // Vercel), like /sync and /chat: it's polled every 30s regardless of
-    // window visibility, so it was a steady source of Vercel invocations.
+    // Vercel), like /sync and /chat: the events watch loop polls it every
+    // 120 s regardless of window visibility, on top of the UI's own polls.
     let url = format!("{}/events-active", functions_base());
     let anon = supabase_anon_key();
     let resp = api_fetch_full(client, reqwest::Method::GET, &url, None, Some(&anon)).await?;
@@ -1481,8 +1615,14 @@ pub async fn api_fetch_ongoing_trades(client: &Client) -> Option<serde_json::Val
     Some(data["trades"].clone())
 }
 
-pub async fn api_poll_trade(client: &Client, trade_id: &str) -> Option<Trade> {
-    let path = format!("/trade/status?tradeId={}", urlencoding::encode(trade_id));
+/// The trade as it stands. `with_names` asks for both parties' names, which
+/// can't change mid-trade, so the client asks only on its first poll.
+pub async fn api_poll_trade(client: &Client, trade_id: &str, with_names: bool) -> Option<Trade> {
+    let path = format!(
+        "/trade/status?tradeId={}{}",
+        urlencoding::encode(trade_id),
+        if with_names { "" } else { "&names=0" }
+    );
     let resp = api_fetch(client, reqwest::Method::GET, &path, None).await?;
     if !resp.status().is_success() {
         return None;

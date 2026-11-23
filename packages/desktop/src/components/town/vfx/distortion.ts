@@ -155,7 +155,16 @@ export class SonicDistortionEffect extends Effect {
       uniform float uGlow;
       uniform float uActive;
       uniform float uWarp;
+      uniform float uWarpDoor;
       void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+        if (uWarp > 0.0 && uWarpDoor > 0.5) {
+          // Stepping through a door: the dark closes in from the edges,
+          // as into a doorway's shadow, until there's nothing but dark.
+          float r = length((uv - 0.5) * vec2(1.25, 1.0));
+          float shade = max(smoothstep(0.15, 0.95, uWarp), smoothstep(0.95 - uWarp, 1.15 - uWarp, r));
+          outputColor = vec4(mix(inputColor.rgb, vec3(0.02, 0.015, 0.03), shade), inputColor.a);
+          return;
+        }
         if (uWarp > 0.0) {
           // Stepping through a portal: the whole view swirls in on itself
           // and whites out.
@@ -206,6 +215,7 @@ export class SonicDistortionEffect extends Effect {
           ["uGlow", new THREE.Uniform(0.035)],
           ["uActive", new THREE.Uniform(0)],
           ["uWarp", new THREE.Uniform(0)],
+          ["uWarpDoor", new THREE.Uniform(0)],
         ]),
       },
     );
@@ -214,6 +224,11 @@ export class SonicDistortionEffect extends Effect {
   /** How far through stepping through a portal, 0–1 (see warp). */
   set warp(k: number) {
     (this.uniforms.get("uWarp") as THREE.Uniform).value = k;
+  }
+
+  /** Whether that's through a door: darkening, not swirling. */
+  set warpDoor(on: boolean) {
+    (this.uniforms.get("uWarpDoor") as THREE.Uniform).value = on ? 1 : 0;
   }
 
   /** Whether there's anything to bend this frame. */

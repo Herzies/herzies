@@ -28,6 +28,14 @@ export type Grid = { size: number };
 export function islandRadius(g: Grid): number {
   return g.size / 2;
 }
+
+/** A steady 0–1 from two numbers, the same every run: the shader-style
+ * `sin` hash the Town scatters its little differences with (which lamp
+ * flickers when, which nights have northern lights, which slots rain). */
+export function hash01(a: number, b: number): number {
+  return Math.abs(Math.sin(a * 12.9898 + b * 78.233) * 43758.5453) % 1;
+}
+
 /** How far you can walk from an island's middle. */
 export function worldRadius(g: Grid): number {
   return g.size / 2 - EDGE_MARGIN;
@@ -70,6 +78,16 @@ export const OBJECTS = {
   D: { name: "Training dummy", color: "#d9b26a" },
   O: { name: "Portal", color: "#b07aff" },
   Q: { name: "Crystal", color: "#7fe8ff" },
+  I: { name: "Tower", color: "#d7c7f0" },
+  // Where the sky ship ties up: a pier out to the rim, the ship moored
+  // alongside past it (see airship/berth.ts). Faces out of the island.
+  X: { name: "Sky dock", color: "#c58a4a" },
+  // A workbench that opens the crafting window (see wilds/craftingSpot.ts).
+  // Faces the middle of the island unless turned.
+  W: { name: "Crafting station", color: "#e0a458" },
+  // The Wilds' meter for its next cache: listening fills it (see
+  // wilds/HuntCrystal.tsx).
+  G: { name: "Hunt crystal", color: "#ffc61a" },
 } as const;
 export type ObjectChar = keyof typeof OBJECTS;
 
@@ -83,22 +101,33 @@ export const MAP_ID = /^[a-z][a-z0-9-]{1,23}$/;
  * same island's next floor, and only opens once the floor is cleared. */
 export type PortalLink = { to: MapId; next?: true };
 
+/** The kinds of enclosed room a map can be (see TownMap's `room`). */
+export const ROOM_KINDS = ["dark", "tower"] as const;
+export type RoomKind = (typeof ROOM_KINDS)[number];
+
 export type TownMap = {
   version: 2;
   id: MapId;
-  /** What the game calls it ("Enter the Training Grounds"). */
+  /** What the game calls it ("The Wilds"). */
   name: string;
   size: number;
   /** Where the island floats in the one sky every island shares: the
    * island you're on is drawn at the origin, the others where they float
    * relative to it. Home is at [0, 0, 0]. */
   origin: [x: number, y: number, z: number];
-  /** Whether you can fight here (the training grounds' dummies). */
+  /** Whether you can fight here (the boss's cave, the Tower). */
   combat?: boolean;
   /** An enclosed room instead of an island in the sky: no sky, clouds or
-   * other islands, a floor and walls, and a lamp-lit dark. The boss's
-   * cave. Room maps aren't drawn as islands in anyone else's sky. */
-  room?: "dark";
+   * other islands, a floor and walls. "dark": the boss's cave, rough rock
+   * round a lamp-lit dark, entered through a cave's mouth. "tower": the
+   * Tower's hall inside, a round stone hall lit by torches and its
+   * windows (see TowerHall). Room maps aren't drawn as islands in anyone
+   * else's sky. */
+  room?: RoomKind;
+  /** A sky ship's deck rather than an island: walked on in the ship's own
+   * frame, drawn by the ship (see airship/), never as ground, and never as
+   * an island in anyone's sky. Its round grid only holds what's on deck. */
+  ship?: true;
   /** Where each portal ("O") leads: "col,row" → link. */
   portals?: Record<string, PortalLink>;
   /** size rows of size terrain chars (OFF where off the island). */
@@ -286,6 +315,8 @@ export const SPOT_NAMES: Record<string, string> = {
   tower_guard: "Tower Guard",
   pip: "Pip",
   nakata: "Nakata",
+  skipper: "Blåmann",
+  madas: "Madas",
 };
 
 /** The centre of a cell, in world (x, z). */
@@ -422,9 +453,13 @@ export function parseMap(json: unknown): TownMap {
   if (m.combat !== undefined && typeof m.combat !== "boolean") {
     errors.push("combat: expected true or false");
   }
-  if (m.room !== undefined && m.room !== "dark") {
-    errors.push('room: expected "dark"');
+  if (m.room !== undefined && !ROOM_KINDS.includes(m.room as RoomKind)) {
+    errors.push(`room: expected one of ${ROOM_KINDS.join(", ")}`);
   }
+  if (m.ship !== undefined && m.ship !== true) {
+    errors.push("ship: expected true");
+  }
+  if (m.ship && m.room) errors.push("ship: a deck can't also be a room");
   const size = m.size as number;
   if (
     !Number.isInteger(size) ||
@@ -625,12 +660,13 @@ export function serializeMap(map: TownMap): string {
     : "";
   const combat = map.combat ? `\n  "combat": true,` : "";
   const room = map.room ? `\n  "room": ${JSON.stringify(map.room)},` : "";
+  const ship = map.ship ? `\n  "ship": true,` : "";
   return `{
   "version": ${map.version},
   "id": ${JSON.stringify(map.id)},
   "name": ${JSON.stringify(map.name)},
   "size": ${map.size},
-  "origin": [${map.origin.join(", ")}],${combat}${room}${portals}
+  "origin": [${map.origin.join(", ")}],${combat}${room}${ship}${portals}
   "spawn": { "at": ${pt(map.spawn.at)}, "heading": ${map.spawn.heading} },
   "spots": {${spots ? `\n${spots}\n  ` : ""}},${field("spare", "[]", map.spare.map(pt))}${facing}${turns}
   "terrain": ${rows(map.terrain)},
@@ -777,6 +813,7 @@ export const BUILDING_KINDS = {
   $: "shop",
   C: "cave",
   A: "auction",
+  I: "tower",
 } as const;
 export type BuildingKind = (typeof BUILDING_KINDS)[keyof typeof BUILDING_KINDS];
 export const isBuildingChar = (ch: string): ch is keyof typeof BUILDING_KINDS =>
@@ -842,13 +879,19 @@ export function turned(b: Building, x: number, z: number): [number, number] {
   return [px + dx * c + dz * s, pz - dx * s + dz * c];
 }
 
+const buildingsCache = new WeakMap<TownMap, Building[]>();
+
 /**
  * Every building on the map — homes, shops, caves and the auction house. Painted cells of
  * the same kind that touch are one building; an L or T shape is split into rectangles, largest first.
  * The door goes in the middle of the biggest rectangle's side that faces
  * the middle of town (or the next best side that's an outside wall).
+ * Worked out once per map (maps aren't changed in place: the editor makes
+ * a new one), as many things on the island read them.
  */
 export function buildingsOf(map: TownMap): Building[] {
+  const cached = buildingsCache.get(map);
+  if (cached) return cached;
   const seen = new Set<number>();
   const size = map.size;
   const key = (c: number, r: number) => r * size + c;
@@ -938,6 +981,7 @@ export function buildingsOf(map: TownMap): Building[] {
       });
     }
   }
+  buildingsCache.set(map, out);
   return out;
 }
 

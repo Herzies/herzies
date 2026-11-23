@@ -23,6 +23,7 @@ import {
   type BossClaim,
   signTownTicket,
   TOWN_TICKET_TTL_S,
+  type TownTicketPayload,
 } from "../_shared/shared/town-net.ts";
 import { vitalsOf } from "../_shared/shared/vitals.ts";
 import { CLASS_DEFS, isHerzieClass } from "../_shared/shared/classes.ts";
@@ -76,7 +77,7 @@ Deno.serve(async (request) => {
   });
   const { data: herzie, error } = await admin
     .from("herzies")
-    .select("name, friend_code, stage, equipped, level, hp, hp_at, down, class, stat_stamina, stat_sonic, stat_euphony, stat_timing, emotes, gm")
+    .select("name, friend_code, stage, equipped, level, hp, hp_at, down, class, stat_stamina, stat_sonic, stat_euphony, stat_timing, emotes, gm, title")
     .eq("user_id", user.id)
     .maybeSingle();
   if (error) {
@@ -195,6 +196,16 @@ Deno.serve(async (request) => {
     tower = open as typeof tower;
   }
 
+  // The Wilds: while a "wilds" event is on, the ticket says which and when
+  // (00154's open_wilds_json). The room keys its caches and drops off it,
+  // and only a ticket with it counts as on the Wilds for the listening
+  // bonus. None while they're shut: the room has nothing to give out then.
+  let wilds: TownTicketPayload["wilds"];
+  if (map === "wilds") {
+    const { data: open } = await admin.rpc("open_wilds_json");
+    if (open) wilds = open as TownTicketPayload["wilds"];
+  }
+
   const exp = Math.floor(now / 1000) + TOWN_TICKET_TTL_S;
   const ticket = await signTownTicket(
     {
@@ -215,6 +226,7 @@ Deno.serve(async (request) => {
       ],
       boss,
       tower,
+      ...(wilds ? { wilds } : {}),
       lv: herzie.level,
       ...(herzie.class ? { cls: herzie.class as string, sk } : {}),
       // Owned emotes (00132), so the town-server can refuse one you don't.
@@ -223,6 +235,8 @@ Deno.serve(async (request) => {
         : {}),
       // A game master (00133): other players see a "GM" mark on its name.
       ...(herzie.gm ? { gm: true as const } : {}),
+      // The title it wears (00152), shown under its name in Town.
+      ...(herzie.title ? { ti: herzie.title as string } : {}),
     },
     TOWN_TICKET_SECRET,
   );

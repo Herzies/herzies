@@ -32,6 +32,9 @@ const ROWS = 6;
 
 /** Wing size, as a share of the torso's radius. */
 const SIZE = 0.95;
+/** How far each wing is rooted out from the spine, as a share of the
+ * torso's radius. */
+const ROOT_ACROSS = 0.5;
 
 /** How quickly the wings open and close (per second). */
 const OPEN_RATE = 8;
@@ -216,12 +219,15 @@ export class Wings {
     this.a = body.radius * SIZE;
     const a = this.a;
     this.feathers = layOut(a);
-    this.dx = 0.3 * body.radius;
-    // On the back, between the shoulder blades and a little above the
-    // middle, sat on the torso's skin.
-    const dx = 0.3 * body.radius;
+    // On the back, out on the shoulder blades and a little above the
+    // middle, sat on the torso's skin: wide of the spine, so what's slung
+    // down it (class gear on the back, the discs) shows between the
+    // folded wings.
+    const dx = ROOT_ACROSS * body.radius;
     const dy = -0.32 * body.radius;
-    const dz = Math.sqrt(Math.max(0, 1 - 0.3 ** 2 - 0.32 ** 2)) * body.radius;
+    const dz =
+      Math.sqrt(Math.max(0, 1 - ROOT_ACROSS ** 2 - 0.32 ** 2)) * body.radius;
+    this.dx = dx;
     this.root = [
       body.center[0] + dx,
       body.center[1] + dy,

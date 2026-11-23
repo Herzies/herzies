@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HerzieAppearance {
     pub head_index: u32,
@@ -46,6 +46,10 @@ pub struct Herzie {
     /// predates stat points; what's left to spend is the frontend's sum.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stat_points: Option<StatPoints>,
+    /// The title worn under the name (TITLES ids in @herzies/shared), or
+    /// `None` for none. Also `None` from a server that predates titles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 /// Points spent on each stat. Mirrors `StatPoints` in @herzies/shared.
@@ -76,7 +80,7 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HerzieProfile {
     pub name: String,
@@ -112,16 +116,19 @@ pub struct HerzieProfile {
     pub listening_hidden: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_listening: Option<bool>,
+    /// The title worn under the name (TITLES ids in @herzies/shared).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TopArtist {
     pub name: String,
     pub plays: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileNowPlaying {
     pub title: String,
@@ -130,7 +137,7 @@ pub struct ProfileNowPlaying {
     pub album_art_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileLastPlayed {
     pub title: String,
@@ -219,6 +226,14 @@ pub struct SyncResponse {
     /// left alone.
     #[serde(default)]
     pub skills: Option<Vec<HerzieSkill>>,
+    /// Titles earned that the app hasn't announced yet (TITLES ids). The
+    /// server marks them announced as it sends them, so each arrives once.
+    #[serde(default)]
+    pub new_titles: Vec<String>,
+    /// The loadouts — see `LoadoutState`. `None` from a server that doesn't
+    /// send them here, leaving the local copy alone.
+    #[serde(default)]
+    pub loadouts: Option<LoadoutState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,6 +252,9 @@ pub struct PendingDrop {
     pub id: String,
     pub item_id: String,
     pub dropped_at: String,
+    /// It lies on the Wilds (00159): shown and picked up only there.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wilds: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -325,8 +343,11 @@ pub struct Trade {
     pub id: String,
     pub initiator_id: String,
     pub target_id: String,
-    pub initiator_name: String,
-    pub target_name: String,
+    /// Only when asked for (`/trade/status?names=0` leaves them out).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initiator_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_name: Option<String>,
     pub initiator_offer: TradeOffer,
     pub target_offer: TradeOffer,
     pub state: String,
@@ -334,6 +355,10 @@ pub struct Trade {
     pub target_accepted: bool,
     pub created_at: String,
     pub expires_at: String,
+    /// Orders polls against the live broadcasts (00157); absent from older
+    /// servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<u64>,
 }
 
 pub type Inventory = HashMap<String, u32>;
@@ -356,6 +381,9 @@ pub struct ItemSnapshot {
     pub bank_expansions: Option<u32>,
     /// Emotes owned (EMOTES ids in @herzies/shared). `None` as above.
     pub emotes: Option<Vec<String>>,
+    /// The loadouts (`LoadoutState`). `None` when the response doesn't carry
+    /// them, leaving the local copy alone.
+    pub loadouts: Option<LoadoutState>,
     /// When the request that produced this was sent: the server's state is at
     /// least this new. `None` when unknown. Lets a pickup the server already
     /// confirmed be dropped, rather than re-added, once a snapshot that should
@@ -376,6 +404,31 @@ pub struct ItemUnit {
     /// A stored slot key, `"modifier"`, or `None` while it sits in the bank.
     #[serde(default)]
     pub equipped_slot: Option<String>,
+    /// The inactive loadout holding this copy (out of the bag), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held_by: Option<u8>,
+}
+
+/// The two loadouts: which is worn, and the other one's pieces. Mirrors
+/// `LoadoutState` in @herzies/shared.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadoutState {
+    pub active: u8,
+    /// `None` until the other loadout is first made (a copy of this one).
+    #[serde(default)]
+    pub inactive: Option<Vec<LoadoutPiece>>,
+}
+
+/// One piece of the loadout not worn. Mirrors `LoadoutPiece`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadoutPiece {
+    pub slot: String,
+    /// `None` once that copy is gone (sold, traded, eaten).
+    #[serde(default)]
+    pub unit_id: Option<String>,
+    pub item_id: String,
 }
 
 /// Dice-upgrade levels (itemId -> 0-3) — see MAX_ITEM_UPGRADE_LEVEL in
@@ -455,6 +508,14 @@ pub struct AppState {
     /// that knows about it has answered.
     #[serde(default)]
     pub crystal: Option<serde_json::Value>,
+    /// The loadouts — see `LoadoutState`. `None` until a response has
+    /// carried them.
+    #[serde(default)]
+    pub loadouts: Option<LoadoutState>,
+    /// Titles earned and not yet shown: the UI toasts them, then calls
+    /// `ack_new_titles`.
+    #[serde(default)]
+    pub new_titles: Vec<String>,
     pub friends: HashMap<String, HerzieProfile>,
     /// Present while the server reports an incoming trade you have not joined yet.
     pub pending_trade_request: Option<PendingTradeRequest>,
@@ -518,7 +579,7 @@ pub struct ActiveEventsResponse {
     pub week: Vec<GameEvent>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatMessage {
     pub id: String,
@@ -630,11 +691,13 @@ mod tests {
             item_id: "boombox".into(),
             upgrade_level: 2,
             equipped_slot: Some("modifier".into()),
+            held_by: None,
         };
         let v = serde_json::to_value(&u).unwrap();
         assert_eq!(v["itemId"], "boombox");
         assert_eq!(v["upgradeLevel"], 2);
         assert_eq!(v["equippedSlot"], "modifier");
+        assert!(v.get("heldBy").is_none());
     }
 
     // An offer made before copies existed has only `items`; it must still parse

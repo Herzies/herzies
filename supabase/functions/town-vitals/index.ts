@@ -20,22 +20,39 @@
  * out, and a wipe. Those land first, in that order, so the boss's health is
  * sized before the first damage and a revive lands before the health that
  * follows it; every one is idempotent, so a retried report is safe.
+ *
+ * A finished duel is reported once (action "duel"): it lands in 00152's
+ * record_duel, never touching health, and a replay of the same id adds
+ * nothing.
+ *
+ * The Wilds (00154, wilds-loot.ts): a herzie taken down drops a random card
+ * from its bag into escrow ("wildsDrop"), someone takes it ("wildsTake") or
+ * it goes back ("wildsReturn"), a cache is opened once ("wildsCache", its
+ * loot rolled here), and the report's `wilds` keeps everyone in a Wilds
+ * room "on the Wilds" for the listening bonus. Each is idempotent on the
+ * room's id, so a retry is safe.
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
+  BOSS_LOOT_EXCLUDED_ITEM_IDS,
   filterDroppablePool,
   getHerzieStatsFromUnits,
   NON_DROPPABLE_ITEM_IDS,
   normalizeEquipped,
   normalizeUnits,
   pickWeightedDrop,
+  type Rarity,
 } from "../_shared/shared/items.ts";
 import {
+  isChestFloor,
   TOWER_DROP_CHANCE,
   TOWER_DROPS_DAILY_CAP,
   TOWER_XP_DAILY_CAP,
+  towerChestRolls,
+  towerLootLean,
   towerXpPerKill,
 } from "../_shared/shared/tower.ts";
+import { rollCacheLoot } from "../_shared/shared/wilds-loot.ts";
 import { verifyVitalsRequest } from "../_shared/shared/town-net.ts";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
@@ -47,6 +64,10 @@ const TOWN_TICKET_SECRET = Deno.env.get("TOWN_TICKET_SECRET");
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** A room holds 40; a batch can't be bigger than a few rooms. */
 const MAX_BATCH = 200;
+
+function isUuid(v: unknown): v is string {
+  return typeof v === "string" && UUID.test(v);
+}
 
 function admin(): SupabaseClient {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
@@ -84,12 +105,37 @@ async function rpc(
   return data;
 }
 
-/** `count` items picked as listening picks a drop: the droppable pool, by
- * rarity, leaning on the herzie's Luck. */
+/** Marks the herzies a Wilds room reports as on the Wilds (00154's
+ * wilds_presence, which ignores an event that isn't the one on now). Null
+ * when there's nothing to mark; never throws. */
+async function wildsPresence(
+  db: SupabaseClient,
+  wilds: { event: string; uids: string[] } | undefined,
+): Promise<number | null> {
+  if (!wilds || !isUuid(wilds.event)) return null;
+  const uids = (Array.isArray(wilds.uids) ? wilds.uids : [])
+    .slice(0, MAX_BATCH)
+    .filter(isUuid);
+  if (uids.length === 0) return null;
+  try {
+    return (await rpc(db, "wilds_presence", {
+      p_event: wilds.event,
+      p_uids: uids,
+    })) as number;
+  } catch {
+    return null;
+  }
+}
+
+/** Items picked as listening picks a drop — the droppable pool (less
+ * `exclude`), by rarity, leaning on the herzie's Luck — one per entry of
+ * `leans`, each leaning on its rarities by that much more (a Tower drop's
+ * floor: towerLootLean). */
 async function rollDrops(
   db: SupabaseClient,
   uid: string,
-  count: number,
+  leans: Record<Rarity, number>[],
+  exclude: readonly string[] = [],
 ): Promise<string[]> {
   const [{ data: pool }, { data: unitRows }] = await Promise.all([
     db
@@ -102,13 +148,15 @@ async function rollDrops(
       ),
     db.rpc("item_units_json", { p_user_id: uid }),
   ]);
-  const droppable = pool ? filterDroppablePool(pool) : [];
+  const droppable = (pool ? filterDroppablePool(pool) : []).filter(
+    (i) => !exclude.includes(i.id),
+  );
   const { luck } = getHerzieStatsFromUnits(
     Array.isArray(unitRows) ? normalizeUnits(unitRows) : [],
   );
   const out: string[] = [];
-  for (let i = 0; i < count; i++) {
-    const picked = pickWeightedDrop(droppable, luck);
+  for (const lean of leans) {
+    const picked = pickWeightedDrop(droppable, luck, Math.random, lean);
     if (picked) out.push(picked.id);
   }
   return out;
@@ -260,14 +308,15 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     log?: Record<string, unknown> & { event?: string };
     /** The fight is over: the cave's end screen, for these herzies. */
     results?: { event: string; uids: string[] };
-    /** The Tower: a herzie's kills since the last batch, and the best
-     * floor cleared in it. */
+    /** The Tower: a herzie's kills since the last batch, the best floor
+     * cleared in it, and a Warden's floor's chest opened. */
     tower?: {
       event: string;
       batch: string;
       uid: string;
       kills: { floor: number; x: number; z: number }[];
       cleared?: number;
+      chest?: { floor: number; x: number; z: number };
     };
     /** action "eat": who ate what. */
     uid?: string;
@@ -275,6 +324,29 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     /** action "revive": the health a Bard's resurrect brings `uid` back
      * with (outside a raid). */
     health?: unknown;
+    /** action "duel": a finished duel (00152 record_duel). `id` is the
+     * room's, unique per duel; the per-duelist maps are keyed by uid. */
+    id?: unknown;
+    a?: unknown;
+    b?: unknown;
+    winner?: unknown;
+    why?: unknown;
+    ms?: unknown;
+    damage?: unknown;
+    maxHp?: unknown;
+    level?: unknown;
+    credited?: unknown;
+    /** The Wilds' loot (00154). `id`: the room's drop id ("wildsDrop",
+     * "wildsTake") or a wildsCacheId ("wildsCache"). */
+    event?: unknown;
+    victim?: unknown;
+    killer?: unknown;
+    x?: unknown;
+    z?: unknown;
+    ids?: unknown;
+    /** On a report: these herzies are on the Wilds (the listening bonus),
+     * while `event` is the Wilds event on now. */
+    wilds?: { event: string; uids: string[] };
   };
   try {
     msg = JSON.parse(body);
@@ -317,6 +389,115 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
       return jsonResponse({ ok: !!vitals, vitals: vitals ?? null });
     } catch {
       return jsonResponse({ ok: false }, 500);
+    }
+  }
+  if (msg.action === "duel") {
+    // A finished duel, reported once per end and safe to replay (the id).
+    const duel = duelOf(msg);
+    if (!duel) return jsonResponse({ error: "Bad duel" }, 400);
+    try {
+      const res = (await rpc(db, "record_duel", {
+        p_id: duel.id,
+        p_a: duel.a,
+        p_b: duel.b,
+        p_winner: duel.winner,
+        p_why: duel.why,
+        p_ms: duel.ms,
+        p_damage: duel.damage,
+        p_max_hp: duel.maxHp,
+        p_level: duel.level,
+        p_credited: duel.credited,
+      })) as { recorded?: boolean; counted?: boolean } | null;
+      return jsonResponse({
+        ok: true,
+        recorded: !!res?.recorded,
+        counted: !!res?.counted,
+      });
+    } catch {
+      return jsonResponse({ ok: false }, 500);
+    }
+  }
+  if (msg.action === "wildsDrop") {
+    // A herzie taken down on the Wilds: a random card from its bag into
+    // escrow, where it fell. Null: nothing to drop, or the Wilds are shut.
+    const x = Number(msg.x);
+    const z = Number(msg.z);
+    const killer = msg.killer ?? null;
+    if (
+      !isUuid(msg.id) || !isUuid(msg.event) || !isUuid(msg.victim) ||
+      (killer !== null && !isUuid(killer)) ||
+      !Number.isFinite(x) || !Number.isFinite(z)
+    ) {
+      return jsonResponse({ error: "Bad wildsDrop" }, 400);
+    }
+    try {
+      const drop = await rpc(db, "wilds_drop", {
+        p_id: msg.id,
+        p_event: msg.event,
+        p_victim: msg.victim,
+        p_killer: killer,
+        p_x: x,
+        p_z: z,
+      });
+      return jsonResponse({ drop: drop ?? null });
+    } catch {
+      return jsonResponse({ error: "Failed to drop" }, 500);
+    }
+  }
+  if (msg.action === "wildsTake") {
+    // The room has judged reach and the killer's head start; this only
+    // checks it's still there and fits the bag.
+    if (!isUuid(msg.id) || !isUuid(msg.uid)) {
+      return jsonResponse({ error: "Bad wildsTake" }, 400);
+    }
+    try {
+      const res = (await rpc(db, "wilds_take", {
+        p_id: msg.id,
+        p_uid: msg.uid,
+      })) as
+        | { ok: true; item: string; level: number }
+        | { ok: false; why: "bag-full" | "gone" };
+      return jsonResponse(res);
+    } catch {
+      return jsonResponse({ error: "Failed to take" }, 500);
+    }
+  }
+  if (msg.action === "wildsReturn") {
+    // Unclaimed past their life: back to their owners.
+    const ids = (Array.isArray(msg.ids) ? msg.ids : [])
+      .slice(0, MAX_BATCH)
+      .filter(isUuid);
+    try {
+      const returned = await rpc(db, "wilds_return", { p_ids: ids });
+      return jsonResponse({
+        returned: Array.isArray(returned) ? returned : [],
+      });
+    } catch {
+      return jsonResponse({ error: "Failed to return" }, 500);
+    }
+  }
+  if (msg.action === "wildsCache") {
+    // First to open it: its loot, rolled here, lands on their ground. A
+    // second opener (or a retry after it landed) gets nothing.
+    if (
+      typeof msg.id !== "string" || msg.id.length === 0 ||
+      msg.id.length > 200 || !isUuid(msg.event) || !isUuid(msg.uid)
+    ) {
+      return jsonResponse({ error: "Bad wildsCache" }, 400);
+    }
+    try {
+      const res = (await rpc(db, "wilds_open_cache", {
+        p_id: msg.id,
+        p_event: msg.event,
+        p_uid: msg.uid,
+        p_items: rollCacheLoot(Math.random),
+      })) as { opened?: boolean; drops?: { id: string; item: string }[] } | null;
+      return jsonResponse({
+        opened: !!res?.opened,
+        drops: Array.isArray(res?.drops) ? res.drops : [],
+      });
+    } catch {
+      return jsonResponse({ error: "Failed to open" }, 500);
     }
   }
   if (msg.action === "report") {
@@ -393,6 +574,9 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
           p_xp: skillXp,
         }).then((res) => ({ ok: true, res }), () => ({ ok: false, res: null }))
         : Promise.resolve(null),
+      // On the Wilds for the next WILDS_PRESENCE_MS. Never fails the
+      // report: the room says it again in half a minute.
+      wildsPresence(db, msg.wilds),
     ]);
     // The boss fell: put the rewards on the ground now rather than on the
     // next minute's cron (still the backstop; settling twice pays once), and
@@ -410,8 +594,13 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
       }
     }
     // The Tower: pay the kills (a little XP, now and then an item, rolled as
-    // listening rolls one), under the day's caps, once per batch.
-    let tower: { drops: { id: string; item: string }[] } | null = null;
+    // listening rolls one, leaning rarer the higher the floor), under the
+    // day's caps, once per batch; then a chest opened, once per floor per
+    // Tower (00155), its items leaning rarer still and outside the cap.
+    let tower: {
+      drops: { id: string; item: string }[];
+      chest?: { id: string; item: string }[];
+    } | null = null;
     let towerFailed = false;
     const tw = msg.tower;
     if (
@@ -422,10 +611,15 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
         .slice(0, MAX_BATCH)
         .filter((k) => Number.isFinite(k.floor) && k.floor >= 1);
       const cleared = Number.isFinite(tw.cleared) ? Math.floor(tw.cleared as number) : 0;
+      const chestFloor = isChestFloor(Number(tw.chest?.floor))
+        ? Number(tw.chest?.floor)
+        : 0;
       try {
         const xp = kills.reduce((n, k) => n + towerXpPerKill(k.floor), 0);
-        const rolls = kills.filter(() => Math.random() < TOWER_DROP_CHANCE).length;
-        const items = rolls > 0 ? await rollDrops(db, tw.uid, rolls) : [];
+        const leans = kills
+          .filter(() => Math.random() < TOWER_DROP_CHANCE)
+          .map((k) => towerLootLean(k.floor));
+        const items = leans.length > 0 ? await rollDrops(db, tw.uid, leans) : [];
         tower = (await rpc(db, "tower_grant", {
           p_user: tw.uid,
           p_event: tw.event,
@@ -436,6 +630,24 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
           p_xp_cap: TOWER_XP_DAILY_CAP,
           p_drop_cap: TOWER_DROPS_DAILY_CAP,
         })) as typeof tower;
+        if (chestFloor > 0 && tower) {
+          // No Nostalgic Tokens, as a boss's loot.
+          const inChest = await rollDrops(
+            db,
+            tw.uid,
+            Array.from(
+              { length: towerChestRolls(chestFloor) },
+              () => towerLootLean(chestFloor, true),
+            ),
+            BOSS_LOOT_EXCLUDED_ITEM_IDS,
+          );
+          tower.chest = (await rpc(db, "tower_chest_grant", {
+            p_user: tw.uid,
+            p_event: tw.event,
+            p_floor: chestFloor,
+            p_item_ids: inChest,
+          })) as { id: string; item: string }[];
+        }
       } catch {
         towerFailed = true;
       }
@@ -501,6 +713,79 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     );
   }
   return jsonResponse({ error: "Unknown action" }, 400);
+}
+
+const DUEL_REASONS: Record<string, true> = {
+  defeat: true,
+  yield: true,
+  bounds: true,
+  left: true,
+  time: true,
+  draw: true,
+};
+
+/** A duel report checked field by field, or null if it doesn't hold
+ * together: two different duelists, a winner that's one of them (none only
+ * for a draw), a known reason. The per-duelist numbers keep only the two
+ * duelists' finite values. */
+function duelOf(msg: {
+  id?: unknown;
+  a?: unknown;
+  b?: unknown;
+  winner?: unknown;
+  why?: unknown;
+  ms?: unknown;
+  damage?: unknown;
+  maxHp?: unknown;
+  level?: unknown;
+  credited?: unknown;
+}): {
+  id: string;
+  a: string;
+  b: string;
+  winner: string | null;
+  why: string;
+  ms: number;
+  damage: Record<string, number>;
+  maxHp: Record<string, number>;
+  level: Record<string, number>;
+  credited: boolean;
+} | null {
+  const { id, a, b, why } = msg;
+  const winner = msg.winner ?? null;
+  const ms = Number(msg.ms);
+  if (
+    typeof id !== "string" || id.length === 0 || id.length > 200 ||
+    typeof a !== "string" || !UUID.test(a) ||
+    typeof b !== "string" || !UUID.test(b) || a === b ||
+    typeof why !== "string" || !Object.hasOwn(DUEL_REASONS, why) ||
+    !Number.isFinite(ms) || ms < 0 ||
+    (winner === null) !== (why === "draw") ||
+    (winner !== null && winner !== a && winner !== b)
+  ) {
+    return null;
+  }
+  const perDuelist = (v: unknown): Record<string, number> => {
+    const out: Record<string, number> = {};
+    if (!v || typeof v !== "object") return out;
+    for (const uid of [a, b]) {
+      const n = Number((v as Record<string, unknown>)[uid]);
+      if (Number.isFinite(n)) out[uid] = n;
+    }
+    return out;
+  };
+  return {
+    id,
+    a,
+    b,
+    winner: winner as string | null,
+    why,
+    ms: Math.min(Math.round(ms), 2_147_483_647),
+    damage: perDuelist(msg.damage),
+    maxHp: perDuelist(msg.maxHp),
+    level: perDuelist(msg.level),
+    credited: msg.credited === true && winner !== null,
+  };
 }
 
 async function handlePlayer(request: Request, body: string): Promise<Response> {

@@ -28,15 +28,9 @@ import {
   MELEE_REACH,
   meleeReaches,
   pushOutOfDomes,
-  stunMs,
   WAVE_HAND_HEIGHT,
 } from "@herzies/shared/combat";
-import {
-  type Buff,
-  RIMSHOT,
-  SHUFFLE_REACH,
-  shuffleScale,
-} from "@herzies/shared/skills";
+import { type Buff, SHUFFLE_REACH, shuffleScale } from "@herzies/shared/skills";
 import {
   attackTokens,
   CONTACT,
@@ -71,6 +65,7 @@ import {
   type Telegraph,
   TUNING,
 } from "./boss";
+import { StunReturns } from "./budgets";
 
 /** How far behind the server the client draws mobs (its interpolation
  * delay, about), so casts are judged against what the player saw. */
@@ -132,9 +127,9 @@ export type Mob = {
   trail: { t: number; x: number; z: number }[];
   /** Not before this (server ms): a minion just called stands a beat. */
   wakeAt?: number;
-  /** Stunned until (server ms), and when its recent stuns began. */
+  /** Stunned until (server ms), and its recent stuns. */
   stunUntil?: number;
-  stuns?: number[];
+  stunReturns?: StunReturns;
 };
 
 type PendingHit = {
@@ -315,8 +310,9 @@ export class MobPack {
     // Two packs, either side of the far middle, so they come at you from
     // two ways at once.
     const away = Math.atan2(-entry.x, -entry.z);
-    // In the open meadow: the wooded rim (past about 13) is the client's
-    // trees, which mobs here know nothing of.
+    // Out on the open floor: the barrels and pots stacked round the hall's
+    // wall (past about 18) are the client's, which mobs here know nothing
+    // of.
     const r = Math.min(radius - 4, 12);
     for (let i = 0; i < n; i++) {
       const kind = kinds[i];
@@ -527,16 +523,15 @@ export class MobPack {
   }
 
   /**
-   * Stuns `m` for `base`, halved for each stun of it in the last
-   * {@link RIMSHOT.drWindowMs}; not while it already is. It stands where
+   * Stuns `m` for `base`, halved for each stun of it lately (see
+   * StunReturns); not while it already is. It stands where
    * it is, and the swing it was winding up comes off the floor (the
    * interrupt). Returns how long, or 0.
    */
   stun(m: Mob, now: number, base: number): number {
     if (m.hp <= 0 || (m.stunUntil ?? 0) > now) return 0;
-    const recent = (m.stuns ?? []).filter((t) => t > now - RIMSHOT.drWindowMs);
-    const ms = stunMs(base, recent.length);
-    m.stuns = [...recent, now];
+    m.stunReturns ??= new StunReturns();
+    const ms = m.stunReturns.take(now, base);
     m.stunUntil = now + ms;
     for (const t of this.telegraphs)
       if (t.mob === m.id) this.cancelled.push(t.id);

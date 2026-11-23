@@ -172,15 +172,18 @@ function PortalDisc({ portal, live }: { portal: Portal; live: boolean }) {
     },
     [disc, motes, ripple],
   );
-  const place = useMemo(() => {
-    const m = new THREE.Matrix4();
-    return {
-      m,
-      q: new THREE.Quaternion(),
+  const place = useMemo(
+    () => ({
+      m: new THREE.Matrix4(),
+      q: new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0),
+        portal.yaw,
+      ),
       p: new THREE.Vector3(),
       s: new THREE.Vector3(),
-    };
-  }, []);
+    }),
+    [portal.yaw],
+  );
   useFrame(({ clock }) => {
     if (!live) return;
     // Too far off to see the air bend: skip the distortion pass's work.
@@ -190,7 +193,6 @@ function PortalDisc({ portal, live }: { portal: Portal; live: boolean }) {
     const t = clock.elapsedTime;
     const pulse = 1 + Math.sin(t * 2.4) * 0.05;
     place.p.set(portal.x, portal.y + DISC_Y, portal.z);
-    place.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), portal.yaw);
     place.s.setScalar(pulse);
     ripple.mesh.setMatrixAt(0, place.m.compose(place.p, place.q, place.s));
     ripple.mesh.instanceMatrix.needsUpdate = true;
@@ -220,9 +222,10 @@ export function Portals({
   live?: boolean;
 }) {
   // The cave's mouth is there only while the cave is open, the Tower's
-  // door while it's on, its way on once the floor's clear.
+  // way on once the floor's clear. A door (the Tower's) is its building's
+  // own: no disc.
   const isOpen = usePortalOpen();
-  const all = useMemo(() => portalsOf(map), [map]);
+  const all = useMemo(() => portalsOf(map).filter((p) => !p.door), [map]);
   const portals = all.filter(isOpen);
   return (
     <>

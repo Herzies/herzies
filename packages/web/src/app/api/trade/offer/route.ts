@@ -1,8 +1,9 @@
-import { normalizeUnits } from "@herzies/shared";
+import { isInBag } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import {
   countByItem,
+  loadUnits,
   type OfferedUnit,
   type StoredOffer,
   sameOffer,
@@ -68,21 +69,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not enough currency" }, { status: 400 });
   }
 
-  const { data: rows } = await admin
-    .from("item_units")
-    .select("id, item_id, upgrade_level, equipped_slot, acquired_at")
-    .eq("user_id", auth.userId)
-    .order("acquired_at", { ascending: true })
-    .order("id", { ascending: true });
-
-  const owned = normalizeUnits(
-    (rows ?? []).map((r) => ({
-      id: r.id,
-      itemId: r.item_id,
-      upgradeLevel: r.upgrade_level,
-      equippedSlot: r.equipped_slot,
-    })),
-  );
+  // item_units_json: oldest first, with heldBy on what the other loadout holds.
+  const owned = await loadUnits(admin, auth.userId);
 
   // What are they giving? Named copies (current clients), or — from a client
   // that predates copies — a count per item id, which we resolve to copies: the
@@ -92,11 +80,12 @@ export async function POST(request: Request) {
     unitIds = [...new Set(offer.units)];
   } else {
     unitIds = [];
-    // Only unworn copies can be traded, so a count that could only be met by
-    // wearing-down your equipment is "not enough", not a silent partial offer.
-    const unworn = owned.filter((u) => u.equippedSlot === null);
+    // Only bag copies can be traded (not worn, not held by the other
+    // loadout), so a count that could only be met by wearing-down your
+    // equipment is "not enough", not a silent partial offer.
+    const inBag = owned.filter(isInBag);
     for (const [itemId, qty] of Object.entries(offer.items ?? {})) {
-      const picked = unitsForLegacyCount(unworn, itemId, qty);
+      const picked = unitsForLegacyCount(inBag, itemId, qty);
       if (!picked) {
         return NextResponse.json(
           { error: `Not enough ${itemId}` },
@@ -122,6 +111,13 @@ export async function POST(request: Request) {
     if (u.equippedSlot !== null) {
       return NextResponse.json(
         { error: "Unequip an item before trading it" },
+        { status: 400 },
+      );
+    }
+    // Nor one put away in the other loadout: it isn't in the bag to give.
+    if (u.heldBy !== undefined) {
+      return NextResponse.json(
+        { error: "That's in your other loadout" },
         { status: 400 },
       );
     }

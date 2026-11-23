@@ -1,15 +1,21 @@
 import { describe, expect, it } from "vitest";
+import { pickWeightedDrop } from "./items.js";
 import {
   attackTokens,
   floorKinds,
   gapColour,
+  isChestFloor,
   isEliteFloor,
   isWardenFloor,
   levelGapMods,
   mobsOnFloor,
   TOWER_DROP_CHANCE,
   TOWER_DROPS_DAILY_CAP,
+  TOWER_RARE_LEAN,
+  towerChestRolls,
+  towerLootLean,
   towerMob,
+  towerRareFactor,
   towerXpPerKill,
   windupScale,
 } from "./tower.js";
@@ -80,5 +86,57 @@ describe("tower curves", () => {
     }
     expect(TOWER_DROP_CHANCE).toBeLessThanOrEqual(1 / 8);
     expect(TOWER_DROPS_DAILY_CAP).toBeLessThanOrEqual(30);
+  });
+});
+
+describe("tower loot", () => {
+  it("leans rarer floor by floor, gently, up to a cap", () => {
+    expect(towerRareFactor(1)).toBe(1);
+    expect(towerRareFactor(0)).toBe(1);
+    expect(towerRareFactor(Number.NaN)).toBe(1);
+    let last = 1;
+    for (let f = 2; f <= 200; f++) {
+      const r = towerRareFactor(f);
+      expect(r).toBeGreaterThanOrEqual(last);
+      expect(r).toBeLessThanOrEqual(1 + TOWER_RARE_LEAN.cap);
+      last = r;
+    }
+    expect(towerRareFactor(11)).toBeCloseTo(1.1);
+    expect(towerRareFactor(51)).toBeCloseTo(1 + TOWER_RARE_LEAN.cap);
+    expect(towerRareFactor(500)).toBe(towerRareFactor(51));
+  });
+
+  it("leans only rare and up; a chest leans further", () => {
+    const kill = towerLootLean(31);
+    expect(kill.common).toBe(1);
+    expect(kill.uncommon).toBe(1);
+    expect(kill.rare).toBeCloseTo(1.3);
+    expect(kill.mythic).toBe(kill.rare);
+    const chest = towerLootLean(31, true);
+    for (const r of ["uncommon", "rare", "legendary", "mythic"] as const)
+      expect(chest[r]).toBeGreaterThan(kill[r]);
+  });
+
+  it("makes a rare likelier higher up", () => {
+    const pool = [
+      { id: "a", rarity: "common" as const },
+      { id: "b", rarity: "uncommon" as const },
+      { id: "c", rarity: "rare" as const },
+    ];
+    // Weights 1000 / 150 / 25: this roll lands on the uncommon's end on
+    // floor 1 (1145.6 of 1175), and past it once the rare's weight grows
+    // by half (1157.8 of 1187.5).
+    const roll = () => 0.975;
+    expect(pickWeightedDrop(pool, 0, roll, towerLootLean(1))?.id).toBe("b");
+    expect(pickWeightedDrop(pool, 0, roll, towerLootLean(60))?.id).toBe("c");
+  });
+
+  it("leaves a chest every 10th floor, fuller higher up", () => {
+    expect([0, 1, 5, 9, 11, 15, 25].some(isChestFloor)).toBe(false);
+    expect([10, 20, 30, 100].every(isChestFloor)).toBe(true);
+    expect(towerChestRolls(10)).toBe(2);
+    expect(towerChestRolls(20)).toBe(3);
+    expect(towerChestRolls(40)).toBe(4);
+    expect(towerChestRolls(200)).toBe(4);
   });
 });

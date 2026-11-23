@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import itemIconGrids from "./card/item-icon-grids.json" with { type: "json" };
 import { CLASS_IDS, type HerzieClass } from "./classes.js";
 import {
   applyEquip,
@@ -30,8 +31,10 @@ import {
   getHerzieStats,
   getHerzieStatsFromUnits,
   getItem,
+  getItemCategory,
   getItemSet,
   getItemType,
+  growsBagPastCapacity,
   HALLOWEEN_DROP_WINDOW,
   HIT_BASE,
   HIT_SPREAD,
@@ -43,6 +46,7 @@ import {
   type ItemDef,
   type ItemUnit,
   isBankFull,
+  isInBag,
   isInDropWindow,
   isModifierEquipped,
   MAX_ITEM_UPGRADE_LEVEL,
@@ -69,6 +73,7 @@ import {
 } from "./items.js";
 import { STAT_TUNING, timingCritChance } from "./stats.js";
 import { TOWN_SPRINT_SPEED } from "./town-net.js";
+import { WILDS_BITS, WILDS_RECIPES } from "./wilds-loot.js";
 
 /** A unit with sensible defaults, so a test only states what it cares about. */
 const unit = (
@@ -417,6 +422,19 @@ describe("seasonal drop windows", () => {
     }
   });
 
+  it("makes the Sailor's Starter Pack an uncommon face piece, +10 luck, drop-only", () => {
+    const item = getItem("sailors-starter-pack");
+    expect(item?.name).toBe("Sailor's Starter Pack");
+    expect(item?.rarity).toBe("uncommon");
+    expect(item?.equipSlot).toBe("face");
+    expect(getHerzieStats({ face: "sailors-starter-pack" }).luck).toBe(10);
+    expect(NON_DROPPABLE_ITEM_IDS).not.toContain("sailors-starter-pack");
+    expect(bossLootWeights()).toContainEqual({
+      itemId: "sailors-starter-pack",
+      weight: 225,
+    });
+  });
+
   it("adds the Fabulous Fabian set's +10 luck only with all six worn", () => {
     const full = {
       head: "fabulous-fabian",
@@ -717,15 +735,19 @@ describe("applyEquip", () => {
     const gear = ITEMS.filter(
       (i) => i.equipSlot === "main_hand" || i.equipSlot === "off_hand",
     );
-    expect(gear.map((i) => i.id).sort()).toEqual([
-      "compact-discs",
-      "lute",
-      "old-cymbal",
-      "worn-stick",
-    ]);
+    expect(gear.map((i) => i.id).sort()).toEqual(
+      [
+        "compact-discs",
+        "lute",
+        "old-cymbal",
+        "worn-stick",
+        ...WILDS_RECIPES.map((r) => r.id),
+      ].sort(),
+    );
     for (const item of gear) {
       expect(item.requiredClass).toBeDefined();
-      expect(item.sellPrice).toBe(10);
+      // The Wilds' builds of them are worth more (see "Wilds loot").
+      expect(item.sellPrice).toBe(item.rarity === "rare" ? 40 : 10);
       expect(NON_DROPPABLE_ITEM_IDS).toContain(item.id);
     }
   });
@@ -1727,6 +1749,74 @@ describe("bank tiles", () => {
   });
 });
 
+describe("copies the other loadout holds", () => {
+  const held = (u: ItemUnit): ItemUnit => ({ ...u, heldBy: 1 });
+  const units = [
+    unit("bag", "boombox"),
+    held(unit("away", "boombox", 2)),
+    held(unit("shared", "headphones", 0, "head")),
+    unit("cd", "cd"),
+  ];
+
+  it("reads heldBy, and drops anything that isn't a loadout", () => {
+    expect(
+      normalizeUnits([
+        { id: "a", itemId: "cd", heldBy: 2 },
+        { id: "b", itemId: "cd", heldBy: 3 },
+        { id: "c", itemId: "cd", heldBy: "1" },
+      ]).map((u) => u.heldBy),
+    ).toEqual([2, undefined, undefined]);
+    expect(normalizeUnits([{ id: "b", itemId: "cd", heldBy: 3 }])[0]).toEqual({
+      id: "b",
+      itemId: "cd",
+      upgradeLevel: 0,
+      equippedSlot: null,
+    });
+  });
+
+  it("keeps a held copy that isn't worn out of the bag and the inventory", () => {
+    expect(units.map(isInBag)).toEqual([true, false, false, true]);
+    expect(bankTiles(units).map((t) => t.key)).toEqual(["bag", "stack:cd"]);
+    expect(unitsToInventory(units)).toEqual({
+      boombox: 1,
+      headphones: 1,
+      cd: 1,
+    });
+    expect(bankTiles(units)).toHaveLength(
+      bankSlotsUsed(unitsToInventory(units), unitsToEquipped(units)),
+    );
+  });
+
+  it("never picks a held copy to sell or offer", () => {
+    expect(unitsPlainestFirst(units, "boombox").map((u) => u.id)).toEqual([
+      "bag",
+    ]);
+    expect(pickPlainestUnitIds(units, "headphones", 1)).toBeNull();
+  });
+
+  it("grows the bag past capacity only when it gets bigger", () => {
+    const off = units.map((u) =>
+      u.id === "shared" ? { ...u, equippedSlot: null } : u,
+    );
+    const offUnheld = off.map((u) =>
+      u.id === "shared" ? unit("shared", "headphones") : u,
+    );
+    // Held, it stays out of the bag however full that is.
+    expect(growsBagPastCapacity(units, off, 2)).toBe(false);
+    expect(growsBagPastCapacity(units, offUnheld, 2)).toBe(true);
+    expect(growsBagPastCapacity(units, offUnheld, 3)).toBe(false);
+    // Shrinking or standing still passes even over capacity.
+    expect(growsBagPastCapacity(offUnheld, units, 0)).toBe(false);
+    expect(growsBagPastCapacity(units, units, 0)).toBe(false);
+  });
+
+  // bag_slots_used (00152) has no category to skip, so it counts every item:
+  // the two only agree while every catalog item is in the "deck" category.
+  it("has no item outside the deck category, which the SQL bag count assumes", () => {
+    expect(ITEMS.filter((i) => getItemCategory(i) !== "deck")).toEqual([]);
+  });
+});
+
 describe("choosing copies from an item id", () => {
   const units = [
     unit("worn", "boombox", 0, "ground_left"),
@@ -1783,9 +1873,9 @@ describe("boss loot", () => {
       new URL(`../../../supabase/migrations/${name}`, import.meta.url),
       "utf8",
     );
-  // settle_boss_fight lives in 00114; the roll was last replaced in 00151.
+  // settle_boss_fight lives in 00114; the roll was last replaced in 00158.
   const sql = migration("00114_boss_bonus_loot.sql");
-  const rollSql = migration("00151_class_set_drops.sql");
+  const rollSql = migration("00158_sailors_starter_pack.sql");
 
   it("rolls from the same weights as bossLootWeights", () => {
     const roll = rollSql.slice(
@@ -1999,6 +2089,113 @@ describe("class sets", () => {
         minStage: item?.minStage,
         requiredClass: item?.requiredClass,
       });
+    }
+  });
+});
+
+describe("Wilds loot", () => {
+  const bits = {
+    tonewood: ["Tonewood", "common", 3],
+    "sky-string": ["Sky String", "uncommon", 8],
+    "storm-hide": ["Storm Hide", "rare", 25],
+    resonite: ["Resonite", "legendary", 80],
+  } as const;
+  const instruments = {
+    "wildwood-lute": {
+      name: "Wildwood Lute",
+      slot: "main_hand",
+      cls: "bard",
+      stats: { euphony: 18, sonicPower: 5 },
+    },
+    "stormcut-discs": {
+      name: "Stormcut Discs",
+      slot: "main_hand",
+      cls: "record_slinger",
+      stats: { sonicPower: 12, critChance: 8, critDamage: 38 },
+    },
+    "thunderhide-sticks": {
+      name: "Thunderhide Sticks",
+      slot: "main_hand",
+      cls: "percussionist",
+      stats: { sonicPower: 6, critChance: 3 },
+    },
+    "storm-cymbal": {
+      name: "Storm Cymbal",
+      slot: "off_hand",
+      cls: "percussionist",
+      stats: { def: 15 },
+    },
+  } as const;
+
+  it("has every bit, a plain stackable card", () => {
+    expect(Object.keys(bits).sort()).toEqual([...WILDS_BITS].sort());
+    for (const [id, [name, rarity, sell]] of Object.entries(bits)) {
+      const item = getItem(id);
+      expect(item).toMatchObject({ name, rarity, sellPrice: sell });
+      expect(item?.stackable, id).toBe(true);
+      expect(item?.equipable, id).toBeFalsy();
+      expect(item?.stats, id).toBeUndefined();
+      // In the bag like any card (a deck item: one tile a stack).
+      expect(getItemCategory(item as ItemDef), id).toBe("deck");
+      expect(item?.frames.length, id).toBeGreaterThan(0);
+    }
+  });
+
+  it("has every Wilds instrument, as the contract has it", () => {
+    expect(Object.keys(instruments).sort()).toEqual(
+      WILDS_RECIPES.map((r) => r.id).sort(),
+    );
+    for (const [id, def] of Object.entries(instruments)) {
+      const item = getItem(id);
+      expect(item).toMatchObject({
+        name: def.name,
+        rarity: "rare",
+        sellPrice: 40,
+        equipable: true,
+        equipSlot: def.slot,
+        minStage: 2,
+        requiredClass: def.cls,
+      });
+      expect(item?.stats, id).toEqual(def.stats);
+      expect(item?.stackable, id).toBeFalsy();
+      expect(item?.frames.length, id).toBeGreaterThan(0);
+    }
+  });
+
+  it("makes each one about half as strong again as its base, in its slot", () => {
+    for (const r of WILDS_RECIPES) {
+      const base = getItem(r.base);
+      const wild = getItem(r.id);
+      expect(wild?.equipSlot, r.id).toBe(base?.equipSlot);
+      expect(wild?.requiredClass, r.id).toBe(base?.requiredClass);
+      for (const [key, v] of Object.entries(base?.stats ?? {}))
+        expect(
+          wild?.stats?.[key as keyof typeof wild.stats],
+          `${r.id} ${key}`,
+        ).toBeGreaterThanOrEqual((v ?? 0) * 1.4);
+    }
+  });
+
+  it("never drops from the normal pools", () => {
+    for (const id of [...WILDS_BITS, ...WILDS_RECIPES.map((r) => r.id)])
+      expect(NON_DROPPABLE_ITEM_IDS as readonly string[]).toContain(id);
+  });
+
+  it("has a painted icon for each, not the generic one", () => {
+    const grids: Record<string, { grid: string[]; palette: string[] }> =
+      itemIconGrids;
+    for (const id of [...WILDS_BITS, ...WILDS_RECIPES.map((r) => r.id)]) {
+      const icon = grids[id];
+      expect(icon, id).toBeDefined();
+      expect(icon.grid.length, id).toBe(24);
+      for (const row of icon.grid) {
+        expect(row.length, id).toBe(24);
+        for (const ch of row)
+          if (ch !== ".")
+            expect(Number.parseInt(ch, 16), id).toBeLessThan(
+              icon.palette.length,
+            );
+      }
     }
   });
 });

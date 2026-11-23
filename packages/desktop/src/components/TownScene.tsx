@@ -7,6 +7,10 @@ import {
   GEORGE_EQUIPPED,
   GEORGE_SEED,
   generateCreatureParams,
+  MADAS_EQUIPPED,
+  MADAS_KEY,
+  MADAS_SEED,
+  MADAS_STAGE,
   MARKET_EQUIPPED,
   MARKET_KEY,
   MARKET_SEED,
@@ -26,6 +30,10 @@ import {
   PIP_KEY,
   PIP_SEED,
   PIP_STAGE,
+  SKIPPER_EQUIPPED,
+  SKIPPER_KEY,
+  SKIPPER_SEED,
+  SKIPPER_STAGE,
   TOWER_GUARD_EQUIPPED,
   TOWER_GUARD_KEY,
   TOWER_GUARD_SEED,
@@ -104,6 +112,18 @@ export function lookOf(card: EventCard): Look {
         seed: NAKATA_SEED,
         stage: NAKATA_STAGE,
         equipped: NAKATA_EQUIPPED,
+      };
+    case MADAS_KEY:
+      return {
+        seed: MADAS_SEED,
+        stage: MADAS_STAGE,
+        equipped: MADAS_EQUIPPED,
+      };
+    case SKIPPER_KEY:
+      return {
+        seed: SKIPPER_SEED,
+        stage: SKIPPER_STAGE,
+        equipped: SKIPPER_EQUIPPED,
       };
     case TOWER_GUARD_KEY:
       return {

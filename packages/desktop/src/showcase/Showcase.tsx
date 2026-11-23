@@ -1,9 +1,11 @@
 import {
   BOBOKU_KEY,
+  MADAS_KEY,
   MARKET_KEY,
   MEDEA_KEY,
   NAKATA_KEY,
   PIP_KEY,
+  SKIPPER_KEY,
   TOWER_GUARD_KEY,
 } from "@herzies/shared";
 import { Canvas, useFrame } from "@react-three/fiber";
@@ -131,6 +133,8 @@ const RESIDENTS = [
   MARKET_KEY,
   PIP_KEY,
   NAKATA_KEY,
+  SKIPPER_KEY,
+  MADAS_KEY,
   TOWER_GUARD_KEY,
 ];
 

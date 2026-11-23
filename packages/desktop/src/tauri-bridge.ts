@@ -13,6 +13,9 @@ import type {
   Inventory,
   ItemUnit,
   ItemUpgradeResult,
+  LoadoutIndex,
+  LoadoutState,
+  LoadoutSwitchReport,
   MarketListing,
   MarketStall,
   PendingDrop,
@@ -20,13 +23,15 @@ import type {
   PremiumItem,
   StatPoints,
   StoreProduct,
+  TitlesState,
   TownLook,
-  Trade,
   TradeState,
+  TradeUpdate,
   Vitals,
 } from "@herzies/shared";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { relaunch } from "@tauri-apps/plugin-process";
 import {
@@ -34,7 +39,7 @@ import {
   type DownloadEvent,
   type Update,
 } from "@tauri-apps/plugin-updater";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 /** What the server made of a pickup (see `collectDrop`). */
 export type CollectOutcome = "collected" | "gone" | "bag-full";
@@ -115,6 +120,16 @@ export type AttuneCrystalReply =
     }
   | { ok: false; reason: "stale" | "not-found"; crystal?: CrystalState };
 
+/** What a loadout switch answers: the item state (already applied to the
+ * app's state by the time this returns), the loadouts, and what couldn't be
+ * put on. */
+export interface LoadoutSwitchReply {
+  equipped: Equipped;
+  units: ItemUnit[];
+  loadouts: LoadoutState;
+  report: LoadoutSwitchReport;
+}
+
 export interface AppState {
   herzie: Herzie | null;
   nowPlaying: {
@@ -150,6 +165,12 @@ export interface AppState {
   /** The Crystal: what listening has stored up to attune for. Null until a
    * server that knows about it has answered. */
   crystal?: CrystalState | null;
+  /** The two loadouts: which is worn, and the other's pieces. Null until a
+   * server that knows about them has answered. */
+  loadouts?: LoadoutState | null;
+  /** Titles earned and not announced yet (TITLES ids), oldest first: the
+   * app toasts them, then `ackNewTitles`. */
+  newTitles?: string[];
   friends: Record<string, HerzieProfile>;
   pendingTradeRequest?: PendingTradeRequest | null;
   pendingFriendRequest?: PendingFriendRequest | null;
@@ -332,6 +353,21 @@ export const herzies = {
       euphony: points.euphony,
       timing: points.timing,
     }),
+  /** Puts the other loadout on. Rejects with a `LoadoutRefusal` code
+   * ("same", "too-soon", "invalid"), or the server's message. */
+  switchLoadout: (loadout: LoadoutIndex) =>
+    invoke<LoadoutSwitchReply>("switch_loadout", { loadout }),
+  /** Every title, earned or not, with progress and holder counts. */
+  fetchTitles: () => invoke<TitlesState>("fetch_titles"),
+  /** Wears an earned title, or none (null). Rejects with "not-earned",
+   * "unknown", or the server's message. */
+  wearTitle: (title: string | null) =>
+    invoke<{ worn: string | null }>("wear_title", { title }),
+  /** Clears the NEW pill on titles that have been looked at. */
+  markTitlesSeen: (ids: string[]) =>
+    invoke<{ ok: true }>("mark_titles_seen", { ids }),
+  /** These new titles have been announced: they leave `newTitles`. */
+  ackNewTitles: (ids: string[]) => invoke<void>("ack_new_titles", { ids }),
   /** Rolls a dice item onto ONE named card. The server rolls, never the
    * client: `result` says whether it went up, a failed roll was absorbed by
    * the Safety Pick (`protectionItemId`), or the card broke. Throws with the
@@ -355,6 +391,29 @@ export const herzies = {
       targetUnitId,
       protectionItemId,
     }),
+  /** Crafts a Wilds instrument from a `WILDS_RECIPES` recipe: consumes a base
+   * instrument (keeping its upgrade level) plus crafting bits. Throws with the
+   * server's error message (unknown recipe, not enough bits, bag full, …). */
+  craftWildsInstrument: (recipe: string) =>
+    invoke<{
+      ok: boolean;
+      item: string;
+      unitId: string;
+      inventory: Inventory;
+      itemUpgrades: Record<string, number>;
+      units: ItemUnit[];
+    }>("craft_wilds_instrument", { recipe }),
+  /** Tunes one instrument copy (worn or not) up a level with crafting bits.
+   * Throws with the server's error message (not tunable, already at +6, not
+   * enough bits). */
+  tuneInstrument: (unitId: string) =>
+    invoke<{
+      ok: boolean;
+      newLevel: number;
+      inventory: Inventory;
+      itemUpgrades: Record<string, number>;
+      units: ItemUnit[];
+    }>("tune_instrument", { unitId }),
   /** Buys from a live merchant (Good ol' George, for coins) or treat_trader
    * (Nandor the Treatless, for treats). Throws with the server's message
    * (sold out, limit reached, not enough currency, …). `newCurrency` is
@@ -505,8 +564,10 @@ export const herzies = {
     invoke<{ completed: boolean } | null>("trade_accept", { tradeId }),
   tradeCancel: (tradeId: string) =>
     invoke<boolean>("trade_cancel", { tradeId }),
-  tradePoll: (tradeId: string) =>
-    invoke<Trade | null>("trade_poll", { tradeId }),
+  /** The trade as it stands. `withNames`: both parties' names too, which
+   * can't change mid-trade, so they're asked for once. */
+  tradePoll: (tradeId: string, withNames = true) =>
+    invoke<TradeUpdate | null>("trade_poll", { tradeId, withNames }),
   fetchOngoingTrades: () =>
     invoke<{ trades: OngoingTrade[] }>("fetch_ongoing_trades"),
 
@@ -515,6 +576,13 @@ export const herzies = {
   setTownExpanded: (expanded: boolean) =>
     isTauri()
       ? invoke<void>("set_town_expanded", { expanded })
+      : Promise.resolve(),
+  /** Real OS full screen (macOS: the window's own Space, not just
+   * maximised), on or off; useFullscreen follows the result. Nothing
+   * outside the app. */
+  setFullscreen: (on: boolean) =>
+    isTauri()
+      ? getCurrentWindow().setFullscreen(on).finally(refreshFullscreen)
       : Promise.resolve(),
 
   /** Keep the window open when it loses focus (not always-on-top). */
@@ -834,6 +902,25 @@ export function useWindowWaking(): boolean {
   return waking;
 }
 
+/** Whether the window is on screen at all, now: not closed to the menu bar
+ * (the app says so), minimised or covered (the browser does). */
+export function windowVisibleNow(): boolean {
+  return windowShown && (typeof document === "undefined" || !document.hidden);
+}
+
+/** Calls `cb` whenever the window may have come on screen or gone off it
+ * (see windowVisibleNow): for what isn't React, like the game's sounds. */
+export function onWindowVisibility(cb: () => void): () => void {
+  shownListeners.add(cb);
+  if (typeof document !== "undefined")
+    document.addEventListener("visibilitychange", cb);
+  return () => {
+    shownListeners.delete(cb);
+    if (typeof document !== "undefined")
+      document.removeEventListener("visibilitychange", cb);
+  };
+}
+
 /**
  * Whether the window is on screen at all: false while it's closed to the
  * menu bar (the app says so), or minimised or covered (the browser does).
@@ -841,8 +928,7 @@ export function useWindowWaking(): boolean {
  * polling waits for focus (useWindowFocused).
  */
 export function useWindowVisible(): boolean {
-  const read = () =>
-    windowShown && (typeof document === "undefined" || !document.hidden);
+  const read = windowVisibleNow;
   const [visible, setVisible] = useState(read);
   useEffect(() => {
     const update = () => setVisible(read());
@@ -857,6 +943,95 @@ export function useWindowVisible(): boolean {
   return visible;
 }
 
+/** Whether the window's in full screen: one store for the app, read by
+ * every useFullscreen. */
+let fullscreenCache = false;
+const fullscreenListeners = new Set<(on: boolean) => void>();
+let fullscreenRecheck: ReturnType<typeof setTimeout> | undefined;
+/** Went in or out since the webview last got the keyboard back. */
+let fullscreenMoved = false;
+
+/** Asks the window whether it's in full screen, now and once more after
+ * macOS's slide into or out of its Space has settled: its last resize can
+ * land before the window counts itself out (or in).
+ *
+ * Once settled after going in or out, the webview takes the keyboard back.
+ * macOS only takes a titled, resizable window full screen, and ours is a
+ * fixed size (its title bar invisible, tray.rs use_native_corners): tao
+ * lends it that style on the way in and restores the old one once out (tao
+ * `toggle_full_screen_async`, `restore_state_from_fullscreen`), and each
+ * style change makes tao's own NSView first responder — detached since wry
+ * put the WKWebView in its own parent view as the window's content. Every
+ * key then went nowhere until Tab walked the window's key-view loop onto
+ * the webview. The settled read comes 800 ms after the last resize, which
+ * tao emits after both style changes. */
+export function refreshFullscreen(): void {
+  if (!isTauri()) return;
+  const read = (settled: boolean) =>
+    getCurrentWindow()
+      .isFullscreen()
+      .then((on) => {
+        if (fullscreenCache !== on) {
+          fullscreenCache = on;
+          fullscreenMoved = true;
+          for (const l of fullscreenListeners) l(on);
+        }
+        if (settled && fullscreenMoved) {
+          fullscreenMoved = false;
+          return getCurrentWebview().setFocus();
+        }
+      })
+      .catch(() => {});
+  read(false);
+  clearTimeout(fullscreenRecheck);
+  fullscreenRecheck = setTimeout(() => read(true), 800);
+}
+if (isTauri()) {
+  // Going in or out resizes the window, whoever did it (the menu, or the
+  // OS's own way out).
+  getCurrentWindow()
+    .onResized(refreshFullscreen)
+    .catch(() => {});
+  refreshFullscreen();
+}
+
+/** Whether the window's in real OS full screen (never in a plain browser). */
+export function useFullscreen(): boolean {
+  const [on, setOn] = useState(fullscreenCache);
+  useEffect(() => {
+    fullscreenListeners.add(setOn);
+    setOn(fullscreenCache);
+    return () => {
+      fullscreenListeners.delete(setOn);
+    };
+  }, []);
+  return on;
+}
+
+/** Whether the window has focus: one store and one Tauri listener for the
+ * app, read by every useWindowFocused. Starts true until the window says. */
+let focusedCache = true;
+const focusedListeners = new Set<() => void>();
+function setFocusedCache(on: boolean): void {
+  if (focusedCache === on) return;
+  focusedCache = on;
+  for (const l of focusedListeners) l();
+}
+// Sandbox / Vite dev runs in a plain browser — no Tauri window APIs.
+if (isTauri()) {
+  const w = getCurrentWindow();
+  w.onFocusChanged(({ payload }) => setFocusedCache(payload)).catch(() => {});
+  w.isFocused()
+    .then(setFocusedCache)
+    .catch(() => {});
+}
+function subscribeFocused(l: () => void): () => void {
+  focusedListeners.add(l);
+  return () => {
+    focusedListeners.delete(l);
+  };
+}
+
 /**
  * Tracks whether the Tauri window currently has focus. Use it to pause
  * animation timers whenever the user isn't actively in the window — an
@@ -864,24 +1039,7 @@ export function useWindowVisible(): boolean {
  * background, so neither is worth burning CPU on.
  */
 export function useWindowFocused(): boolean {
-  const [focused, setFocused] = useState(true);
-  useEffect(() => {
-    // Sandbox / Vite dev runs in a plain browser — no Tauri window APIs.
-    if (!isTauri()) return;
-
-    const w = getCurrentWindow();
-    let unlisten: (() => void) | undefined;
-    w.onFocusChanged(({ payload }) => setFocused(payload)).then((fn) => {
-      unlisten = fn;
-    });
-    w.isFocused()
-      .then((v) => setFocused(v))
-      .catch(() => {});
-    return () => {
-      unlisten?.();
-    };
-  }, []);
-  return focused;
+  return useSyncExternalStore(subscribeFocused, () => focusedCache);
 }
 
 export type UpdateInstallEvent =

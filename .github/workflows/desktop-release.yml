@@ -6,6 +6,11 @@ on:
       - 'desktop-v*'
 
 jobs:
+  # Lint, typecheck and tests (JS and Rust): a red build never reaches the
+  # updater.
+  checks:
+    uses: ./.github/workflows/ci.yml
+
   check-release-notes:
     name: Check release notes
     runs-on: ubuntu-latest
@@ -23,7 +28,7 @@ jobs:
 
   build-macos:
     name: Build macOS
-    needs: check-release-notes
+    needs: [checks, check-release-notes]
     runs-on: macos-latest
     env:
       HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
@@ -68,23 +73,6 @@ jobs:
           security import "$CERT_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -k "" "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain
-
-      - name: Inspect signing identities
-        if: env.HAS_APPLE_CERT == 'true'
-        env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-        run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          echo "=== Codesigning identities in temp keychain ==="
-          security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true
-          echo ""
-          echo "=== Codesigning identities across all search list ==="
-          security find-identity -v -p codesigning || true
-          echo ""
-          echo "=== Match check for APPLE_SIGNING_IDENTITY ==="
-          security find-identity -v -p codesigning -s "$APPLE_SIGNING_IDENTITY" "$KEYCHAIN_PATH" || true
-          echo ""
-          echo "Length of APPLE_SIGNING_IDENTITY secret: ${#APPLE_SIGNING_IDENTITY}"
 
       - name: Build universal binary
         working-directory: packages/desktop
@@ -142,7 +130,7 @@ jobs:
 
   build-windows:
     name: Build Windows
-    needs: check-release-notes
+    needs: [checks, check-release-notes]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

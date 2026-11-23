@@ -133,6 +133,10 @@ Deno.serve(async (request) => {
       skills: result.skills,
       // The Crystal: what listening has stored up to attune for (00140).
       crystal: result.crystal,
+      // Titles earned since the last sync, for the app's toast (00152).
+      newTitles: result.newTitles,
+      // The loadouts, for the Deck's 1 | 2 tabs (00152).
+      loadouts: result.loadouts,
     });
   } catch (err) {
     const message =

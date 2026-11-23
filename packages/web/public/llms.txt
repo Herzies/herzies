@@ -1,0 +1,35 @@
+# Herzies
+
+> Herzies is a free desktop pet for macOS and Windows that grows while you listen to music. It picks up whatever is playing in Spotify, Apple Music, Tidal or any other player that reports to the system's now-playing feed, and turns listening time into XP, levels and item drops. Think Tamagotchi meets an MMO, with music listening as the main mechanic.
+
+Herzies is an indie passion project in open beta. The desktop app is built with Tauri and is open source on GitHub.
+
+## What you do in Herzies
+
+- **Hatch and grow a herzie**: listening to music gives your herzie XP. It levels up and evolves through stages, and keeps a daily listening streak.
+- **Collect items**: items drop while you listen. Wear them, use them, sell them on the market, or trade them with other players.
+- **Customize**: hats, face items, necklaces, skins and instruments change how your herzie looks; items carry stats and effects.
+- **Pick a class**: Bard (support, heals friends), Record Slinger (damage) or Percussionist (tank). Each class plays its own instrument and has its own skills.
+- **The Town**: a live multiplayer 3D world where herzies hang out, chat, duel each other and team up.
+- **Events**: boss raids, song hunts (play a given song to find it first), the Tower, and the Wilds island.
+- **Leaderboard**: herzies ranked by XP at https://www.herzies.app/leaderboard
+
+## Facts
+
+- Price: free. Optional cosmetic purchases support development.
+- Platforms: macOS 10.15+ (universal: Apple Silicon and Intel) and Windows (64-bit). No Linux or mobile app yet.
+- Music players: Spotify, Apple Music, Tidal, and other players that report to the OS now-playing feed (MediaRemote on macOS, System Media Transport Controls on Windows). No Spotify account linking is needed on desktop.
+- Privacy: what you listen to is private by default. Friends only see it if you choose to share it; everyone else sees only public game stats (name, level, stage, appearance).
+- Sign-in: Google or GitHub.
+- The app updates itself.
+
+## Links
+
+- [Website](https://www.herzies.app): home page with the live Town
+- [Download](https://www.herzies.app/download): macOS and Windows installers
+- [About](https://www.herzies.app/about): what the game is about
+- [Leaderboard](https://www.herzies.app/leaderboard): top herzies by XP
+- [Source code](https://github.com/Herzies/herzies): the desktop app, server and website
+- [Releases](https://github.com/Herzies/herzies/releases/latest): latest builds and release notes
+- [Discord](https://discord.gg/DxECVqT5sh): community, bug reports and feedback
+- [Terms of service](https://www.herzies.app/terms)

@@ -11,7 +11,8 @@ import {
   windowLit,
   windowPhase,
 } from "./Buildings";
-import { groundY, objectAt, objectJitter, type TownMap } from "./map";
+import { groundY, hash01, objectAt, objectJitter, type TownMap } from "./map";
+import { TOWN_MAPS_LOCAL } from "./maps";
 
 // Old-school lamp posts — an iron pole, a lantern on top — and the light
 // the town gives off at night: from the lamps, and from lit windows.
@@ -148,8 +149,7 @@ export function glowsOf(map: TownMap): Glow[] {
         reach: LAMP_POST_REACH,
         onHerzies: LAMP_ON_HERZIES,
         // As the lantern glass works it out from where it stands.
-        seed:
-          (Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1) * 100,
+        seed: hash01(x, z) * 100,
       });
     }
   }
@@ -179,6 +179,55 @@ export function glowsOf(map: TownMap): Glow[] {
   return [...lamps, ...windows].slice(0, MAX_LAMPS);
 }
 
+type GlowCounts = { lamps: number; windows: number };
+
+function countGlows(glows: Glow[]): GlowCounts {
+  const lamps = glows.filter((g) => !g.out).length;
+  return { lamps, windows: glows.length - lamps };
+}
+
+/** The most lamp posts, and the most lit windows, of any island among
+ * `islands` that floats in the sky (not a room, not a deck). */
+function mostGlows(islands: Iterable<TownMap>): GlowCounts {
+  const most = { lamps: 0, windows: 0 };
+  for (const m of islands) {
+    if (m.room || m.ship) continue;
+    const n = countGlows(glowsOf(m));
+    most.lamps = Math.max(most.lamps, n.lamps);
+    most.windows = Math.max(most.windows, n.windows);
+  }
+  return most;
+}
+
+/** mostGlows of every island there is, worked out the first time it's
+ * asked for. */
+let skyMost: GlowCounts | null = null;
+function skyMostGlows(): GlowCounts {
+  if (!skyMost) skyMost = mostGlows(TOWN_MAPS_LOCAL.values());
+  return skyMost;
+}
+
+/** How many lights of each kind NightLights keeps on `map` (with these
+ * `glows`): lamp posts' (point lights) and windows' (spot lights). An
+ * island in the sky keeps as many of each as the one with the most, the
+ * spares dark: how many lights there are is part of every lit material's
+ * shader, so a different count recompiles them all — on a sky ship, half
+ * way over, where the island drawn in full changes, that was the scene
+ * stopping for a second or two. A room (the cave, the Tower's hall) keeps
+ * its own: going in is a fade, and its few lights are cheaper. */
+export function lightPools(
+  map: TownMap,
+  glows: Glow[] = glowsOf(map),
+  most: GlowCounts = skyMostGlows(),
+): GlowCounts {
+  const own = countGlows(glows);
+  if (map.room || map.ship) return own;
+  return {
+    lamps: Math.max(own.lamps, most.lamps),
+    windows: Math.max(own.windows, most.windows),
+  };
+}
+
 /** Where a light lights herzies from: a lamp from its lantern, a window
  * from a little out in front of it. */
 const herzieLightAt = (g: Glow): [number, number, number] =>
@@ -203,18 +252,39 @@ function aimOf(g: Glow): THREE.Object3D {
   return target;
 }
 
+/** A shadow-casting light with nothing to stand at (an island with fewer
+ * lamp posts or windows than the pool; see lightPools), or with somewhere
+ * again. Idle, its shadow is drawn once, empty, and then left: a caster
+ * with no shadow map at all breaks every lit material's draw in WebKit
+ * (the island went black at night), and one drawn every frame would be
+ * the scene again for nothing. */
+function idleShadow(
+  light: THREE.PointLight | THREE.SpotLight,
+  idle: boolean,
+): void {
+  light.shadow.autoUpdate = !idle;
+  if (idle && !light.shadow.map) light.shadow.needsUpdate = true;
+}
+
+/** Nearest first (made once: NightLights sorts with it most frames while
+ * walking). */
+const byDistance = (a: { d: number }, b: { d: number }) => a.d - b.d;
+
 /**
  * The town's little lights at night: a warm point light at every lamp
  * post, and a cone of light out of every lit window onto the ground in
  * front — so the glow spills onto the ground, the walls and trees nearby,
  * and (through `ambient.uLamps`, which their own shader reads) onto
  * herzies. Off by day; as many lights at noon as at midnight, so nothing
- * recompiles as the day turns.
+ * recompiles as the day turns — and as many on every island in the sky
+ * (see lightPools), so nothing recompiles when another is drawn in full.
  *
  * The few lamp posts and windows nearest the player cast shadows: small
  * pools of shadow-casting lights that move to them (the plain light there
  * going dark meanwhile). They only cast at night — turning that on and off
- * recompiles the materials, once at dusk and once at dawn.
+ * recompiles the materials, once at dusk and once at dawn. A caster with
+ * nothing to stand at (an island with fewer) still casts, for the count,
+ * an empty shadow (see idleShadow).
  */
 export function NightLights({ map }: { map: TownMap }) {
   const glows = useMemo(() => glowsOf(map), [map]);
@@ -233,6 +303,7 @@ export function NightLights({ map }: { map: TownMap }) {
   const shown = useRef({ level: -1, x: Number.NaN, z: Number.NaN });
   const lampCount = glows.filter((g) => !g.out).length;
   const windowCount = glows.length - lampCount;
+  const pool = useMemo(() => lightPools(map, glows), [map, glows]);
 
   useLayoutEffect(() => {
     const lamps = ambient.uLamps.value;
@@ -253,6 +324,18 @@ export function NightLights({ map }: { map: TownMap }) {
     lamps: [],
     windows: [],
   });
+  /** Scratch for the re-placing, kept so walking about allocates nothing:
+   * every glow with its distance (`order` re-sorted from `byIndex` each
+   * time, so ties go as ever), and the lamps' and windows' distances. */
+  const near = useMemo(() => {
+    const byIndex = glows.map((g, i) => ({ i, g, d: 0 }));
+    return {
+      byIndex,
+      order: byIndex.slice(),
+      lamps: [] as number[],
+      windows: [] as number[],
+    };
+  }, [glows]);
 
   useFrame(() => {
     const level = nightLights.level < DARK_ENOUGH ? 0 : nightLights.level;
@@ -285,25 +368,40 @@ export function NightLights({ map }: { map: TownMap }) {
     // Re-placed when the light changes or the player has moved a little
     // (little enough that the shadows' fades move smoothly).
     if (!moved) return;
-    Object.assign(s, { level, x, z });
+    // Dark, and dark already: nothing to move till dusk (which re-places
+    // everything).
+    if (level === 0 && s.level === 0) {
+      s.x = x;
+      s.z = z;
+      return;
+    }
+    s.level = level;
+    s.x = x;
+    s.z = z;
 
     // The lamp posts and windows nearest the player cast shadows.
-    const byDistance = glows
-      .map((g, i) => ({ i, g, d: Math.hypot(g.at[0] - x, g.at[2] - z) }))
-      .sort((a, b) => a.d - b.d);
-    const lampsNear = byDistance.filter((n) => !n.g.out);
-    const windowsNear = byDistance.filter((n) => n.g.out);
-    const nearest = lampsNear.slice(0, SHADOW_LIGHTS).map((n) => n.i);
-    const nearestWindows = windowsNear.slice(0, WINDOW_SHADOWS).map((n) => n.i);
-    casting.current = { lamps: nearest, windows: nearestWindows };
-    const fades = casterFades(
-      lampsNear.map((n) => n.d),
-      SHADOW_LIGHTS,
-    );
-    const windowFades = casterFades(
-      windowsNear.map((n) => n.d),
-      WINDOW_SHADOWS,
-    );
+    const { byIndex, order } = near;
+    for (let i = 0; i < byIndex.length; i++) {
+      const n = byIndex[i];
+      n.d = Math.hypot(n.g.at[0] - x, n.g.at[2] - z);
+      order[i] = n;
+    }
+    order.sort(byDistance);
+    const nearest = casting.current.lamps;
+    const nearestWindows = casting.current.windows;
+    nearest.length = nearestWindows.length = 0;
+    near.lamps.length = near.windows.length = 0;
+    for (const n of order) {
+      if (n.g.out) {
+        near.windows.push(n.d);
+        if (nearestWindows.length < WINDOW_SHADOWS) nearestWindows.push(n.i);
+      } else {
+        near.lamps.push(n.d);
+        if (nearest.length < SHADOW_LIGHTS) nearest.push(n.i);
+      }
+    }
+    const fades = casterFades(near.lamps, SHADOW_LIGHTS);
+    const windowFades = casterFades(near.windows, WINDOW_SHADOWS);
     glows.forEach((g, i) => {
       const light = lights.current[i];
       const lit = glowLevel(g, level, t);
@@ -316,6 +414,7 @@ export function NightLights({ map }: { map: TownMap }) {
       if (!light) return;
       const g = glows[nearest[k]];
       light.castShadow = level > 0;
+      idleShadow(light, !g);
       if (!g || level === 0) {
         light.intensity = 0;
         return;
@@ -328,6 +427,7 @@ export function NightLights({ map }: { map: TownMap }) {
       if (!light) return;
       const g = glows[nearestWindows[k]];
       light.castShadow = level > 0;
+      idleShadow(light, !g);
       if (!g || level === 0) {
         light.intensity = 0;
         return;
@@ -380,7 +480,22 @@ export function NightLights({ map }: { map: TownMap }) {
           />
         );
       })}
-      {Array.from({ length: Math.min(SHADOW_LIGHTS, lampCount) }, (_, k) => (
+      {/* The spares, dark (see lightPools). */}
+      {Array.from({ length: pool.lamps - lampCount }, (_, k) => (
+        <pointLight
+          // biome-ignore lint/suspicious/noArrayIndexKey: a fixed pool
+          key={`spare${k}`}
+          intensity={0}
+        />
+      ))}
+      {Array.from({ length: pool.windows - windowCount }, (_, k) => (
+        <spotLight
+          // biome-ignore lint/suspicious/noArrayIndexKey: a fixed pool
+          key={`wspare${k}`}
+          intensity={0}
+        />
+      ))}
+      {Array.from({ length: Math.min(SHADOW_LIGHTS, pool.lamps) }, (_, k) => (
         <pointLight
           // biome-ignore lint/suspicious/noArrayIndexKey: a fixed pool
           key={`cast${k}`}
@@ -400,7 +515,7 @@ export function NightLights({ map }: { map: TownMap }) {
         />
       ))}
       {windowAims
-        .slice(0, Math.min(WINDOW_SHADOWS, windowCount))
+        .slice(0, Math.min(WINDOW_SHADOWS, pool.windows))
         .map((aim, k) => (
           <group
             // biome-ignore lint/suspicious/noArrayIndexKey: a fixed pool

@@ -15,6 +15,7 @@ import {
   type Sphere,
 } from "./creature-renderer.js";
 import { type Equipped, getItem } from "./items.js";
+import { WILDS_RECIPES } from "./wilds-loot.js";
 
 const USER = "held-test-user";
 /** Which side of the herzie (creature x) the casting arm is on. */
@@ -489,6 +490,33 @@ describe("held class equipment", () => {
         expect(s.held, id).toBeDefined();
         expect(s.center[2], id).toBeGreaterThan(body.center[2]);
       }
+    }
+  });
+
+  it("holds each Wilds instrument as its base, in its own colours", () => {
+    const props = (equipped: Equipped) =>
+      buildCreatureModel(USER, 3, equipped).spheres.filter(
+        (s) => s.part in HELD_ARM,
+      );
+    for (const r of WILDS_RECIPES) {
+      const slot = getItem(r.id)?.equipSlot;
+      if (slot !== "main_hand" && slot !== "off_hand")
+        throw new Error(`${r.id} isn't held`);
+      const base = props({ [slot]: r.base });
+      const wild = props({ [slot]: r.id });
+      // The same shape, sphere for sphere, held by the same palm…
+      expect(wild.length, r.id).toBe(base.length);
+      expect(wild.length, r.id).toBeGreaterThan(0);
+      wild.forEach((s, i) => {
+        expect(s.held?.grip, r.id).toEqual(base[i].held?.grip);
+        // …slung just where its base is — but for the Stormcut Discs, cut
+        // a size up, which hang lower to keep clear of the head.
+        if (s.radius === base[i].radius)
+          expect(s.center, r.id).toEqual(base[i].center);
+        else expect(s.radius, r.id).toBeGreaterThan(base[i].radius);
+      });
+      // …but it reads as a different instrument.
+      expect(wild.map((s) => s.color)).not.toEqual(base.map((s) => s.color));
     }
   });
 });

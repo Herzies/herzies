@@ -1,6 +1,6 @@
 [package]
 name = "herzies-desktop"
-version = "0.1.0-beta.72"
+version = "0.1.0-beta.73"
 edition = "2021"
 
 [dependencies]
@@ -10,8 +10,8 @@ tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["macros", "net", "process", "sync", "time", "io-util", "rt"] }
+reqwest = { version = "0.12", features = ["json", "gzip", "brotli"] }
 hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
@@ -37,6 +37,13 @@ tauri-build = { version = "2", features = [] }
 [lib]
 name = "herzies_desktop"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+# Keep the default panic = "unwind": many spawned tasks `.lock().unwrap()`,
+# and abort would turn one task's panic into a whole-app crash.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2.10.1"

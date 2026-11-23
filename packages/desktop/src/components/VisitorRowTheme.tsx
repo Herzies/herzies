@@ -88,6 +88,18 @@ export const VISITOR_THEMES: Record<string, VisitorTheme> = {
     dim: "#c9c3b8",
     accent: "#e8e2d6",
   },
+  // Blåmann the skipper: deep sea blue, the sky he sails at night.
+  skipper: {
+    background: "linear-gradient(90deg, #04101f 0%, #0b2a4d 55%, #030b16 100%)",
+    dim: "#a3bfd9",
+    accent: "#7cc4ff",
+  },
+  // Madas: tarnished gold, the dark of a hoard.
+  madas: {
+    background: "linear-gradient(90deg, #171104 0%, #3d2e08 55%, #100b02 100%)",
+    dim: "#d9c58f",
+    accent: "#f5c518",
+  },
   // Plutus: dusk violet, like his coat.
   market: {
     background: "linear-gradient(90deg, #120b26 0%, #2a1c52 55%, #0d081c 100%)",
@@ -99,6 +111,12 @@ export const VISITOR_THEMES: Record<string, VisitorTheme> = {
     background: "linear-gradient(90deg, #06180a 0%, #12381a 55%, #051208 100%)",
     dim: "#9fcfa4",
     accent: "#7fe08a",
+  },
+  // The Wilds: evening sky, like the ships' crossing.
+  wilds: {
+    background: "linear-gradient(90deg, #07142a 0%, #16305e 55%, #060f20 100%)",
+    dim: "#a9c3ec",
+    accent: "#8fb8ff",
   },
 };
 

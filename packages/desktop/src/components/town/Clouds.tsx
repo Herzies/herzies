@@ -4,13 +4,14 @@ import { useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { homeMode } from "./homeMode";
 
 /** How many clouds, and how fast the whole sky of them turns. */
 const COUNT = 16;
 const DRIFT = 0.006;
 
 /** A cloud's colours: shaded blue-grey underneath, white on top. */
-const CLOUD = { deep: "#c3cde0", mid: "#e4e9f3", lit: "#ffffff" };
+export const CLOUD = { deep: "#c3cde0", mid: "#e4e9f3", lit: "#ffffff" };
 
 /** One cloud: a few soft round puffs (the same rounded clumps as an oak's
  * crown, shaded as one mass), flattened, side by side. */
@@ -82,6 +83,7 @@ export function Clouds() {
   const meshes = useRef<(THREE.Mesh | null)[]>([]);
 
   useFrame(({ clock }) => {
+    if (homeMode.full) return;
     const t = clock.elapsedTime;
     if (ring.current) ring.current.rotation.y = t * DRIFT;
     clouds.forEach((c, i) => {

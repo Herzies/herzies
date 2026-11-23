@@ -269,6 +269,9 @@ export type TowerBatch = {
   kills: { floor: number; x: number; z: number }[];
   /** The highest floor cleared in this batch, if any was. */
   cleared?: number;
+  /** A Warden's floor's chest opened (TOWER_CHEST): its floor, and where
+   * it stood, for its loot to come out of. */
+  chest?: { floor: number; x: number; z: number };
 };
 
 /** What one herzie did for the fight since the last batch: damage dealt,
@@ -371,10 +374,11 @@ export class FightRuntime {
     batch: string;
     xp: { uid: string; skill: string; xp: number }[];
   } | null = null;
-  /** The Tower's kills and clears not yet in a batch, and the batch in
-   * flight. */
+  /** The Tower's kills, clears and opened chest not yet in a batch, and
+   * the batch in flight. */
   private towerKills: TowerBatch["kills"] = [];
   private towerCleared = 0;
+  private towerChest: NonNullable<TowerBatch["chest"]> | null = null;
   private towerInflight: TowerBatch | null = null;
   /** The Tower's one herzie (a room of their own). */
   private towerUid = "";
@@ -515,12 +519,19 @@ export class FightRuntime {
     return this.engine instanceof BossEngine ? this.engine : null;
   }
 
-  /** On to the next floor, if this one's cleared. */
+  /** On to the next floor, if this one's cleared. Its chest, still shut,
+   * opens on the way: it's been earned, and isn't lost. */
   next(uid: string, now: number): Outbound[] {
     const tower = this.tower;
     const p = this.players.get(uid);
     if (!tower || !p?.present || p.down || !this.open) return [];
+    // Only a cleared floor has one, and only a cleared floor goes on.
+    const left = tower.openChest();
     if (!tower.next(now)) return [];
+    if (left) {
+      this.towerChest = { floor: left.floor, x: left.x, z: left.z };
+      this.reportNow = true;
+    }
     // A breather on arrival, as on joining.
     tower.noteSpawn(uid, now);
     this.history.forget(uid);
@@ -1117,8 +1128,8 @@ export class FightRuntime {
     return best;
   }
 
-  /** Whether a herzie is playing music (the boss hates it, any of it). The
-   * room rate-limits these. */
+  /** Whether a herzie is playing music (the boss hates it, any of it; in
+   * the Tower it's the same bonus). The room rate-limits these. */
   tune(uid: string, playing: boolean, now: number): void {
     const prev = this.tunes.get(uid);
     if (prev && prev.playing === playing) return;
@@ -1353,7 +1364,9 @@ export class FightRuntime {
   step(now: number): Outbound[] {
     const out: Outbound[] = [];
     const boss = this.boss;
+    // The Tower has no raid clock, but music is the same bonus there.
     if (boss && this.open) this.stepRaid(now, out);
+    else if (this.open) this.stepTunes(now, out);
     const alive: BossPlayer[] = [];
     for (const p of this.players.values()) {
       if (!p.present || !this.fighting(p.uid)) continue;
@@ -1783,13 +1796,14 @@ export class FightRuntime {
     this.closeWhy = why;
     this.reportNow = true;
     this.raidDirty = true;
+    // Out of tune when it ends, cave or Tower.
+    for (const uid of this.tunes.keys())
+      out.push(...this.setInTune(uid, false, now));
     const boss = this.boss;
     if (boss) {
       this.stage = "over";
       for (const by of [...this.channels.keys()])
         out.push(...this.stopChannels(by));
-      for (const uid of this.tunes.keys())
-        out.push(...this.setInTune(uid, false, now));
       if (why === "wiped") {
         this.wipePending = this.eventId !== DEV_EVENT;
         this.speak("wipe", now, out, true);
@@ -1904,6 +1918,13 @@ export class FightRuntime {
       case "cleared":
         this.towerCleared = Math.max(this.towerCleared, ev.floor);
         this.reportNow = true;
+        if (this.tower)
+          out.push({ to: "all", msg: { t: "floor", ...this.tower.view() } });
+        break;
+      case "chest":
+        this.towerChest = { floor: ev.floor, x: round(ev.x), z: round(ev.z) };
+        this.reportNow = true;
+        // Off the floor: it's open.
         if (this.tower)
           out.push({ to: "all", msg: { t: "floor", ...this.tower.view() } });
         break;
@@ -2084,7 +2105,7 @@ export class FightRuntime {
     }
     if (
       !this.towerInflight &&
-      (this.towerKills.length || this.towerCleared) &&
+      (this.towerKills.length || this.towerCleared || this.towerChest) &&
       !dev
     ) {
       this.towerInflight = {
@@ -2093,8 +2114,10 @@ export class FightRuntime {
         uid: this.towerUid,
         kills: this.towerKills,
         ...(this.towerCleared ? { cleared: this.towerCleared } : {}),
+        ...(this.towerChest ? { chest: this.towerChest } : {}),
       };
       this.towerKills = [];
+      this.towerChest = null;
       this.towerCleared = 0;
     }
     // Over: ask for the end screen's table, but only on a report whose
@@ -2260,22 +2283,36 @@ export class FightRuntime {
     return out;
   }
 
-  /** What a Tower batch's kills dropped (`town-vitals`' word): to the
-   * herzie, to land where the last of those mobs fell. */
-  towerLoot(drops: LootDrop[], batch: TowerBatch): Outbound[] {
+  /** What a Tower batch paid out (`town-vitals`' word): to the herzie, the
+   * kills' drops to land where the last of those mobs fell, the chest's
+   * out of the chest. */
+  towerLoot(
+    paid: { drops: LootDrop[]; chest?: LootDrop[] },
+    batch: TowerBatch,
+  ): Outbound[] {
     const p = this.players.get(batch.uid);
-    if (!drops.length || !p?.present) return [];
+    if (!p?.present) return [];
+    const out: Outbound[] = [];
     const last = batch.kills[batch.kills.length - 1];
-    return [
-      {
+    if (paid.drops.length)
+      out.push({
         to: { uid: batch.uid },
         msg: {
           t: "loot",
-          drops,
+          drops: paid.drops,
           ...(last ? { at: { x: last.x, z: last.z } } : {}),
         },
-      },
-    ];
+      });
+    if (paid.chest?.length && batch.chest)
+      out.push({
+        to: { uid: batch.uid },
+        msg: {
+          t: "loot",
+          drops: paid.chest,
+          at: { x: batch.chest.x, z: batch.chest.z },
+        },
+      });
+    return out;
   }
 
   /** The boss fell and its loot is on the ground: tell each herzie still
@@ -2420,6 +2457,7 @@ export class FightRuntime {
       this.towerInflight !== null ||
       this.towerKills.length > 0 ||
       this.towerCleared > 0 ||
+      this.towerChest !== null ||
       this.pending.size > 0 ||
       this.leftUnreported.size > 0 ||
       this.xpInflight !== null ||
@@ -2443,8 +2481,8 @@ export type FightStats = HitStats & { def: number; euphony: number };
 
 /** How a ticket's herzie fights: its basic attack, a blow's strength, and
  * whether it holds its class's instrument. */
-function armsOf(
-  ticket: TownTicketPayload,
+export function armsOf(
+  ticket: Pick<TownTicketPayload, "cls" | "look">,
 ): Pick<FightPlayer, "attack" | "melee" | "armed"> {
   const cls = isHerzieClass(ticket.cls) ? ticket.cls : null;
   const mainHand = ticket.look.equipped?.main_hand ?? null;
@@ -2474,7 +2512,9 @@ export function statsOf(st: TownTicketPayload["st"]): FightStats {
 }
 
 /** The skills a ticket says this herzie has, at their levels. */
-function skillsOf(ticket: TownTicketPayload): Map<SkillId, number> {
+export function skillsOf(
+  ticket: Pick<TownTicketPayload, "sk">,
+): Map<SkillId, number> {
   const out = new Map<SkillId, number>();
   for (const entry of ticket.sk ?? []) {
     if (!Array.isArray(entry)) continue;

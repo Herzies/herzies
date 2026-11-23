@@ -87,6 +87,26 @@ export const allocateStatsSchema = z.object({
   timing: statPoint.default(0),
 });
 
+/** A title id (TITLES). Unknown and unearned ones are set_title's to refuse,
+ * with a reason the app can show. */
+const titleId = z.string().min(1).max(64);
+
+/** Wear a title, or none (null). */
+export const wearTitleSchema = z.object({
+  title: titleId.nullable(),
+});
+
+/** Titles looked at in the Titles tab: their NEW pill goes. */
+export const seenTitlesSchema = z.object({
+  ids: z.array(titleId).max(100),
+});
+
+/** Switch to a loadout. Any number parses so that one that isn't 1 or 2 is
+ * refused with the `invalid` reason (LoadoutRefusal), like the others. */
+export const switchLoadoutSchema = z.object({
+  loadout: z.number(),
+});
+
 /** Upgrade one named copy. `{targetItemId}` is the older client's spelling. */
 export const upgradeItemSchema = z.union([
   z.object({
@@ -100,6 +120,16 @@ export const upgradeItemSchema = z.union([
     targetItemId: z.string().min(1),
   }),
 ]);
+
+/** The Crafting Station: craft a Wilds instrument (a WILDS_RECIPES id). */
+export const wildsCraftSchema = z.object({
+  recipe: z.string().min(1).max(100),
+});
+
+/** The Crafting Station: tune one copy of an instrument up a level. */
+export const wildsTuneSchema = z.object({
+  unitId,
+});
 
 export const createTradeSchema = z.object({
   targetFriendCode: z.string().min(1),
@@ -162,7 +192,7 @@ export const adminEventSchema = z.object({
 
 export const adminEventSeriesSchema = z.object({
   id: z.string().optional(),
-  type: z.enum(["song_hunt", "boss_fight", "merchant", "tower"]),
+  type: z.enum(["song_hunt", "boss_fight", "merchant", "tower", "wilds"]),
   title: z.string().min(1),
   description: z.string().optional(),
   enabled: z.boolean().optional(),

@@ -1,6 +1,7 @@
 import {
   bestUnitOf,
   type ItemUnit,
+  type LoadoutState,
   MAX_ITEM_UPGRADE_LEVEL,
   normalizeEquipped,
   normalizeUnits,
@@ -11,19 +12,23 @@ import type { createAdminClient } from "@/lib/supabase-admin";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
-/** What every inventory RPC returns under `state` (item_state, 00079). */
+/** What every inventory RPC returns under `state` (item_state, 00079;
+ * `loadouts` since 00152). */
 export interface ItemState {
   units: unknown;
   inventory: Record<string, number>;
   equipped: unknown;
   itemUpgrades: Record<string, number>;
   currency: number;
+  loadouts?: LoadoutState | null;
 }
 
 /**
  * The response fields every inventory mutation returns: the units themselves,
  * plus the id-keyed views (`inventory`, `equipped`, `itemUpgrades`) that
- * clients built before per-copy identity still read. Spread it into the JSON.
+ * clients built before per-copy identity still read, and the loadouts (the
+ * Deck's 1 | 2 tabs, whose inactive set can lose a copy to any mutation).
+ * Spread it into the JSON.
  */
 export function itemResponse(state: ItemState) {
   return {
@@ -31,6 +36,7 @@ export function itemResponse(state: ItemState) {
     inventory: state.inventory ?? {},
     equipped: normalizeEquipped(state.equipped),
     itemUpgrades: state.itemUpgrades ?? {},
+    ...(state.loadouts ? { loadouts: state.loadouts } : {}),
   };
 }
 
@@ -43,6 +49,18 @@ export async function loadUnits(
   return normalizeUnits(data);
 }
 
+/** The loadouts (loadout_state_json, 00152), or undefined when they couldn't
+ * be read: a client keeps what it has rather than resetting its tabs. */
+export async function loadLoadouts(
+  admin: Admin,
+  userId: string,
+): Promise<LoadoutState | undefined> {
+  const { data, error } = await admin.rpc("loadout_state_json", {
+    p_user: userId,
+  });
+  return error || !data ? undefined : (data as LoadoutState);
+}
+
 // ---------------------------------------------------------------------------
 // Older clients speak in item ids ("sell 2 cd", "equip boombox", "upgrade
 // boombox") because that was all there was to say. These pick the specific
@@ -53,8 +71,9 @@ export async function loadUnits(
 
 /** "Sell/offer N of this item": the plainest copies first — unworn before worn,
  * then lowest level, then oldest — so a spare goes before one you've invested
- * in or are wearing. Null if the player doesn't own that many. The same rule
- * the desktop uses wherever it only knows an item id. */
+ * in or are wearing; copies the other loadout holds are never picked. Null if
+ * the player doesn't have that many to give. The same rule the desktop uses
+ * wherever it only knows an item id. */
 export const unitsForLegacyCount = pickPlainestUnitIds;
 
 /** "Equip this item": the copy already worn if there is one (so a repeat is
@@ -73,7 +92,8 @@ export function unitForLegacyUnequip(
 /** "Upgrade this item": the copy furthest along that this die can still take
  * a level, so repeated upgrades from an older client concentrate on one card
  * the way the old per-item level did; the worn copy wins a tie. Copies past
- * this die's band are skipped rather than picked and refused. */
+ * this die's band, and copies the other loadout holds (apply_item_upgrade
+ * refuses those), are skipped rather than picked and refused. */
 export function unitForLegacyUpgrade(
   units: readonly ItemUnit[],
   itemId: string,
@@ -83,6 +103,7 @@ export function unitForLegacyUpgrade(
     .filter(
       (u) =>
         u.itemId === itemId &&
+        u.heldBy === undefined &&
         u.upgradeLevel < MAX_ITEM_UPGRADE_LEVEL &&
         requiredDiceForLevel(u.upgradeLevel) === diceItemId,
     )

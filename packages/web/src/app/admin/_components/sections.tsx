@@ -1,6 +1,10 @@
 "use client";
 
-import type { SongHuntConfig, SongHuntHint } from "@herzies/shared";
+import {
+  RARITIES,
+  type SongHuntConfig,
+  type SongHuntHint,
+} from "@herzies/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAdminData } from "./admin-data";
 import {
@@ -27,16 +31,19 @@ import {
   bossFightFormToConfig,
   defaultBossFightConfig,
   defaultMerchantConfig,
+  defaultWildsConfig,
   MerchantConfigFields,
   type MerchantConfigForm,
   merchantConfigFromRecord,
   merchantFormToConfig,
+  WildsConfigFields,
+  type WildsConfigForm,
+  wildsConfigFromRecord,
+  wildsFormToConfig,
 } from "./event-fields";
 import { NotificationsPanel } from "./NotificationsPanel";
 import { SongPoolPanel } from "./SongPoolPanel";
 import { XpPanel } from "./XpPanel";
-
-const RARITIES = ["common", "uncommon", "rare", "legendary", "mythic"] as const;
 
 type SongHuntHintForm = {
   text: string;
@@ -68,6 +75,7 @@ type EventFormState = {
   songHunt: SongHuntConfigForm;
   bossFight: BossFightConfigForm;
   merchant: MerchantConfigForm;
+  wilds: WildsConfigForm;
 };
 
 const EQUIP_SLOT_OPTIONS = [
@@ -215,6 +223,7 @@ function newEventForm(overrides?: Partial<EventFormState>): EventFormState {
     songHunt: defaultSongHuntConfig(),
     bossFight: defaultBossFightConfig(),
     merchant: defaultMerchantConfig(),
+    wilds: defaultWildsConfig(),
     ...overrides,
   };
 }
@@ -243,6 +252,10 @@ function eventToForm(event: AdminEvent): EventFormState {
       event.type === "merchant" || event.type === "treat_trader"
         ? merchantConfigFromRecord(event.config)
         : defaultMerchantConfig(),
+    wilds:
+      event.type === "wilds"
+        ? wildsConfigFromRecord(event.config)
+        : defaultWildsConfig(),
   };
 }
 
@@ -327,6 +340,9 @@ function buildEventConfig(
   }
   if (form.type === "merchant" || form.type === "treat_trader") {
     return merchantFormToConfig(form.merchant);
+  }
+  if (form.type === "wilds") {
+    return wildsFormToConfig(form.wilds);
   }
   return parseEventConfig(form.configJson);
 }
@@ -724,6 +740,7 @@ function EventForm({
                     type === "merchant" || type === "treat_trader"
                       ? defaultMerchantConfig()
                       : f.merchant,
+                  wilds: type === "wilds" ? defaultWildsConfig() : f.wilds,
                 };
               });
             }}
@@ -737,6 +754,7 @@ function EventForm({
               treat_trader (Nandor the Treatless, priced in treats)
             </option>
             <option value="tower">tower (the Tower: floors of mobs)</option>
+            <option value="wilds">wilds (The Wilds: sky ship, PvP)</option>
           </select>
         </div>
         <div>
@@ -867,6 +885,12 @@ function EventForm({
           merchant={form.merchant}
           setMerchant={(merchant) => setForm((f) => ({ ...f, merchant }))}
           catalogItems={catalogItems}
+          fieldIdPrefix={form.id ?? "new"}
+        />
+      ) : form.type === "wilds" ? (
+        <WildsConfigFields
+          wilds={form.wilds}
+          setWilds={(wilds) => setForm((f) => ({ ...f, wilds }))}
           fieldIdPrefix={form.id ?? "new"}
         />
       ) : (

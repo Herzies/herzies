@@ -56,6 +56,9 @@ export type Wave = {
   reach: number;
   /** The dummy it's drawn toward, if any. */
   target: DummyState | null;
+  /** Whose it is (their herzie), if a dummy may stand for them (a duel):
+   * it passes through that one. */
+  owner: object | null;
   /** Its damage as a share of a plain cast's (a Backspin disc's is less). */
   scale: number;
   /** A Bard's heal bolt: green, through dummies, home on `ally` (an entity
@@ -120,6 +123,7 @@ export class WaveField {
     travelled: 0,
     reach: 0,
     target: null,
+    owner: null,
     scale: 1,
     heal: false,
     ally: null,
@@ -163,6 +167,7 @@ export class WaveField {
       scale?: number;
       heal?: boolean;
       ally?: number | null;
+      owner?: object | null;
     },
   ): Wave {
     const w = take(this.waves, (a, b) => a.age > b.age);
@@ -177,6 +182,7 @@ export class WaveField {
     w.travelled = 0;
     w.reach = Math.min(WAVE.range, opts.reach ?? WAVE.range);
     w.target = opts.target ?? null;
+    w.owner = opts.owner ?? null;
     w.scale = opts.scale ?? 1;
     w.heal = !!opts.heal;
     w.ally = opts.ally ?? null;
@@ -226,6 +232,7 @@ export class WaveField {
       let best: { t: number; point: Vec3; dummy: DummyState } | null = null;
       if (!w.heal)
         for (const d of dummies) {
+          if (w.owner && d.body === w.owner) continue;
           const hit = waveHitsDummy(d, w.prev, w.pos, WAVE.hitRadius);
           if (hit && (!best || hit.t < best.t)) best = { ...hit, dummy: d };
         }
@@ -288,15 +295,18 @@ export function waveRadius(w: Wave): number {
 /**
  * The dummy a wave from `from` going `dir` would be drawn to: the one
  * nearest the line of aim, within the assist angle and in range — or null.
+ * Never the one standing for `owner` (who's casting it).
  */
 export function assistTarget(
   from: Readonly<Vec3>,
   dir: Readonly<Vec3>,
   dummies: readonly DummyState[],
+  owner?: object,
 ): DummyState | null {
   let best: DummyState | null = null;
   let bestAngle = WAVE.assistAngle;
   for (const d of dummies) {
+    if (owner && d.body === owner) continue;
     const tx = d.x - from[0];
     const ty = DUMMY.chest - from[1];
     const tz = d.z - from[2];

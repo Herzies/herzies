@@ -5,10 +5,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # The desktop release runs these first, so nothing ships red.
+  workflow_call:
 
 jobs:
   check:
-    name: Lint & Typecheck
+    name: Lint, Typecheck & Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,8 +27,14 @@ jobs:
       - name: Biome lint & format
         run: pnpm biome ci packages/desktop/src packages/shared/src
 
+      - name: Vendored shared rules are current
+        run: node scripts/vendor-shared.mjs --check
+
       - name: Typecheck
         run: pnpm turbo check --filter=herzies-desktop --filter=@herzies/shared
+
+      - name: Test
+        run: pnpm turbo test --filter=herzies-desktop --filter=@herzies/shared
 
   rust:
     name: Rust checks (${{ matrix.os }})
@@ -57,4 +65,7 @@ jobs:
         run: cargo fmt --check
 
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test

@@ -7,6 +7,12 @@ import { buffOn, skills } from "./combat/skills";
 import { pendingSlam } from "./combat/slams";
 import { townSave } from "./runtime";
 
+/** A line in the stacked list under the now-playing box (a buff, where
+ * you are on the Wilds, the Sky Dock's board): bold, coloured, shadowed
+ * to read over the world, no box. */
+export const HUD_LINE =
+  "px-0.5 text-ui font-bold [text-shadow:0_1px_2px_#000,0_0_6px_#000]";
+
 /**
  * What your buffs are doing right now, beside the hotbar: a Cymbrella's
  * dome you stand in (nothing gets through; the seconds left) and Rattled from
@@ -83,10 +89,7 @@ export function SkillHud({
 
   const row = (color: string) =>
     stacked
-      ? cn(
-          "px-0.5 text-ui font-bold [text-shadow:0_1px_2px_#000,0_0_6px_#000]",
-          color,
-        )
+      ? cn(HUD_LINE, color)
       : cn("rounded bg-black/60 px-1.5 text-[11px]", color);
   return (
     <div

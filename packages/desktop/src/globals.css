@@ -656,3 +656,389 @@
     animation: none !important;
   }
 }
+
+/* Titles (components/TitlesTab.tsx, TitleToast.tsx, TitleLabel.tsx). */
+/* A legendary or mythic title's name: a slow white glint across it, drawn
+   from --title-colour (TitleLabel sets it). */
+@keyframes title-glint {
+  0% {
+    background-position: 100% 0;
+  }
+  60%,
+  100% {
+    background-position: 0% 0;
+  }
+}
+.title-glint {
+  background:
+    linear-gradient(
+      100deg,
+      var(--title-colour) 40%,
+      #fff 50%,
+      var(--title-colour) 60%
+    )
+    0 0 / 300% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  /* Over the inline colour TitleLabel sets, without !important. */
+  -webkit-text-fill-color: transparent;
+  animation: title-glint 4.5s ease-in-out infinite;
+}
+/* A title put on: the preview's line pops in. */
+@keyframes title-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(3px) scale(0.85);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(0) scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.title-pop {
+  display: inline-block;
+  animation: title-pop 280ms ease-out;
+}
+/* A NEW pill: a soft pulse, so the eye finds it. */
+@keyframes title-new {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+.title-new {
+  animation: title-new 1.6s ease-in-out infinite;
+}
+/* The toast: drops in from the top with a little overshoot, lifts away. */
+@keyframes title-toast-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.94);
+  }
+  65% {
+    opacity: 1;
+    transform: translateY(2px) scale(1.02);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes title-toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.97);
+  }
+}
+.title-toast-in {
+  animation: title-toast-in 380ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+.title-toast-out {
+  animation: title-toast-out 260ms ease-in forwards;
+}
+/* A grand toast: its border breathing in the title's colour, and a sheen
+   sweeping across now and then. */
+@keyframes title-toast-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 8px 0
+      color-mix(in srgb, var(--title-colour) 35%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 18px 2px
+      color-mix(in srgb, var(--title-colour) 60%, transparent);
+  }
+}
+.title-toast-glow {
+  animation: title-toast-glow 2.4s ease-in-out infinite;
+}
+@keyframes title-sheen {
+  0% {
+    transform: translateX(-120%) skewX(-20deg);
+  }
+  45%,
+  100% {
+    transform: translateX(320%) skewX(-20deg);
+  }
+}
+.title-sheen {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.14),
+    transparent
+  );
+  animation: title-sheen 3.2s ease-in-out 300ms infinite;
+}
+/* Its sparks, thrown out to --dx/--dy from the middle and winking out. */
+@keyframes title-spark {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.4);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy)))
+      scale(0.4);
+  }
+}
+.title-spark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  background: var(--title-colour);
+  box-shadow: 0 0 6px var(--title-colour);
+  opacity: 0;
+  animation: title-spark 900ms cubic-bezier(0.15, 0.7, 0.3, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .title-glint,
+  .title-pop,
+  .title-new,
+  .title-toast-glow {
+    animation: none;
+  }
+  .title-sheen,
+  .title-spark {
+    display: none;
+  }
+  .title-toast-in,
+  .title-toast-out {
+    animation-name: none;
+  }
+}
+
+/* Duels (components/town/duel). */
+/* Music notes circling a beaten duelist's head. */
+@keyframes duel-notes {
+  0%,
+  100% {
+    transform: translate(calc(-50% + 16px), -50%) scale(1);
+    opacity: 1;
+  }
+  25% {
+    transform: translate(-50%, calc(-50% - 5px)) scale(0.75);
+    opacity: 0.5;
+  }
+  50% {
+    transform: translate(calc(-50% - 16px), -50%) scale(1);
+    opacity: 1;
+  }
+  75% {
+    transform: translate(-50%, calc(-50% + 5px)) scale(1.15);
+    opacity: 1;
+  }
+}
+
+/* WINNER over a duel's winner: pops, rises, fades. */
+@keyframes duel-winner {
+  0% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+  12% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  75% {
+    opacity: 1;
+    transform: translateY(-10px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+}
+
+/* A challenge card dropping in from the top. */
+@keyframes duel-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A place's name as you arrive: fades in, holds, and fades out. */
+@keyframes location-title {
+  from {
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  75% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* A bar emptying over the animation's duration (a challenge's time). */
+@keyframes duel-drain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* The VS card's two sides, sliding in. */
+@keyframes duel-vs-left {
+  from {
+    opacity: 0;
+    transform: translateX(-60px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes duel-vs-right {
+  from {
+    opacity: 0;
+    transform: translateX(60px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 3, 2, 1: popped in at 1.4×, held, faded over the slot's last 150 ms. */
+@keyframes duel-count {
+  0% {
+    opacity: 0;
+    transform: scale(1.4);
+  }
+  15% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  81% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+/* FIGHT!: punched to 1.15, settled, faded. */
+@keyframes duel-fight {
+  0% {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  20% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+  35% {
+    transform: scale(1);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+/* VICTORY: in at 1.2×, held, gone. DEFEAT and DRAW only fade. */
+@keyframes duel-banner-pop {
+  0% {
+    opacity: 0;
+    transform: scale(1.2);
+  }
+  8% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes duel-banner-fade {
+  0% {
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* A confetti bit, thrown to (--dx, --dy) and turned --r. */
+@keyframes duel-confetti {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx), var(--dy)) rotate(var(--r));
+  }
+}
+
+/* Your bar, jolted by a hit. */
+@keyframes duel-shake {
+  0%,
+  100% {
+    transform: none;
+  }
+  25% {
+    transform: translateX(-2px);
+  }
+  75% {
+    transform: translateX(2px);
+  }
+}
+
+/* "wants a rematch", and a bar below a quarter: a beat twice a second. */
+@keyframes duel-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .duel-confetti {
+    display: none;
+  }
+}

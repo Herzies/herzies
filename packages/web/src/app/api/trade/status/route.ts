@@ -8,6 +8,9 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const tradeId = searchParams.get("tradeId");
+  // Names can't change mid-trade: the client asks once (and clients from
+  // before this, which don't say, get them every time).
+  const withNames = searchParams.get("names") !== "0";
 
   if (!tradeId) {
     return NextResponse.json({ error: "Missing tradeId" }, { status: 400 });
@@ -15,10 +18,9 @@ export async function GET(request: Request) {
 
   const admin = createAdminClient();
 
-  // This is the hottest route in the app — TradeView polls it every 650ms per
-  // open trade, and deliberately keeps polling while the window is blurred so
-  // partner lock/accept stays instant. It used to open with
-  // expire_stale_trades(), a write, on every one of those polls.
+  // TradeView polls this as a fallback to the live trade_update broadcasts
+  // (00157): every 2s per open trade, 650ms while its live channel is down.
+  // It used to open with expire_stale_trades(), a write, on every poll.
   //
   // The sweep runs on pg_cron now (00057_expire_stale_trades_cron.sql), and
   // expiry is derived below instead. Same observable result: the client treats
@@ -38,20 +40,15 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Not your trade" }, { status: 403 });
   }
 
-  // Look up names for both parties. Independent queries, so issue them
-  // together rather than paying two serial round trips 92 times a minute.
-  const [{ data: initiator }, { data: target }] = await Promise.all([
-    admin
+  // Both parties' names in one query, and only when asked for.
+  const names = new Map<string, string>();
+  if (withNames) {
+    const { data: herzies } = await admin
       .from("herzies")
-      .select("name, friend_code")
-      .eq("user_id", trade.initiator_id)
-      .single(),
-    admin
-      .from("herzies")
-      .select("name, friend_code")
-      .eq("user_id", trade.target_id)
-      .single(),
-  ]);
+      .select("user_id, name")
+      .in("user_id", [trade.initiator_id, trade.target_id]);
+    for (const h of herzies ?? []) names.set(h.user_id, h.name);
+  }
 
   // A trade past its expiry is cancelled, whether or not the sweep has run.
   const TERMINAL = ["completed", "cancelled"];
@@ -66,8 +63,10 @@ export async function GET(request: Request) {
       id: trade.id,
       initiatorId: trade.initiator_id,
       targetId: trade.target_id,
-      initiatorName: initiator?.name ?? "Unknown",
-      targetName: target?.name ?? "Unknown",
+      ...(withNames && {
+        initiatorName: names.get(trade.initiator_id) ?? "Unknown",
+        targetName: names.get(trade.target_id) ?? "Unknown",
+      }),
       initiatorOffer: trade.initiator_offer,
       targetOffer: trade.target_offer,
       state,
@@ -75,6 +74,9 @@ export async function GET(request: Request) {
       targetAccepted: trade.target_accepted,
       createdAt: trade.created_at,
       expiresAt: trade.expires_at,
+      // Orders this answer against the broadcasts (00157); absent until it's
+      // deployed.
+      version: trade.version,
     },
   });
 }

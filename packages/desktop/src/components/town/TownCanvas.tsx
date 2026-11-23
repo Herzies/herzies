@@ -1,13 +1,34 @@
 import {
+  blankState,
   CRYSTAL_KEY,
   type HerzieStats,
   TOWN_FLAG_SITTING,
+  type TownState,
 } from "@herzies/shared";
-import { Canvas, type RootState, useFrame, useThree } from "@react-three/fiber";
+import {
+  Canvas,
+  createPortal,
+  type RootState,
+  useFrame,
+  useThree,
+} from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
-import { Suspense, useEffect, useMemo, useRef } from "react";
-import { useWindowFocused } from "../../tauri-bridge";
+import { Suspense, useMemo, useRef } from "react";
 import type { Look } from "../TownScene";
+import { berthOf } from "./airship/berth";
+import {
+  LAID_UP_GRACE_MS,
+  laidUp,
+  noShipHome,
+  STRANDED_GRACE_MS,
+  seeOffPlank,
+  seeOffShip,
+} from "./airship/boarding";
+import { DeckColliders, DockColliders } from "./airship/Colliders";
+import { useAboardNear, useShipFrame } from "./airship/frames";
+import { SkyShips } from "./airship/SkyShips";
+import { wildsServiceKnown } from "./airship/service";
+import { shadowFocusFor } from "./airship/shadows";
 import { ambient } from "./ambient";
 import { crystalHasSomething, isAttuning, startAttune } from "./attune";
 import { benchesOf, type Seat, seatNear } from "./Benches";
@@ -26,6 +47,8 @@ import { Telegraphs } from "./combat/Telegraphs";
 import { getCrystal } from "./crystalState";
 import type { Hour } from "./DayCycle";
 import { driftClouds } from "./depth";
+import { youDown } from "./downed";
+import { DuelScene } from "./duel/DuelScene";
 import { drawn } from "./fps";
 import { isMouth, usePortalOpen } from "./gates";
 import { HomeDrops } from "./HomeDrops";
@@ -38,6 +61,7 @@ import type { TownConnection } from "./net/TownConnection";
 import { townNet } from "./net/townNet";
 import { Player } from "./Player";
 import { Post } from "./Post";
+import { MapColliders } from "./Props";
 import {
   arrivalOn,
   PORTAL_REACH,
@@ -51,7 +75,7 @@ import {
 } from "./portal";
 import { RemotePlayers } from "./RemotePlayers";
 import type { Season } from "./Seasons";
-import { sfxPortal } from "./sfx";
+import { sfxDoor, sfxPortal } from "./sfx";
 import "./shadows";
 import {
   homeDpr,
@@ -73,7 +97,8 @@ import {
 } from "./runtime";
 import type { Champion } from "./Statues";
 import { Supersample } from "./Supersample";
-import { Visitor } from "./Visitor";
+import { TowerChest } from "./TowerChest";
+import { Visitor, VisitorBody } from "./Visitor";
 import { DiscVFX } from "./vfx/DiscVFX";
 import { DomeVFX } from "./vfx/DomeVFX";
 import { HasteVFX } from "./vfx/HasteVFX";
@@ -83,13 +108,41 @@ import { SlamVFX } from "./vfx/SlamVFX";
 import { SlashVFX } from "./vfx/SlashVFX";
 import { SonicVFX } from "./vfx/SonicVFX";
 import { StunVFX } from "./vfx/StunVFX";
-import { World } from "./World";
+import { mapId, World } from "./World";
+import {
+  CraftingStation,
+  CraftingStationColliders,
+} from "./wilds/CraftingStation";
+import {
+  CRAFTING_KEY,
+  craftingNear,
+  craftingStationsOf,
+} from "./wilds/craftingSpot";
+import { HuntCrystalColliders, HuntCrystals } from "./wilds/HuntCrystal";
+import {
+  HUNT_CRYSTAL_KEY,
+  huntCrystalNear,
+  huntCrystalsOf,
+} from "./wilds/huntCrystalSpot";
+import {
+  asked,
+  cardInReach,
+  cardName,
+  type GroundCard,
+  mayAsk,
+} from "./wilds/loot";
+import { SafeCamp } from "./wilds/SafeCamp";
+import { myWildsDown } from "./wilds/store";
+import { WildsLoot } from "./wilds/WildsLoot";
 
 export { PIXEL_SCALE } from "./pixelSize";
 
 export type TownCanvasProps = {
   spots: TownSpot[];
   player: Look;
+  /** Your herzie's name and worn title (a titles.ts id), over its head. */
+  playerName?: string;
+  playerTitle?: string | null;
   paused: boolean;
   onOpen: (openKey: string) => void;
   /** Another player's name was clicked: open their profile (by friend
@@ -98,11 +151,10 @@ export type TownCanvasProps = {
   /** Who's close enough to talk to (null: nobody), when that changes. */
   onNearChange: (spot: TownSpot | null) => void;
   /** What E would do at a bench or board right now — sit on one nearby,
-   * stand up off it, or read the bulletin board — when that changes (null:
+   * stand up off it, read the bulletin board, the Crystal, the Crafting
+   * Station or the Hunt Crystal on the Wilds — when that changes (null:
    * nothing). */
-  onBenchChange?: (
-    prompt: "sit" | "stand" | "read" | "attune" | "upgrade" | null,
-  ) => void;
+  onBenchChange?: (prompt: BenchPrompt | null) => void;
   /** The island a portal nearby leads to (E steps in), when that changes
    * (null: none near). */
   onPortalChange?: (to: TownMap | null) => void;
@@ -141,6 +193,19 @@ export type TownCanvasProps = {
   homeDrops?: boolean;
 };
 
+/** What E would do where you stand, besides talking or a portal. On the
+ * Wilds, `pickup`: take the card lying in reach (its drop id, and its name
+ * to show). */
+export type BenchPrompt =
+  | "sit"
+  | "stand"
+  | "read"
+  | "attune"
+  | "upgrade"
+  | "crafting"
+  | "hunt"
+  | { pickup: string; name: string };
+
 /**
  * The 3D Town: react-three-fiber for the scene and its lifecycle, Rapier
  * for collisions and a fixed-step simulation, camera-controls for the
@@ -163,21 +228,32 @@ export default function TownCanvas(props: TownCanvasProps) {
   );
   const current = useTownMap();
   const map = props.map ?? current;
+  // Aboard a sky ship: physics is its deck's (in its own frame), and the
+  // world is drawn round whichever island it's nearest.
+  const aboard = map.ship ? townSave.ship : null;
+  const near = useAboardNear();
+  const view = aboard !== null ? mapById(near) : map;
+  const deckFrame = useShipFrame(aboard);
+  // Shadows over the island and the berth beside it, or over the ship
+  // you're on as it flies.
+  const shadows = useMemo(
+    () =>
+      aboard !== null || berthOf(view)
+        ? shadowFocusFor(view, aboard)
+        : undefined,
+    [view, aboard],
+  );
   // A debug override of PIXEL_SCALE (Settings, dev builds).
   const pixelSize = useTownPixelSize();
-  // Visitors stand on islands with spots for them.
-  const spots = Object.keys(map.spots).length > 0 ? props.spots : [];
+  // Visitors stand on islands with spots for them: the island drawn, so
+  // from a sky ship they're already there as you come in.
+  const spots = Object.keys(view.spots).length > 0 ? props.spots : [];
   // At Home nothing's aimed or cast (and aim mode ends on the way in).
   const { home } = useHomeMode();
   // Supersampled (Settings > Graphics): drawn at twice the resolution and
   // averaged back down to the same big pixels (see Supersample), at Home
   // too.
   const supersample = useTownSupersample();
-  // Visible but not the window you're in (a pinned window beside another
-  // app, the Town on a second screen): drawn at a fraction of the rate,
-  // which is most of the CPU.
-  const unfocused = !useWindowFocused();
-  const throttled = THROTTLE_UNFOCUSED && unfocused && !props.paused;
 
   return (
     <Canvas
@@ -198,18 +274,54 @@ export default function TownCanvas(props: TownCanvasProps) {
       // included, and the herzie stage (fixed, z-index 1) draws over them.
       style={{ imageRendering: "pixelated", isolation: "isolate" }}
       camera={{ fov: 55, near: 0.1, far: 400 }}
-      frameloop={props.paused || throttled ? "never" : "always"}
+      frameloop={props.paused ? "never" : "always"}
       onCreated={props.onCreated}
     >
       <TownRuntimeContext.Provider value={runtime}>
         <ClockGap />
-        {throttled && <UnfocusedTicker />}
-        <Systems {...props} map={map} spots={spots} input={input} />
+        <Systems
+          {...props}
+          map={map}
+          // Aboard, where you stand is the deck's: nobody to talk to.
+          spots={aboard === null ? spots : []}
+          input={input}
+          followsSave={!props.map}
+        />
         {/* Rapier's WASM loads here: wait inside the canvas instead of
             suspending the whole Town again (the splash would blink). */}
         <Suspense fallback={null}>
+          {/* What's seen: outside the physics, so stepping onto a ship (a
+              new physics world) doesn't build the island again. */}
+          <World
+            map={view}
+            others={props.others}
+            champion={props.champion}
+            hour={props.hour}
+            season={props.season}
+            shadows={shadows}
+          />
+          {!view.room && <SkyShips origin={view.origin} />}
+          {/* What stands on the island, drawn with it: seen from a sky ship
+              as you come in, and the same things (not made again) once you
+              step ashore. What's solid of them is in the physics below. */}
+          {spots.map((s) => (
+            <Visitor
+              key={s.key}
+              spot={s}
+              ground={groundY(view, s.at.x, s.at.z)}
+              map={view}
+              onOpen={props.onOpen}
+              bare={aboard !== null}
+            />
+          ))}
+          {view.id === "wilds" && <SafeCamp map={view} />}
+          {/* Crafting Stations and Hunt Crystals, wherever they're
+              painted. */}
+          <CraftingStation map={view} />
+          <HuntCrystals map={view} />
           <Physics
-            // A new island: a new physics world, with only its colliders.
+            // A new island (or a ship's deck): a new physics world, with
+            // only its colliders.
             key={map.id}
             timeStep={1 / 60}
             interpolate
@@ -218,13 +330,14 @@ export default function TownCanvas(props: TownCanvasProps) {
             updatePriority={-3}
           >
             {props.onReady && <FirstFrame onReady={props.onReady} />}
-            <World
-              map={map}
-              others={props.others}
-              champion={props.champion}
-              hour={props.hour}
-              season={props.season}
-            />
+            {map.ship ? (
+              <DeckColliders />
+            ) : (
+              <>
+                <MapColliders key={mapId(map)} map={map} />
+                <DockColliders map={map} />
+              </>
+            )}
             <Player
               map={map}
               look={props.player}
@@ -232,20 +345,22 @@ export default function TownCanvas(props: TownCanvasProps) {
               reach={worldRadius(map)}
               respawn={props.respawn}
               bubble={props.bubbles?.get(props.player.seed)}
+              name={props.playerName}
+              title={props.playerTitle}
+              deck={aboard}
             />
-            {spots.map((s) => (
-              <Visitor
-                key={s.key}
-                spot={s}
-                ground={groundY(map, s.at.x, s.at.z)}
-                map={map}
-                onOpen={props.onOpen}
-              />
-            ))}
+            {aboard === null &&
+              spots.map((s) => (
+                <VisitorBody
+                  key={s.key}
+                  spot={s}
+                  ground={groundY(map, s.at.x, s.at.z)}
+                />
+              ))}
             <Combat
               map={map}
               stats={props.stats ?? NO_STATS}
-              active={!props.paused && !home}
+              active={!props.paused && !home && aboard === null}
             />
             {map.id === "bossroom" && (
               <>
@@ -259,24 +374,47 @@ export default function TownCanvas(props: TownCanvasProps) {
               <>
                 <Mobs />
                 <Telegraphs />
+                {/* A cleared Warden's floor's chest. */}
+                <TowerChest map={map} />
               </>
             )}
-            {/* The bossroom's loot; anywhere, for the dev drop. */}
+            {/* The bossroom's loot; anywhere, for the dev drop (and a
+                Wilds cache's). */}
             <LootDrops />
+            {/* The Wilds' dropped cards and caches. */}
+            {map.id === "wilds" && <WildsLoot map={map} />}
+            {!map.ship && (
+              <>
+                <CraftingStationColliders map={map} />
+                <HuntCrystalColliders map={map} />
+              </>
+            )}
             {/* What drops while you listen, around you (see HomeDrops). */}
-            {props.homeDrops && !map.combat && <HomeDrops map={map} />}
+            {props.homeDrops && !map.combat && !map.ship && (
+              <HomeDrops map={map} />
+            )}
             {portalsOf(map).some(isMouth) && <CaveTimer map={map} />}
           </Physics>
         </Suspense>
-        {props.net && (
-          <RemotePlayers
-            map={map}
-            net={props.net}
-            bubbles={props.bubbles}
-            onOpenProfile={props.onOpenProfile}
-          />
-        )}
-        <CameraRig map={map} />
+        {props.net &&
+          (() => {
+            const others = (
+              <>
+                <RemotePlayers
+                  map={map}
+                  net={props.net}
+                  bubbles={props.bubbles}
+                  onOpenProfile={props.onOpenProfile}
+                  frame={deckFrame}
+                />
+                {/* Duels' rings, and what a duel's end leaves over heads. */}
+                <DuelScene map={map} />
+              </>
+            );
+            // Aboard, everyone else is on the deck with you.
+            return deckFrame ? createPortal(others, deckFrame) : others;
+          })()}
+        <CameraRig map={view} />
         {/* Aim mode works on every island, so its effects are always here. */}
         <SonicVFX />
         <DiscVFX />
@@ -310,27 +448,6 @@ const NO_STATS: HerzieStats = {
   moveSpeed: 0,
 };
 
-/** Off for now: the Town draws at full rate unfocused too. */
-const THROTTLE_UNFOCUSED = false;
-
-/** Unfocused frame rate. */
-const UNFOCUSED_FPS = 3;
-
-/** Draws the frames while the canvas is stopped for being unfocused. Not
- * "demand": Rapier invalidates after every step while the player's body is
- * awake, which would keep that drawing at the full rate. */
-function UnfocusedTicker() {
-  const advance = useThree((s) => s.advance);
-  useEffect(() => {
-    const id = setInterval(
-      () => advance(performance.now()),
-      1000 / UNFOCUSED_FPS,
-    );
-    return () => clearInterval(id);
-  }, [advance]);
-  return null;
-}
-
 /** The Town's clock doesn't run while it's paused (window closed to the
  * menu bar): the first frame back would carry the whole gap in `elapsedTime`
  * and everything swaying on it (trees, bunting, clouds) would jump to a new
@@ -355,7 +472,12 @@ function Systems({
   map,
   net,
   input,
-}: TownCanvasProps & { input: React.RefObject<TownInput> }) {
+  followsSave,
+}: TownCanvasProps & {
+  input: React.RefObject<TownInput>;
+  /** The island drawn is the save's (not the map editor's preview). */
+  followsSave: boolean;
+}) {
   const surface = useThree((s) => s.gl.domElement);
   const near = useRef<TownSpot | null>(null);
   const spotsRef = useRef(spots);
@@ -363,15 +485,21 @@ function Systems({
   const benches = useMemo(() => (map ? benchesOf(map) : []), [map]);
   /** The seat E would sit on, if any. */
   const seat = useRef<Seat | null>(null);
-  const prompt = useRef<"sit" | "stand" | "read" | "attune" | "upgrade" | null>(
-    null,
-  );
+  const prompt = useRef<BenchPrompt | null>(null);
   const boards = useMemo(() => (map ? boardsOf(map) : []), [map]);
   /** The bulletin board E would read, if any. */
   const board = useRef<Board | null>(null);
   const crystals = useMemo(() => (map ? crystalsOf(map) : []), [map]);
   /** The Crystal E would attune to, if any. */
   const crystal = useRef<CrystalSpot | null>(null);
+  const stations = useMemo(() => (map ? craftingStationsOf(map) : []), [map]);
+  /** At a Crafting Station. */
+  const crafting = useRef(false);
+  const huntCrystals = useMemo(() => (map ? huntCrystalsOf(map) : []), [map]);
+  /** By a Hunt Crystal (to talk to it). */
+  const hunt = useRef(false);
+  /** The card on the Wilds E would pick up, if any. */
+  const pickup = useRef<GroundCard | null>(null);
   // A shut portal (a sealed cave, the Tower out of season, a floor not
   // yet cleared): nothing to see, step into or be prompted by.
   const isOpen = usePortalOpen();
@@ -382,10 +510,33 @@ function Systems({
   /** Where the player was last frame, on which island: walking through a
    * disc is going from one side of it to the other. */
   const last = useRef({ map: "", x: 0, z: 0 });
+  /** The other players sitting down, sampled near a bench: the first `n`
+   * of `at` (kept and refilled, not made, each frame). A seat's taken if
+   * one of them is on it. */
+  const sitting = useMemo(() => {
+    const at: TownState[] = [];
+    const state = {
+      at,
+      n: 0,
+      taken: (s: Seat) => {
+        for (let i = 0; i < state.n; i++) {
+          if (Math.hypot(at[i].x - s.x, at[i].z - s.z) < 0.4) return true;
+        }
+        return false;
+      },
+    };
+    return state;
+  }, []);
+  /** Since when the ship you're on has been laid up (you're seen off it
+   * after a moment), and since when you've been on the Wilds with no ship
+   * to take you home (you're sent home after a moment). */
+  const laidUpSince = useRef<number | null>(null);
+  const strandedSince = useRef<number | null>(null);
 
   /** E (or a click on the prompt): talk to whoever's near; else step into
-   * the portal nearby; else stand up; else read the board nearby; else sit
-   * on the bench nearby. */
+   * the portal nearby; else stand up; else pick up the card in reach (the
+   * Wilds); else read the board nearby; else sit on the bench nearby.
+   * Knocked out, talking's all it can do: it lies where it fell. */
   const interact = () => {
     const card = near.current?.card;
     if (card?.openKey) {
@@ -393,14 +544,26 @@ function Systems({
       leaveCombat();
       markMet(card);
       onOpen(card.openKey);
-    } else if (portal.current) enter(portal.current);
+    } else if (youDown()) return;
+    else if (portal.current) enter(portal.current);
     else if (townLive.seat) townLive.standUp = true;
-    else if (crystal.current) {
+    else if (pickup.current) {
+      // The room judges it (a `wildsTaken`, or a refusal that says why).
+      const { id } = pickup.current;
+      const now = performance.now();
+      if (mayAsk(id, now) && townNet().sendWildsTake(id)) asked(id, now);
+    } else if (crystal.current) {
       // Something in it: attune (a cast). Nothing: its upgrade window.
       if (crystalHasSomething()) startAttune();
       else if (!isAttuning()) onOpen(CRYSTAL_KEY);
     } else if (board.current) onOpen(BULLETIN_KEY);
-    else if (seat.current) townLive.seat = seat.current;
+    else if (crafting.current) {
+      leaveCombat();
+      onOpen(CRAFTING_KEY);
+    } else if (hunt.current) {
+      leaveCombat();
+      onOpen(HUNT_CRYSTAL_KEY);
+    } else if (seat.current) townLive.seat = seat.current;
   };
   const enter = (p: Portal) => {
     if (warp.active) return;
@@ -412,8 +575,9 @@ function Systems({
     if (p.next) {
       startWarp(to, true);
       townNet().sendNext();
-    } else startWarp(to);
-    sfxPortal();
+    } else startWarp(to, false, !!p.door);
+    if (p.door) sfxDoor();
+    else sfxPortal();
   };
   const live = useTownInput(!paused, surface, interact);
   input.current = live.current;
@@ -438,6 +602,9 @@ function Systems({
       if (warp.t >= WARP_OUT + WARP_IN) warp.active = false;
     }
     townLive.frozen = warp.active;
+    // Between a map change and the world catching up (a frame or two),
+    // the save is already the next island's: nothing here is about it.
+    if (followsSave && map && townSave.map !== map.id) return;
     if (map) {
       const l = last.current;
       if (l.map === map.id && !warp.active) {
@@ -448,7 +615,9 @@ function Systems({
           }
         }
       }
-      Object.assign(l, { map: map.id, x: townSave.x, z: townSave.z });
+      l.map = map.id;
+      l.x = townSave.x;
+      l.z = townSave.z;
     }
     // The portal close enough to step into with E.
     let nearest: Portal | null = null;
@@ -466,9 +635,43 @@ function Systems({
       onPortalChange?.(nearest ? mapById(nearest.to) : null);
     }
 
+    // A sky ship's gangway is walked through freely (see Player); a laid-up
+    // ship sees its last passengers off after a moment, and a gangplank
+    // being drawn in whoever's on it.
+    if (map && !warp.active) {
+      if (map.ship) {
+        const ship = townSave.ship;
+        if (laidUp(ship) && !townLive.glide) {
+          laidUpSince.current ??= performance.now();
+          if (performance.now() - laidUpSince.current > LAID_UP_GRACE_MS) {
+            laidUpSince.current = null;
+            seeOffShip(ship);
+          }
+        } else laidUpSince.current = null;
+      } else seeOffPlank(map, worldRadius(map));
+    }
+    // The Wilds' only way off is by ship: with none to come (the service is
+    // over, or there's none), back to Town.
+    const stranded =
+      followsSave &&
+      map?.id === "wilds" &&
+      !warp.active &&
+      wildsServiceKnown() &&
+      noShipHome();
+    if (stranded) {
+      strandedSince.current ??= performance.now();
+      if (performance.now() - strandedSince.current > STRANDED_GRACE_MS) {
+        strandedSince.current = null;
+        townLive.seat = null;
+        startWarp("home", false, true);
+      }
+    } else strandedSince.current = null;
+
     // The shared uniforms the wind, water and sky read (see ambient.ts).
     ambient.uTime.value = clock.elapsedTime;
-    ambient.uPlayer.value.set(townSave.x, 0, townSave.z);
+    // Aboard, nobody's walking through the grass down there.
+    if (map?.ship) ambient.uPlayer.value.set(1e5, 0, 1e5);
+    else ambient.uPlayer.value.set(townSave.x, 0, townSave.z);
     driftClouds(clock.elapsedTime, ambient.uWindDir.value);
 
     let closest: TownSpot | null = null;
@@ -488,6 +691,13 @@ function Systems({
       onNearChange(closest);
     }
 
+    // A card on the Wilds in reach that you may take: never taken without
+    // asking (see wilds/loot.ts), so walking past leaves it lying.
+    pickup.current =
+      map?.id === "wilds" && !closest && !portal.current && !townLive.seat
+        ? cardInReach(townSave, performance.now(), myWildsDown())
+        : null;
+
     // Benches: the free seat nearest, if no one's there to talk to. A seat
     // is taken if another player is sitting on it.
     seat.current = null;
@@ -500,46 +710,83 @@ function Systems({
       !closest && !portal.current && !townLive.seat && !crystal.current
         ? boardNear(boards, townSave.x, townSave.z)
         : null;
+    crafting.current =
+      !closest &&
+      !portal.current &&
+      !townLive.seat &&
+      !crystal.current &&
+      !board.current &&
+      craftingNear(stations, townSave.x, townSave.z);
+    hunt.current =
+      !closest &&
+      !portal.current &&
+      !townLive.seat &&
+      !crystal.current &&
+      !board.current &&
+      !crafting.current &&
+      huntCrystalNear(huntCrystals, townSave.x, townSave.z);
     if (
       !closest &&
       !portal.current &&
       !townLive.seat &&
       !crystal.current &&
       !board.current &&
+      !crafting.current &&
+      !hunt.current &&
       benches.length > 0
     ) {
-      const sitting: { x: number; z: number }[] = [];
+      sitting.n = 0;
       if (net) {
         const t = net.clock.renderTime(performance.now());
         for (const r of net.remotes.values()) {
-          const st = r.buffer.sample(t);
-          if (st && st.flags & TOWN_FLAG_SITTING) sitting.push(st);
+          sitting.at[sitting.n] ??= blankState();
+          const st = r.buffer.sample(t, sitting.at[sitting.n]);
+          if (st && st.flags & TOWN_FLAG_SITTING) sitting.n++;
         }
       }
-      seat.current = seatNear(benches, townSave.x, townSave.z, (s) =>
-        sitting.some((p) => Math.hypot(p.x - s.x, p.z - s.z) < 0.4),
-      );
+      seat.current = seatNear(benches, townSave.x, townSave.z, sitting.taken);
     }
     if (townLive.benchPressed) {
       townLive.benchPressed = false;
       if (!closest) interact();
     }
-    const next = townLive.seat
-      ? "stand"
-      : crystal.current
-        ? isAttuning()
-          ? null
-          : crystalHasSomething()
-            ? "attune"
-            : "upgrade"
-        : board.current
-          ? "read"
-          : seat.current
-            ? "sit"
-            : null;
-    if (next !== prompt.current) {
-      prompt.current = next;
-      onBenchChange?.(next);
+    const lying = pickup.current;
+    // Knocked out: no "E to…" (see interact).
+    const next = youDown()
+      ? null
+      : townLive.seat
+        ? "stand"
+        : lying
+          ? "pickup"
+          : crystal.current
+            ? isAttuning()
+              ? null
+              : crystalHasSomething()
+                ? "attune"
+                : "upgrade"
+            : board.current
+              ? "read"
+              : crafting.current
+                ? "crafting"
+                : hunt.current
+                  ? "hunt"
+                  : seat.current
+                    ? "sit"
+                    : null;
+    const was = prompt.current;
+    const same =
+      next === "pickup"
+        ? typeof was === "object" && was?.pickup === lying?.id
+        : next === was;
+    if (!same) {
+      const shown: BenchPrompt | null =
+        next === "pickup" && lying
+          ? { pickup: lying.id, name: cardName(lying.item, lying.level) }
+          : next === "pickup"
+            ? null
+            : next;
+      prompt.current = shown;
+      onBenchChange?.(shown);
     }
   }, -4);
 

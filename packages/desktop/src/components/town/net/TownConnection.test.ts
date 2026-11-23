@@ -10,6 +10,8 @@ import {
 } from "@herzies/shared";
 import { WALK_SPEED } from "@herzies/shared/gl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PLANK_WALK_HALF } from "../airship/deck";
+import { plankOf } from "../airship/gangplank";
 import { worldRadius } from "../map";
 import { HOME_MAP, TOWN_MAPS_LOCAL, WORLD_RADIUS } from "../runtime";
 import { socketBase, TownConnection } from "./TownConnection";
@@ -114,6 +116,18 @@ describe("TownConnection", () => {
     expect([...conn.remotes.keys()]).toEqual([3]);
   });
 
+  it("sets its clock by the welcome, before any snapshot", async () => {
+    const { conn } = setup();
+    conn.start();
+    await settle();
+    latest().open();
+    const clock = vi.spyOn(performance, "now").mockReturnValue(1_000);
+    latest().json({ t: "welcome", you: 1, players: [], now: 1.8e12 });
+    clock.mockRestore();
+    // A shield the server ends 5 s on is 5 s on here too.
+    expect(conn.clock.toLocal(1.8e12 + 5_000)).toBe(6_000);
+  });
+
   it("sends movement only when it changes", async () => {
     const { conn, here } = setup();
     conn.start();
@@ -214,9 +228,9 @@ describe("TownConnection", () => {
     await settle();
     latest().open();
     latest().json({ t: "welcome", you: 1, players: [] });
-    conn.setMap("arena");
+    conn.setMap("wilds");
     await settle();
-    expect(latest().url).toBe("wss://town.test/v1/town/arena?shard=0");
+    expect(latest().url).toBe("wss://town.test/v1/town/wilds?shard=0");
     expect(FakeSocket.all.length).toBe(2);
   });
 
@@ -285,6 +299,40 @@ describe("TownConnection", () => {
     latest().json({ t: "correct", x: 4, z: 5 });
     expect(corrections).toEqual([[4, 5]]);
   });
+
+  it("keeps worn titles, and has its say before leaving a room", async () => {
+    const leaving = vi.fn();
+    const conn: TownConnection = new TownConnection({
+      map: "home",
+      getTicket: vi.fn(async () => ticket),
+      readState: () => ({ x: 0, z: 0, heading: 0, speed: 0, flags: 0 }),
+      onLeaving: () => {
+        leaving();
+        conn.sendDuel({ op: "yield" });
+      },
+    });
+    conn.start();
+    await settle();
+    const ws = latest();
+    ws.open();
+    const look = { seed: "s", stage: 1 };
+    ws.json({
+      t: "welcome",
+      you: 7,
+      players: [{ id: 3, name: "eddie", look, title: "duel-10" }],
+    });
+    expect(conn.remotes.get(3)?.title).toBe("duel-10");
+    ws.json({ t: "join", player: { id: 4, name: "fay", look } });
+    expect(conn.remotes.get(4)?.title).toBeNull();
+    ws.json({ t: "look", player: { id: 3, name: "eddie", look } });
+    expect(conn.remotes.get(3)?.title).toBeNull();
+    conn.setMap("wilds");
+    expect(leaving).toHaveBeenCalledOnce();
+    expect(JSON.parse(ws.sent.at(-1) as string)).toEqual({
+      t: "duel",
+      op: "yield",
+    });
+  });
 });
 
 /** The first retry is never later than this. */
@@ -306,6 +354,25 @@ describe("the server's idea of the Town matches the app's", () => {
       const server = TOWN_MAPS[map.id as keyof typeof TOWN_MAPS];
       expect(server.radius).toBe(worldRadius(map));
       expect([server.spawn.x, server.spawn.z]).toEqual(map.spawn.at);
+    }
+  });
+
+  it("knows where each Sky Dock's gangplank runs, up into the gangway", () => {
+    // Moved a dock in the map editor? The diff is the new entry for
+    // TOWN_MAPS in packages/shared/src/town-net.ts.
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    for (const map of TOWN_MAPS_LOCAL.values()) {
+      const p = plankOf(map);
+      const server = TOWN_MAPS[map.id as keyof typeof TOWN_MAPS];
+      const g = "gangplank" in server ? server.gangplank : undefined;
+      // As far up it as a step from the island may go (see keepOnIsland).
+      const far = p ? p.aboard + 0.1 : 0;
+      const want = p && {
+        from: [r2(p.foot.x), r2(p.foot.z)],
+        to: [r2(p.foot.x + p.dx * far), r2(p.foot.z + p.dz * far)],
+        half: PLANK_WALK_HALF,
+      };
+      expect(g ?? null, `TOWN_MAPS.${map.id}.gangplank`).toEqual(want);
     }
   });
 });

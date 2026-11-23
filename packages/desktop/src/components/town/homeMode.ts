@@ -48,8 +48,8 @@ type State = {
   /** The Town has drawn its first frame: Home can be shown in it (until
    * then the app shows its own stand-in). */
   ready: boolean;
-  /** You're on an island you fight on (the boss's cave, the Tower, the
-   * training grounds): no Home there. */
+  /** You're on an island you fight on (the boss's cave, the Tower): no
+   * Home there. */
   combatMap: boolean;
   frame: HomeFrame | null;
   /** A window's open over Home: the keys are the window's, nobody walks. */

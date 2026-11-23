@@ -21,6 +21,8 @@ const REASONS: Record<string, string> = {
   "bad-action": "Invalid action",
   "stage-too-low": "Your herzie isn't grown enough to wear this",
   "class-required": "Only a herzie of this item's class can wear it",
+  // What comes off would land in the bag, and there's no room (00152).
+  "bag-full": "Your bag is full: make room first.",
 };
 
 export async function POST(request: Request) {
@@ -77,9 +79,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
   if (!result?.ok || !result.state) {
+    const reason = result?.reason ?? "";
     return NextResponse.json(
-      { error: REASONS[result?.reason ?? ""] ?? "Failed to equip" },
-      { status: result?.reason === "not-found" ? 404 : 400 },
+      { error: REASONS[reason] ?? "Failed to equip", reason },
+      { status: reason === "not-found" ? 404 : 400 },
     );
   }
 

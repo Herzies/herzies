@@ -12,9 +12,12 @@ import {
   getHerzieStats,
   getHerzieStatsFromUnits,
   getItem,
+  type HerzieClass,
   RARITY_COLORS as ITEM_RARITY_COLORS,
   ItemTypeIcon,
   isVisitorType,
+  MADAS_KEY,
+  MADAS_NAME,
   MARKET_KEY,
   MARKET_NAME,
   type MarketStall,
@@ -25,6 +28,8 @@ import {
   NAKATA_NAME,
   PIP_KEY,
   PIP_NAME,
+  SKIPPER_KEY,
+  SKIPPER_NAME,
   type StatPoints,
   TOWER_GUARD_KEY,
   TOWER_GUARD_NAME,
@@ -35,6 +40,7 @@ import {
 } from "@herzies/shared";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { usePoll } from "../hooks/usePoll";
 import { useEscape } from "../lib/escapeStack";
 import { HerzieStageContext, visitorHerzieStage } from "../lib/overlayStage";
 import { useQuestBoard } from "../lib/quests";
@@ -50,24 +56,32 @@ import {
 import { BackButton } from "./BackButton";
 import { BossFightHelp, BossFightPanel, makeDebugBoss } from "./BossFightPanel";
 import { BulletinPanel } from "./BulletinPanel";
+import { CraftingPanel } from "./CraftingPanel";
 import { CrystalPanel } from "./CrystalPanel";
+import { HuntCrystalPanel } from "./HuntCrystalPanel";
 import ItemInspectOverlay, {
   INSPECT_ORIGIN_ATTR,
   inspectOrigin,
 } from "./ItemInspectOverlay";
 import { List } from "./List";
 import { LoadingSplash } from "./LoadingSplash";
+import { MadasPanel } from "./MadasPanel";
 import { MarketPanel } from "./MarketPanel";
 import { MerchantPanel } from "./MerchantPanel";
 import { NakataPanel } from "./NakataPanel";
 import { OrphiezStage } from "./OrphiezStage";
 import { PIP, QuestGiverPanel } from "./QuestGiverPanel";
+import { SkipperPanel } from "./SkipperPanel";
 import { TabButton } from "./TabButton";
 import { TowerGuardPanel } from "./TowerGuardPanel";
 import type { EventCard } from "./TownScene";
 import { TownWorld } from "./TownWorld";
+import { setWildsService, setWildsUpcoming } from "./town/airship/service";
 import { BULLETIN_KEY } from "./town/Boards";
 import { setTowerOpen } from "./town/gates";
+import { CRAFTING_KEY } from "./town/wilds/craftingSpot";
+import { HUNT_CRYSTAL_KEY } from "./town/wilds/huntCrystalSpot";
+import { wildsFeed } from "./town/wildsFeed";
 import { View } from "./View";
 import { VisitorHelp } from "./VisitorHelp";
 import { VISITOR_THEMES } from "./VisitorRowTheme";
@@ -271,6 +285,7 @@ function EventsViewImpl({
   debugForceMerchant = false,
   debugForceTreatTrader = false,
   onScreenChange,
+  onEventsRunning,
   equipped,
   units = [],
   currency = 0,
@@ -282,6 +297,7 @@ function EventsViewImpl({
   playerSeed,
   playerStage,
   playerStatPoints,
+  playerClass = null,
   playerProfile,
   musicPlaying = false,
   onOpenProfile,
@@ -310,6 +326,8 @@ function EventsViewImpl({
   playerStage?: number;
   /** Its stat points, added to what its cards give. */
   playerStatPoints?: StatPoints;
+  /** Its class (the Crafting Station makes only its instruments). */
+  playerClass?: HerzieClass | null;
   /** Name, level and progress to the next level, shown top left in the Town. */
   playerProfile?: {
     friendCode?: string;
@@ -319,6 +337,7 @@ function EventsViewImpl({
     xp?: number;
     multipliers?: ActiveMultiplier[] | null;
     classLabel?: string;
+    title?: string | null;
     nowPlaying?: AppState["nowPlaying"];
   };
   /** Tab stays mounted but hidden; only poll while user is on Events. */
@@ -351,6 +370,9 @@ function EventsViewImpl({
   onScreenChange?: (
     screen: "boss" | "merchant" | "world" | "visitor" | null,
   ) => void;
+  /** How many events are on (not the monthly Tower), for the app's Events
+   * button: from this view's own poll, so the app needn't fetch them too. */
+  onEventsRunning?: (running: number) => void;
   /** Current deck, used to show set progress in the reward preview. */
   equipped?: Equipped | null;
   /** Every owned copy, for George's "N owned" counts. */
@@ -404,6 +426,16 @@ function EventsViewImpl({
   const [previousLoaded, setPreviousLoaded] = useState(false);
   const [previousKey, setPreviousKey] = useState(0);
   const liveIdsRef = useRef<string | null>(null);
+  // The sky ship runs while a Wilds event is on. Re-fed on every poll (each
+  // brings fresh arrays), which is also what lets an ended service's last
+  // run finish and the ship then lay up (see setWildsService) — but not
+  // before the first answer: till then "none" is only not knowing.
+  useEffect(() => {
+    if (!activeLoaded) return;
+    const { service, upcomingAt } = wildsFeed(events, upcoming);
+    setWildsService(service);
+    setWildsUpcoming(upcomingAt);
+  }, [events, upcoming, activeLoaded]);
 
   const [inspectOverlay, setInspectOverlay] = useState<"item" | null>(null);
 
@@ -511,16 +543,14 @@ function EventsViewImpl({
   /** The Town or a visitor on screen: kept fresh (not just Home). */
   const fastPoll = eventsTabVisible || selected !== null;
   // reloadKey is a trigger, not a value: George's stall bumps it after a buy.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey re-runs the fetch
-  useEffect(() => {
-    if (!active) return;
-    let cancelled = false;
-
-    const refresh = () =>
+  usePoll(
+    (alive) =>
       herzies
         .fetchActiveEvents()
         .then((active) => {
-          if (cancelled) return;
+          if (!alive()) return;
+          // Fresh arrays every time, on purpose: each poll's re-render is
+          // also what moves the cards' countdowns and the finders' "Ns ago".
           setEvents(active.events);
           setUpcoming(active.upcoming ?? []);
           setWeek(active.week ?? []);
@@ -534,17 +564,23 @@ function EventsViewImpl({
           liveIdsRef.current = ids;
         })
         .catch(() => {
-          if (!cancelled) setActiveLoaded(true);
-        });
+          if (alive()) setActiveLoaded(true);
+        }),
+    {
+      enabled: active,
+      focused,
+      everyMs: fastPoll ? EVENTS_POLL_MS : HOME_EVENTS_POLL_MS,
+      key: String(reloadKey),
+    },
+  );
 
-    refresh();
-    const every = fastPoll ? EVENTS_POLL_MS : HOME_EVENTS_POLL_MS;
-    const interval = focused ? setInterval(refresh, every) : undefined;
-    return () => {
-      cancelled = true;
-      if (interval) clearInterval(interval);
-    };
-  }, [focused, active, reloadKey, fastPoll]);
+  // Not the monthly Tower: it's always on, so it would keep the button
+  // sparkling all month. The Wilds do count: they're only on of an evening,
+  // and the ships are worth a look while they fly.
+  const running = events.filter((e) => e.type !== "tower").length;
+  useEffect(() => {
+    onEventsRunning?.(running);
+  }, [running, onEventsRunning]);
 
   // /events/previous-hunt returns the last ended hunt *or* boss, whichever is
   // newer. While Orphiez is in town his card is live and never shows the last
@@ -618,24 +654,22 @@ function EventsViewImpl({
   const [stall, setStall] = useState<MarketStall | null>(null);
   const [stallKey, setStallKey] = useState(0);
   const marketOpen = selected === MARKET_KEY;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: stallKey and marketOpen re-run the fetch
-  useEffect(() => {
-    if (!active) return;
-    let cancelled = false;
-    const refresh = () =>
+  usePoll(
+    (alive) =>
       herzies
         .marketMine()
         .then((m) => {
-          if (!cancelled) setStall(m);
+          if (alive()) setStall(m);
         })
-        .catch(() => {});
-    refresh();
-    const interval = focused ? setInterval(refresh, MARKET_POLL_MS) : undefined;
-    return () => {
-      cancelled = true;
-      if (interval) clearInterval(interval);
-    };
-  }, [active, focused, stallKey, marketOpen]);
+        .catch(() => {}),
+    {
+      enabled: active,
+      focused,
+      everyMs: MARKET_POLL_MS,
+      // A sale made or his panel opened or closed: fetch it again.
+      key: `${stallKey}:${marketOpen}`,
+    },
+  );
 
   /** A visitor open in the big window's panel, the world still showing. */
   const inPanel = expanded && selected !== null;
@@ -757,9 +791,10 @@ function EventsViewImpl({
     // visitor (Nandor) opens his stall like George does.
     for (const e of liveEvents) {
       if (EVENT_TYPES.some((t) => t.type === e.type)) continue;
-      // The Tower is a place, not a visitor: its portal opens instead
-      // (town/gates.ts), and the bulletin board lists it.
-      if (e.type === "tower") continue;
+      // The Tower and the Wilds are places, not visitors: the Tower's door
+      // opens and the sky ship flies instead, and the bulletin board lists
+      // them.
+      if (e.type === "tower" || e.type === "wilds") continue;
       const limited = LIMITED_TYPES.includes(e.type);
       cards.push({
         type: e.type,
@@ -855,6 +890,26 @@ function EventsViewImpl({
       at: null,
       openKey: NAKATA_KEY,
       detail: "Talks to cats",
+    });
+    // And Blåmann, on the pier by the Sky Dock, who skippers Sofia III.
+    cards.push({
+      type: SKIPPER_KEY,
+      title: SKIPPER_NAME,
+      description: null,
+      status: "live",
+      at: null,
+      openKey: SKIPPER_KEY,
+      detail: "Skippers Sofia III",
+    });
+    // And Madas, in the Wilds' safe camp, wherever a map gives him a spot.
+    cards.push({
+      type: MADAS_KEY,
+      title: MADAS_NAME,
+      description: null,
+      status: "live",
+      at: null,
+      openKey: MADAS_KEY,
+      detail: "Gone funny over gold",
     });
     // Nearest in time first: what's on now, then what starts soonest, then
     // types with nothing on the calendar.
@@ -1036,6 +1091,36 @@ function EventsViewImpl({
       );
     }
 
+    if (selected === MADAS_KEY) {
+      return (
+        <ScreenView
+          inPanel={screenInPanel}
+          ownName
+          title={MADAS_NAME}
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+        >
+          <MadasPanel paused={!active || !visible} />
+        </ScreenView>
+      );
+    }
+
+    if (selected === SKIPPER_KEY) {
+      return (
+        <ScreenView
+          inPanel={screenInPanel}
+          ownName
+          title={SKIPPER_NAME}
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+        >
+          <SkipperPanel paused={!active || !visible} />
+        </ScreenView>
+      );
+    }
+
     if (selected === CRYSTAL_KEY) {
       return (
         <ScreenView
@@ -1047,6 +1132,40 @@ function EventsViewImpl({
           backButton={back}
         >
           <CrystalPanel paused={!active || !visible} />
+        </ScreenView>
+      );
+    }
+
+    if (selected === CRAFTING_KEY) {
+      return (
+        <ScreenView
+          inPanel={screenInPanel}
+          ownName
+          title="The Crafting Station"
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+        >
+          <CraftingPanel
+            units={units}
+            herzieClass={playerClass}
+            onLog={onLog}
+          />
+        </ScreenView>
+      );
+    }
+
+    if (selected === HUNT_CRYSTAL_KEY) {
+      return (
+        <ScreenView
+          inPanel={screenInPanel}
+          ownName
+          title="The Hunt Crystal"
+          colour="yellow"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+        >
+          <HuntCrystalPanel paused={!active || !visible} />
         </ScreenView>
       );
     }

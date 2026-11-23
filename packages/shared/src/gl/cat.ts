@@ -1,5 +1,5 @@
 import { MathUtils, Vector3 } from "three";
-import { angleDelta, turnToward, WALK_SPEED } from "./animation.js";
+import { angleDelta, ICE_SPEED, turnToward, WALK_SPEED } from "./animation.js";
 import { seededRandom } from "./companion.js";
 
 /*
@@ -105,6 +105,11 @@ const RESPAWN_DISTANCE = 7.5;
 const RESPAWN_ANGLE = 2.3;
 /** A frame longer than this (the Town was hidden) puts it on its spot. */
 const MAX_DT = 1;
+/** On ice (CatHost.icy) its way over the ground follows its legs this
+ * slowly as it pushes off, and slower still as it glides to a stop (per
+ * second): about as a herzie's does on ice. */
+const ICE_PUSH = 1.5;
+const ICE_STOP = 1.15;
 
 // --- Gait -------------------------------------------------------------------
 
@@ -271,6 +276,9 @@ export type CatState = {
   lean: number;
   /** Ground height under it, sprung (so a step up is eased). */
   groundVelocity: number;
+  /** Its way over the ground (world units a second; y unused): its legs'
+   * on dry land; on ice, slipping after them, and gliding on. */
+  slide: Vector3;
   /** Seconds it's been alive (breathing, idle swishes). */
   clock: number;
   /** Off to fetch something (world space), or null. */
@@ -343,6 +351,9 @@ export type CatHost = {
   groundAt?: (x: number, z: number) => number;
   /** Whether it can walk there (not water); everywhere when not given. */
   walkable?: (x: number, z: number) => boolean;
+  /** Whether its feet slip there (ice: walkable, but slippery); nowhere
+   * when not given. */
+  icy?: (x: number, z: number) => boolean;
   /** Whether it can walk straight from (ax, az) to (bx, bz): nothing in
    * the way (a wall, a tree) and no water. Without it, only water counts
    * (sampled with `walkable`). */
@@ -419,6 +430,7 @@ export function newCatState(seed = 0): CatState {
     slopeRoll: 0,
     lean: 0,
     groundVelocity: 0,
+    slide: new Vector3(),
     clock: random() * 10,
     target: null,
     fetch: "none",
@@ -943,6 +955,7 @@ function snapToSlot(state: CatState, host: CatHost) {
   state.react = -1;
   state.turnRate = 0;
   state.groundVelocity = 0;
+  state.slide.set(0, 0, 0);
   state.started = true;
   state.sideOn = false;
   state.sideTried = true;
@@ -963,6 +976,7 @@ function respawn(state: CatState, host: CatHost) {
   state.following = true;
   state.react = -1;
   state.groundVelocity = 0;
+  state.slide.set(0, 0, 0);
   state.sideOn = false;
   leaveProp(state);
   state.stuckFor = 0;
@@ -1345,12 +1359,19 @@ export function stepCat(
   }
 
   // Getting nowhere: off the side and back behind; or, well behind,
-  // back in along the herzie's path.
-  if (state.following && !wasFollowing) {
+  // back in along the herzie's path. Not on ice: there its feet slip, and
+  // slow going isn't being stuck (nothing's in its way out there).
+  const onIce = host.icy?.(state.position.x, state.position.z) ?? false;
+  if ((state.following && !wasFollowing) || onIce) {
     state.stuckFor = 0;
     state.stuckBest = away;
   }
-  if (state.following && state.fetch === "none" && state.rest < 0.35) {
+  if (
+    state.following &&
+    state.fetch === "none" &&
+    state.rest < 0.35 &&
+    !onIce
+  ) {
     if (away < state.stuckBest - STUCK_PROGRESS * k) {
       state.stuckBest = away;
       state.stuckFor = 0;
@@ -1525,9 +1546,12 @@ export function stepCat(
     state.sideGoal.set(host.prop.x, host.position.y, host.prop.z);
   }
 
-  // Moving: forward along its heading, round water, and never through the
-  // herzie.
+  // Moving: forward along its heading, round water (slipping on ice), and
+  // never through the herzie.
   let moved = 0;
+  const fromX = state.position.x;
+  const fromZ = state.position.z;
+  let slipping = false;
   if (state.hop >= 0) {
     // Hopping: a crouch, then up (or down) in an arc, then a landing.
     state.hop += dt;
@@ -1562,6 +1586,32 @@ export function stepCat(
       state.position.z = nz;
     }
     if (t >= 1) state.fetch = "holding";
+  } else if (onIce) {
+    // On ice its legs go as they would, but its feet slip (as a herzie's
+    // do): its way over the ground follows them slowly, ICE_SPEED as far
+    // at most, and glides on as they slow — past where it meant to stop.
+    slipping = true;
+    const s = state.slide;
+    const top = state.speed * ICE_SPEED;
+    const pushing = top > Math.hypot(s.x, s.z);
+    const t = 1 - Math.exp(-(pushing ? ICE_PUSH : ICE_STOP) * dt);
+    s.x += (Math.sin(state.heading) * top - s.x) * t;
+    s.z += (Math.cos(state.heading) * top - s.z) * t;
+    const v = Math.hypot(s.x, s.z);
+    const way =
+      v > 1e-3
+        ? dryHeading(state, host, Math.atan2(s.x, s.z), v * dt)
+        : Number.NaN;
+    if (Number.isNaN(way)) s.set(0, 0, 0);
+    else {
+      // Skidding along an edge it can't go over: that way instead.
+      s.x = Math.sin(way) * v;
+      s.z = Math.cos(way) * v;
+      state.position.x += s.x * dt;
+      state.position.z += s.z * dt;
+    }
+    // Its feet keep its legs' pace, not the ground's.
+    moved = state.speed * dt;
   } else if (state.speed > 0) {
     // Never past where it means to stop (a sudden stop ahead of it).
     const step = Math.min(
@@ -1591,6 +1641,15 @@ export function stepCat(
       moved = step;
     }
   }
+  // Off the ice its way is wherever its legs (or a hop, a pounce) took
+  // it; onto the ice, it carries that on.
+  if (!slipping) {
+    state.slide.set(
+      (state.position.x - fromX) / dt,
+      0,
+      (state.position.z - fromZ) / dt,
+    );
+  }
   {
     const ox = state.position.x - host.position.x;
     const oz = state.position.z - host.position.z;
@@ -1602,6 +1661,12 @@ export function stepCat(
       const uz = r > 1e-6 ? oz / r : -Math.cos(host.heading);
       state.position.x = host.position.x + ux * clear;
       state.position.z = host.position.z + uz * clear;
+      // Slid into it (on ice): it goes no further that way.
+      const into = state.slide.x * ux + state.slide.z * uz;
+      if (into < 0) {
+        state.slide.x -= into * ux;
+        state.slide.z -= into * uz;
+      }
     }
   }
   // Beside the prop and turned alongside it: shuffles in against it as it

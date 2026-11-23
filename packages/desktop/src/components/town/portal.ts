@@ -1,4 +1,5 @@
 import {
+  buildingsOf,
   cellCenter,
   facingAt,
   groundY,
@@ -7,11 +8,14 @@ import {
   type TownMap,
 } from "./map";
 import { mapById } from "./maps";
+import { towerDoorSpot } from "./towerPlan";
 
 /**
  * Portals: a swirling disc of light floating in the air, standing on one
  * island and leading to another. Walk through it (or press E beside it) and you're
  * there, stepping out of the portal on the far side that leads back.
+ * A building's door can lead somewhere too (the Tower's): no disc, no
+ * walking through it, just E at the door, and you go in as through a door.
  */
 
 export type Portal = {
@@ -25,6 +29,10 @@ export type Portal = {
   to: MapId;
   /** The Tower's way on to its next floor (on this same island). */
   next?: boolean;
+  /** A door, not a disc: nothing drawn, entered with E only (walking into
+   * the wall beside it mustn't take you in), and gone through as a door
+   * (see warp). */
+  door?: true;
 };
 
 /** How far you can be from a portal to step into it with E. */
@@ -43,8 +51,9 @@ export const MOUTH_FORWARD = 0.5;
  * of the island. */
 export function portalsOf(
   map: TownMap,
-  /** Whether a map is a room (default: ask the maps there are). */
-  isRoom: (id: MapId) => boolean = (id) => !!mapById(id).room,
+  /** Whether a map is a cave, behind a mouth (default: ask the maps there
+   * are). */
+  isCave: (id: MapId) => boolean = (id) => mapById(id).room === "dark",
 ): Portal[] {
   const out: Portal[] = [];
   for (let row = 0; row < map.size; row++) {
@@ -56,7 +65,7 @@ export function portalsOf(
       if (!to) continue;
       const [cx, cz] = cellCenter(map, col, row);
       const yaw = facingAt(map, col, row) ?? Math.atan2(-cx, -cz);
-      const forward = isRoom(to) ? MOUTH_FORWARD : 0;
+      const forward = isCave(to) ? MOUTH_FORWARD : 0;
       const x = cx + Math.sin(yaw) * forward;
       const z = cz + Math.cos(yaw) * forward;
       out.push({
@@ -69,6 +78,20 @@ export function portalsOf(
         ...(link.next ? { next: true } : {}),
       });
     }
+  }
+  // The Tower's door, as a spot just outside it.
+  for (const b of buildingsOf(map)) {
+    if (b.kind !== "tower") continue;
+    const { x, z, yaw } = towerDoorSpot(b);
+    out.push({
+      key: `door:${b.anchor.join(",")}`,
+      x,
+      y: groundY(map, x, z),
+      z,
+      yaw,
+      to: "tower",
+      door: true,
+    });
   }
   return out;
 }
@@ -83,7 +106,8 @@ export function portalSide(p: Portal, x: number, z: number) {
   return { ahead: dx * fx + dz * fz, across: dx * fz - dz * fx };
 }
 
-/** Whether walking from (x0, z0) to (x1, z1) took you through the disc. */
+/** Whether walking from (x0, z0) to (x1, z1) took you through the disc.
+ * Never through a door: those are only entered with E. */
 export function walkedThrough(
   p: Portal,
   x0: number,
@@ -91,6 +115,7 @@ export function walkedThrough(
   x1: number,
   z1: number,
 ): boolean {
+  if (p.door) return false;
   const a = portalSide(p, x0, z0);
   const b = portalSide(p, x1, z1);
   if (Math.sign(a.ahead) === Math.sign(b.ahead) || a.ahead === b.ahead) {
@@ -102,8 +127,9 @@ export function walkedThrough(
   return Math.abs(across) < PORTAL_HALF_WIDTH;
 }
 
-/** Where you arrive on `to` coming from `from`: in front of the portal that
- * leads back, facing out of it — or the island's spawn if none does. */
+/** Where you arrive on `to` coming from `from`: in front of the portal (or
+ * door) that leads back, facing out of it — or the island's spawn if none
+ * does. */
 export function arrivalOn(
   to: TownMap,
   from: MapId,
@@ -122,8 +148,9 @@ export function arrivalOn(
 /**
  * Going through a portal: the view swirls and whites out while the herzie
  * spins down into the disc, the island swaps underneath, and it swirls
- * back in with the herzie stepping out on the far side. Driven by the
- * Town's Systems; Player, Post and the overlay read it.
+ * back in with the herzie stepping out on the far side. Through a door,
+ * the view just darkens and lightens again, and the herzie doesn't spin.
+ * Driven by the Town's Systems; Player, Post and the overlay read it.
  */
 export const warp = {
   active: false,
@@ -135,6 +162,8 @@ export const warp = {
   /** Staying on this island (the Tower's next floor): back to its start
    * rather than a swap. */
   sameIsland: false,
+  /** In through a door (see Portal.door), not a disc. */
+  door: false,
 };
 /** Out (into the portal), then in (out of the far one), in seconds. */
 export const WARP_OUT = 0.5;
@@ -151,8 +180,16 @@ export function warpAmount(): number {
   return (1 - k) ** 2;
 }
 
-/** Into the portal to `to` (`sameIsland`: the Tower's next floor). */
-export function startWarp(to: MapId, sameIsland = false): void {
+/** Into the portal to `to` (`sameIsland`: the Tower's next floor; `door`:
+ * through a door rather than a disc). */
+export function startWarp(to: MapId, sameIsland = false, door = false): void {
   if (warp.active) return;
-  Object.assign(warp, { active: true, t: 0, to, swapped: false, sameIsland });
+  Object.assign(warp, {
+    active: true,
+    t: 0,
+    to,
+    swapped: false,
+    sameIsland,
+    door,
+  });
 }

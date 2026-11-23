@@ -30,7 +30,8 @@ import { useRapier } from "@react-three/rapier";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { notify } from "../../../lib/notices";
-import { entityDown } from "../downed";
+import { entityDown, youDown } from "../downed";
+import { duelFighting, duelHeld, inDuel, myDuelHp } from "../duel/store";
 import { groundY, type TownMap } from "../map";
 import { townNet } from "../net/townNet";
 import { townSave, useTownRuntime } from "../runtime";
@@ -53,6 +54,7 @@ import {
   sfxTaunt,
 } from "../sfx";
 import { getVitals, useVitals } from "../vitals";
+import { myWildsHp, wildsHeld, wildsOn } from "../wilds/store";
 import { pushDamageNumber, pushStunLabel } from "./DamageNumbers";
 import { liveDummies } from "./Dummies";
 import {
@@ -102,6 +104,10 @@ const HIT_STOP_SCALE = 0.12;
 const reachFrom = { x: 0, z: 0 };
 const reachBody = { x: 0, z: 0, radius: 0 };
 const bossScratch = { x: 0, z: 0, yaw: 0 };
+/** The heal stance's allies each frame, and the entries they're written
+ * into: kept, so aiming a heal makes nothing new. */
+const allies: { id: number; x: number; z: number }[] = [];
+const allyPool: { id: number; x: number; z: number }[] = [];
 const HIT_STOP_MS = 65;
 const HANDS: readonly DiscHand[] = ["held-l", "held-r"];
 /** A Rimshot's hold on the slam (a plain strike holds 70 ms): the
@@ -123,15 +129,15 @@ const typing = (t: EventTarget | null) => {
 };
 
 /**
- * Fighting on the training grounds: combat mode's controls, your aim, your
+ * Fighting in the Town: combat mode's controls, your aim, your
  * casts, and every wave in flight — where it lands and what that does.
  *
  * - Tab: into combat mode (the mouse aims; the camera stays as it is);
  *   Esc, or Tab again: out.
  * - Left click or F: cast. Holding it keeps casting; a press mid-cast is
  *   kept for the next.
- * - Q or 1: your class skill, if you have one. In the boss room the server
- *   runs it; on the training grounds it's practice (no XP).
+ * - Q or 1: your class skill, if you have one. In a fight the server runs
+ *   it; anywhere else it's practice on the dummies (no XP).
  *
  * Aiming is the usual third-person way: a ray from the camera through the
  * crosshair finds what you're pointing at, and the wave flies from the
@@ -340,8 +346,9 @@ export function Combat({
     scale: number,
     now: number,
   ): "crit" | "hit" => {
-    // A Tower mob: the server rolls it and says (the number, the sound).
-    if (dummy.mob !== undefined) {
+    // A Tower mob, or a duel's opponent: the server rolls it and says (the
+    // number, the sound).
+    if (dummy.mob !== undefined || dummy.herzie !== undefined) {
       hitDummy(dummy, dir[0], dir[2], 0, false, now, false);
       return "hit";
     }
@@ -365,7 +372,7 @@ export function Combat({
   /**
    * A Rimshot's slam, as the stick strikes the ground: the shockwave and the
    * rest of the show (SlamVFX), a heavy hold on the contact, the camera's
-   * jolt and the boom. On the training grounds every dummy within reach
+   * jolt and the boom. Out of a fight every dummy within reach
    * takes twice a strike, rocked back from the middle, and rolls its own
    * stun; in a fight the server judges it all (the room hears of hits and
    * stuns with its next word).
@@ -391,7 +398,12 @@ export function Combat({
       myHit(d, toward, point, RIMSHOT.damage * STRIKE_DAMAGE, now);
       waveField.burst(point, toward, "hit");
       // Practice: each rolls its own stun. A mob's is the server's.
-      if (d.mob === undefined && !bossFight.on && Math.random() < chance) {
+      if (
+        d.mob === undefined &&
+        d.herzie === undefined &&
+        !bossFight.on &&
+        Math.random() < chance
+      ) {
         stuns.dummies.set(d.key, now + RIMSHOT.stunMs);
         d.frozenUntil = Math.max(d.frozenUntil, now + 120);
         pushStunLabel([d.x, (d.y ?? 0) + DUMMY.chest + 0.2, d.z]);
@@ -553,6 +565,13 @@ export function Combat({
     // that swing out; any other press only a moment.
     const keptFor = mine?.id === "rimshot" ? RIMSHOT_QUEUE_MS : CAST_BUFFER_MS;
     if (queued && now - queued.at >= keptFor) skills.queued = null;
+    // In a fight, the server judges what you do: the boss room, a duel
+    // once "FIGHT!" is called, or the Wilds' free-for-all. A duel's
+    // countdown (and a stun) holds you, and being knocked out (out of
+    // health anywhere, or down in the Wilds) until you're back up.
+    const brawl = wildsOn();
+    const judged = bossFight.on || duelFighting(now) || brawl;
+    const held = duelHeld(now) || wildsHeld(now) || youDown();
     // A taunt does nothing outside a fight, nor a resurrect in a fight
     // that isn't on (the lobby, the Tower): say so rather than spend the
     // press. Outside a fight, a resurrect brings back anyone knocked out.
@@ -562,9 +581,33 @@ export function Combat({
       ((mine.id === "taunt" && !raidOn) ||
         (mine.id === "resurrect" && bossFight.on && !raidOn));
     const unarmed = !!mine && !skills.armed;
+    // Taunt and Resurrect have no place in a duel or the Wilds; Soothing
+    // Drones heal only you there, so at full health they'd be spent on
+    // nothing.
+    const versus = inDuel() || brawl;
+    const notInDuel =
+      !!mine && (mine.id === "taunt" || mine.id === "resurrect") && versus;
+    const duelHp =
+      mine?.id === "soothing-drones"
+        ? inDuel()
+          ? myDuelHp()
+          : brawl
+            ? myWildsHp()
+            : null
+        : null;
+    const nothingToHeal = !!duelHp && duelHp.hp >= duelHp.maxHp;
     if (queued && mine && unarmed) {
       skills.queued = null;
       notify(instrumentNeeded(mine.id), { kind: "info" });
+    } else if (queued && mine && notInDuel) {
+      skills.queued = null;
+      notify(
+        `"${SKILL_DEFS[mine.id].name}" doesn't work ${brawl ? "on other herzies" : "in a duel"}.`,
+        { kind: "info" },
+      );
+    } else if (queued && mine && nothingToHeal) {
+      skills.queued = null;
+      notify("You're at full health.", { kind: "info" });
     } else if (queued && mine && raidOnly) {
       skills.queued = null;
       notify(
@@ -579,6 +622,7 @@ export function Combat({
       herzie &&
       queued &&
       mine &&
+      !held &&
       now - queued.at < keptFor &&
       skillReady(mine.id, now) &&
       // A Rimshot waits out a swing already going: its stick's landing
@@ -654,8 +698,8 @@ export function Combat({
           out[2] = p.z;
           return out;
         });
-        if (bossFight.on) townNet().sendSkill(mine.id, seq, yaw, pitch);
-      } else if (bossFight.on || mine.id === "resurrect") {
+        if (judged) townNet().sendSkill(mine.id, seq, yaw, pitch);
+      } else if (judged || mine.id === "resurrect") {
         townNet().sendSkill(mine.id, seq, yaw, pitch);
       } else if (mine.id === "backspin") {
         // Practice: the discs hit the dummies, for their share of a wave.
@@ -691,19 +735,26 @@ export function Combat({
     const blow = combat.blow;
     // A Bard's lute in its heal stance: locked onto the ally nearest the
     // aim (never yourself, never the knocked out: they need a Resurrect).
-    const heals = combat.on && combat.attack === "wave" && healing();
+    // In a duel or the Wilds it only ever attacks.
+    const heals = combat.on && combat.attack === "wave" && healing() && !versus;
     stance.lock = null;
     if (herzie && heals) {
       herzie.root.getWorldPosition(chest);
       chest.y += herzie.height * 0.55;
       dir.copy(a.point).sub(chest).normalize();
       const me = bossFight.you ?? -1;
-      const allies: { id: number; x: number; z: number }[] = [];
+      let n = 0;
       for (const [id, at] of entityAt) {
         if (id === me || id === -1) continue;
         if (entityDown(id)) continue;
-        allies.push({ id, x: at.x, z: at.z });
+        allyPool[n] ??= { id: 0, x: 0, z: 0 };
+        const ally = allyPool[n];
+        ally.id = id;
+        ally.x = at.x;
+        ally.z = at.z;
+        allies[n++] = ally;
       }
+      allies.length = n;
       stance.lock =
         healTarget([chest.x, chest.y, chest.z], [dir.x, dir.y, dir.z], allies)
           ?.ally.id ?? null;
@@ -719,8 +770,10 @@ export function Combat({
       const free = discs ? nextHand(discField, herzie) : null;
       // Nothing else starts while a Rimshot winds up and lands.
       const slamming = herzie.casting && herzie.castMotion === "slam";
+      // Held for a duel's countdown, or stunned in one: nothing goes off.
       const ready =
         !slamming &&
+        !held &&
         ((now - a.castAt) / 1000) * speed >= CAST_INTERVAL &&
         (!discs || free !== null);
       if (combat.on && (queued || combat.fireHeld) && ready && discs && free) {
@@ -832,7 +885,7 @@ export function Combat({
           waveField.burst(point, toward, kind);
           landed = true;
         }
-        if (bossFight.on) {
+        if (judged) {
           // The server judges it, and says what it did (the number, the
           // sound); the burst is what you see land.
           townNet().sendCast(yaw, 0);
@@ -919,7 +972,7 @@ export function Combat({
           quick: speed,
           bounces: shuffleOf(bossFight.you ?? -1, now),
         });
-        if (bossFight.on) sendBossCast(herzie, a.point);
+        if (judged) sendBossCast(herzie, a.point);
         shake(0.04);
       }
       // The hand is out: the wave leaves it (Player's update, last frame).
@@ -975,8 +1028,9 @@ export function Combat({
           reach: a.blocked && !target ? toAim + 0.2 : WAVE.range,
           target,
         });
-        // In the boss room, the server does the hitting: tell it the aim.
-        if (bossFight.on) sendBossCast(herzie, a.point);
+        // In a fight (the boss room, a duel), the server does the hitting:
+        // tell it the aim.
+        if (judged) sendBossCast(herzie, a.point);
         sfxCast();
         shake(0.05);
       }

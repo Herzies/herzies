@@ -1,3 +1,4 @@
+import type { ShipIndex } from "@herzies/shared";
 import type { HerzieModel } from "@herzies/shared/gl";
 import type { RapierRigidBody } from "@react-three/rapier";
 import {
@@ -65,6 +66,8 @@ export const townSave = {
   /** Bumped on every arrival (another island, a respawn): the camera then
    * swings round behind the herzie, looking the way it faces. */
   arrival: 0,
+  /** On a sky ship's deck (the `airship` map): which ship. */
+  ship: 0 as ShipIndex,
 };
 
 /** What the player's herzie is doing right now, for the multiplayer Town
@@ -77,6 +80,18 @@ export const townLive = {
   /** Set to move the herzie straight there next step (the server refused a
    * move); Player clears it. */
   teleport: null as { x: number; z: number; heading?: number } | null,
+  /** Set to walk the herzie to (x, z) over `ms` (default GLIDE_MS),
+   * turning to `heading` (a duel putting it on its mark, a ship seeing it
+   * off; begun at `from`, performance.now() ms), on whatever it stands on
+   * (a gangplank too). Player clears it on arrival, then calls `after`. */
+  glide: null as {
+    x: number;
+    z: number;
+    heading: number;
+    from: number;
+    ms?: number;
+    after?: () => void;
+  } | null,
   /** The bench seat the herzie is sitting on, if any (see Benches). */
   seat: null as Seat | null,
   /** Stand up from it next step (Player clears it). */
@@ -132,10 +147,18 @@ export type TownSpot = {
 const mapListeners = new Set<() => void>();
 
 /** Go to another island: you arrive at `at` (the map's spawn if not
- * given), facing `heading`. The world swaps its island under you. */
+ * given), facing `heading`. The world swaps its island under you.
+ * `seamless`: stepping across without a cut (on or off a sky ship), so
+ * the camera stays where it is rather than swinging round behind you, and
+ * the herzie carries on as it was (see Player) — at `going`, its velocity
+ * in the new frame. */
 export function goToMap(
   id: MapId,
   at?: { x: number; z: number; heading: number },
+  {
+    seamless = false,
+    going,
+  }: { seamless?: boolean; going?: { vx: number; vz: number } } = {},
 ): void {
   const map = mapById(id);
   const to = at ?? {
@@ -148,14 +171,25 @@ export function goToMap(
     x: to.x,
     z: to.z,
     heading: to.heading,
-    // Behind the herzie, looking the way it faces.
-    azimuth: to.heading - Math.PI,
-    arrival: townSave.arrival + 1,
   });
+  if (!seamless) {
+    // Behind the herzie, looking the way it faces.
+    townSave.azimuth = to.heading - Math.PI;
+    townSave.arrival++;
+  }
+  arriving.seamless = seamless;
+  arriving.vx = seamless ? (going?.vx ?? 0) : 0;
+  arriving.vz = seamless ? (going?.vz ?? 0) : 0;
   townLive.seat = null;
   townLive.teleport = null;
+  townLive.glide = null;
   for (const l of mapListeners) l();
 }
+
+/** How the last goToMap went: seamlessly or not, and at what velocity
+ * (Player reads it as it mounts, to carry its herzie over from the one
+ * before). */
+export const arriving = { seamless: false, vx: 0, vz: 0 };
 
 /** The island you're on, re-rendering when you go to another. */
 export function useTownMap(): TownMap {

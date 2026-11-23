@@ -194,14 +194,14 @@ function benchGeometry(): THREE.BufferGeometry {
 const BENCH_GEOMETRY = benchGeometry();
 
 /** Not see-through like the trees: low, a bench never hides the player. */
-const benchMaterial = inSeason(
-  new THREE.MeshLambertMaterial({
-    vertexColors: true,
-    flatShading: true,
-  }),
-);
+const BENCH_LOOK = { vertexColors: true, flatShading: true } as const;
+/** On an island, snowed on (and wet) with the seasons. */
+const benchMaterial = inSeason(new THREE.MeshLambertMaterial(BENCH_LOOK));
+/** On a ship's deck, as the deck itself: no snow lies up there, so none
+ * on the seats either. */
+const deckBenchMaterial = new THREE.MeshLambertMaterial(BENCH_LOOK);
 
-/** Every bench on the map, as one mesh. */
+/** Every bench on the map, as one mesh (unseasoned on a ship's deck). */
 export function Benches({ map }: { map: TownMap }) {
   const geometry = useMemo(() => {
     const benches = benchesOf(map);
@@ -217,7 +217,7 @@ export function Benches({ map }: { map: TownMap }) {
   return (
     <mesh
       geometry={geometry}
-      material={benchMaterial}
+      material={map.ship ? deckBenchMaterial : benchMaterial}
       castShadow
       receiveShadow
     />
