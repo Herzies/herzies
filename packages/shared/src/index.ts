@@ -27,6 +27,7 @@ export * from "./items.js";
 export * from "./lastfm-link.js";
 export * from "./leveling.js";
 export * from "./loadouts.js";
+export * from "./madas.js";
 export * from "./market.js";
 export * from "./medea.js";
 export * from "./nakata.js";

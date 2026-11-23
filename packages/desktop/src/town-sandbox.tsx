@@ -119,6 +119,7 @@ import { homeMode } from "./components/town/homeMode";
 import { assignHotbar } from "./components/town/hotbarSlots";
 import { LocationTitle } from "./components/town/LocationTitle";
 import { cellAt, objectAt } from "./components/town/map";
+import { TOWN_MAPS_LOCAL } from "./components/town/maps";
 import { setTownTicketSource, townNet } from "./components/town/net/townNet";
 import {
   goToMap,
@@ -144,7 +145,9 @@ import { HerzieStageContext, overlayHerzieStage } from "./lib/overlayStage";
 import { herzies } from "./tauri-bridge";
 
 const params = new URLSearchParams(location.search);
-const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(HOME_MAP);
+// The townsfolk of the island you start on (?map=wilds: Madas in its camp).
+const START_MAP = TOWN_MAPS_LOCAL.get(params.get("map") as never) ?? HOME_MAP;
+const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(START_MAP);
 // Start on another island: ?map=tower .
 if (params.has("map")) goToMap(params.get("map") as string);
 if (params.has("wilds")) {
@@ -285,6 +288,7 @@ const spots: TownSpot[] = [
   ["market", "Plutus"],
   ["nakata", "Nakata"],
   ["skipper", "Blåmann"],
+  ["madas", "Madas"],
 ]
   // Only those the map has a spot for (the boss lives in its cave now).
   .filter(([type]) => SPOTS[type])
@@ -295,8 +299,12 @@ const spots: TownSpot[] = [
     standing: true,
     status: "in town",
   }));
-// `?visitors=6` fills the spare spots too: the most the Town shows.
-const extra = Math.max(0, Number(params.get("visitors") ?? 4) - spots.length);
+// `?visitors=6` fills the spare spots too: the most the Town shows (on an
+// island visitors stand on).
+const extra =
+  START_MAP === HOME_MAP
+    ? Math.max(0, Number(params.get("visitors") ?? 4) - spots.length)
+    : 0;
 SPARE_SPOTS.slice(0, extra).forEach((at, i) => {
   spots.push({
     key: `spare${i}`,

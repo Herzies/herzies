@@ -4,6 +4,7 @@ import {
   type HerzieStats,
   type ItemUnit,
   isTownMapId,
+  MADAS_KEY,
   TOWER_GUARD_KEY,
 } from "@herzies/shared";
 import {
@@ -69,6 +70,10 @@ const TownCanvas = lazy(() => import("./town/TownCanvas"));
 
 const spotKey = (card: EventCard) =>
   `${card.type}-${card.eventId ?? card.status}`;
+
+/** Who stands only where a map gives them a spot of their own (never on a
+ * spare one), and doesn't bring the visitors along with them. */
+const PINNED: ReadonlySet<string> = new Set([TOWER_GUARD_KEY, MADAS_KEY]);
 
 /**
  * The Town as a place you walk around in third person: your own herzie on
@@ -225,21 +230,20 @@ export function TownWorld({
     if (Object.keys(map.spots).length === 0) return [];
     const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(map);
     // A map with visitors on it has a spot for one of them; the Tower
-    // Guard's alone (the Tower's door, say) brings only him.
-    const visitorMap = Object.keys(map.spots).some(
-      (k) => k !== TOWER_GUARD_KEY,
-    );
+    // Guard's or Madas's alone (the Tower's door, the Wilds' camp) brings
+    // only them.
+    const visitorMap = Object.keys(map.spots).some((k) => !PINNED.has(k));
     let spare = 0;
     return (
       cards
         // The boss isn't in town: it's in its cave (see CaveTimer).
         .filter((c) => c.type !== "boss_fight")
         .filter((c) => c.type !== "treat_trader" || c.status !== "idle")
-        // The Tower Guard stands only where a map gives him a spot (the
-        // map editor): never on a spare one. Everyone else only on a
-        // visitor map, and only with somewhere to stand.
+        // The Tower Guard and Madas stand only where a map gives them a
+        // spot (the map editor): never on a spare one. Everyone else only
+        // on a visitor map, and only with somewhere to stand.
         .filter((c) =>
-          c.type === TOWER_GUARD_KEY
+          PINNED.has(c.type)
             ? !!SPOTS[c.type]
             : visitorMap && (!!SPOTS[c.type] || SPARE_SPOTS.length > 0),
         )

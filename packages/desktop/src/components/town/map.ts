@@ -313,6 +313,7 @@ export const SPOT_NAMES: Record<string, string> = {
   pip: "Pip",
   nakata: "Nakata",
   skipper: "Blåmann",
+  madas: "Madas",
 };
 
 /** The centre of a cell, in world (x, z). */

@@ -1,5 +1,6 @@
 import {
   BOBOKU_KEY,
+  MADAS_KEY,
   MARKET_KEY,
   MEDEA_KEY,
   NAKATA_KEY,
@@ -133,6 +134,7 @@ const RESIDENTS = [
   PIP_KEY,
   NAKATA_KEY,
   SKIPPER_KEY,
+  MADAS_KEY,
   TOWER_GUARD_KEY,
 ];
 

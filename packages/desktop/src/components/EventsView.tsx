@@ -16,6 +16,8 @@ import {
   RARITY_COLORS as ITEM_RARITY_COLORS,
   ItemTypeIcon,
   isVisitorType,
+  MADAS_KEY,
+  MADAS_NAME,
   MARKET_KEY,
   MARKET_NAME,
   type MarketStall,
@@ -62,6 +64,7 @@ import ItemInspectOverlay, {
 } from "./ItemInspectOverlay";
 import { List } from "./List";
 import { LoadingSplash } from "./LoadingSplash";
+import { MadasPanel } from "./MadasPanel";
 import { MarketPanel } from "./MarketPanel";
 import { MerchantPanel } from "./MerchantPanel";
 import { NakataPanel } from "./NakataPanel";
@@ -896,6 +899,16 @@ function EventsViewImpl({
       openKey: SKIPPER_KEY,
       detail: "Skippers Sofia III",
     });
+    // And Madas, in the Wilds' safe camp, wherever a map gives him a spot.
+    cards.push({
+      type: MADAS_KEY,
+      title: MADAS_NAME,
+      description: null,
+      status: "live",
+      at: null,
+      openKey: MADAS_KEY,
+      detail: "Gone funny over gold",
+    });
     // Nearest in time first: what's on now, then what starts soonest, then
     // types with nothing on the calendar.
     const when = (c: EventCard) =>
@@ -1072,6 +1085,21 @@ function EventsViewImpl({
           backButton={back}
         >
           <NakataPanel equipped={equipped} paused={!active || !visible} />
+        </ScreenView>
+      );
+    }
+
+    if (selected === MADAS_KEY) {
+      return (
+        <ScreenView
+          inPanel={screenInPanel}
+          ownName
+          title={MADAS_NAME}
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+        >
+          <MadasPanel paused={!active || !visible} />
         </ScreenView>
       );
     }

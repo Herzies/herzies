@@ -245,6 +245,20 @@ export const MEDEA_RAMP = [
 ] as const;
 
 /**
+ * Madas, who wished for a golden touch and got it from the feet up. No item
+ * grants it: grubby, dusty grey-olive at the crown (what's still him),
+ * tarnishing through brass into bright gold at his feet.
+ */
+export const MADAS_RAMP = [
+  "#8C8778",
+  "#8F7F55",
+  "#B08A2E",
+  "#D4A017",
+  "#F5C518",
+  "#FFE066",
+] as const;
+
+/**
  * Boss ramp — the only ramp that is not built around a CREATURE_PALETTE hue,
  * because a boss is deliberately not a colour a herzie could hatch with.
  *

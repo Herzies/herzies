@@ -94,6 +94,12 @@ export const VISITOR_THEMES: Record<string, VisitorTheme> = {
     dim: "#a3bfd9",
     accent: "#7cc4ff",
   },
+  // Madas: tarnished gold, the dark of a hoard.
+  madas: {
+    background: "linear-gradient(90deg, #171104 0%, #3d2e08 55%, #100b02 100%)",
+    dim: "#d9c58f",
+    accent: "#f5c518",
+  },
   // Plutus: dusk violet, like his coat.
   market: {
     background: "linear-gradient(90deg, #120b26 0%, #2a1c52 55%, #0d081c 100%)",

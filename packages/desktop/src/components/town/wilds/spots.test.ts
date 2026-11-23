@@ -1,3 +1,4 @@
+import { MADAS_KEY } from "@herzies/shared";
 import { inWildsSafeCamp } from "@herzies/shared/wilds";
 import { outOfCamp, WILDS_CACHE_SPOTS } from "@herzies/shared/wilds-loot";
 import { describe, expect, it } from "vitest";
@@ -63,5 +64,16 @@ describe("the Wilds' loot spots", () => {
     const b = berthOf(wilds);
     expect(b).not.toBeNull();
     if (b) expect(Math.abs(z - b.pierStart.z)).toBeGreaterThan(3);
+  });
+
+  it("stands Madas on open ground in the camp, clear of the station", () => {
+    const at = wilds.spots[MADAS_KEY];
+    expect(at).toBeDefined();
+    if (!at) return;
+    const [x, z] = at;
+    expect(openGround(wilds, x, z)).toEqual([]);
+    expect(inWildsSafeCamp(x, z)).toBe(true);
+    for (const s of craftingStationsOf(wilds))
+      expect(Math.hypot(s.x - x, s.z - z)).toBeGreaterThan(3);
   });
 });

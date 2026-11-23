@@ -17,6 +17,7 @@ import {
   FYLLINGS_BLACK_RAMP,
   GOLD_RAMP,
   LIGHT,
+  MADAS_RAMP,
   MEDEA_RAMP,
   NAKATA_RAMP,
   NANDOR_RAMP,
@@ -4567,6 +4568,9 @@ export const TOWER_GUARD_SCHEME_ID = "npc-tower-guard";
 export const PIP_SCHEME_ID = "npc-pip";
 /** Colour-scheme key for Nakata's greys, the same arrangement again. */
 export const NAKATA_SCHEME_ID = "npc-nakata";
+/** Colour-scheme key for Madas's gold, creeping up him from the feet, the
+ * same arrangement again. */
+export const MADAS_SCHEME_ID = "npc-madas";
 
 const COLOR_SCHEMES: Record<string, readonly string[]> = {
   prism: RAINBOW_RAMP,
@@ -4591,6 +4595,7 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
   [TOWER_GUARD_SCHEME_ID]: TOWER_GUARD_RAMP,
   [PIP_SCHEME_ID]: PIP_RAMP,
   [NAKATA_SCHEME_ID]: NAKATA_RAMP,
+  [MADAS_SCHEME_ID]: MADAS_RAMP,
 };
 
 /** Skins that make the body see-through: the 3D view draws whatever the
