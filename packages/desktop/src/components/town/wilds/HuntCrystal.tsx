@@ -3,7 +3,7 @@ import { CylinderCollider } from "@react-three/rapier";
 import { Fragment, useEffect, useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
 import { ambient, inSeason } from "../ambient";
-import { cellCenter, groundY, objectAt, type TownMap } from "../map";
+import { groundY, type TownMap } from "../map";
 import { townSave } from "../runtime";
 import {
   CRADLE_GEOMETRY,
@@ -21,6 +21,10 @@ import {
   huntMotesMaterial,
   huntRingMaterial,
 } from "./huntCrystalModel";
+import {
+  huntCrystalsOf,
+  type HuntCrystalSpot as Spot,
+} from "./huntCrystalSpot";
 import { type CacheSpot, huntNow, useWildsLoot, wildsLoot } from "./loot";
 
 /**
@@ -31,35 +35,21 @@ import { type CacheSpot, huntNow, useWildsLoot, wildsLoot } from "./loot";
  * from the foot as it fills, turning quicker and glowing brighter the
  * fuller it gets. Full, the hunt's on: it flashes, a ring of gold rolls out
  * across the camp, it spins and blazes, and an arc of light leaps from it
- * over the trees to the cache, there till someone opens it. Then it goes
- * dull and starts again.
+ * toward the cache, stopping high over the trees short of it (the rest is
+ * yours to find), there till someone opens it. Then it goes dull and
+ * starts again.
  *
- * Painted on a map like any object (HUNT_CRYSTAL); the Wilds has one in
- * its safe camp. Its cradle is solid.
+ * Painted on a map like any object (see huntCrystalSpot.ts); the Wilds has
+ * one in its safe camp, and you can talk to it. Its cradle is solid.
  */
 
-/** The map char for a Hunt Crystal ("gold"). Painted with ` in the
- * editor. */
-export const HUNT_CRYSTAL = "G";
-
-type Spot = { x: number; y: number; z: number };
-
-/** Every Hunt Crystal on the map. */
-export function huntCrystalsOf(map: TownMap): Spot[] {
-  const out: Spot[] = [];
-  for (let row = 0; row < map.size; row++)
-    for (let col = 0; col < map.size; col++) {
-      if (objectAt(map, col, row) !== HUNT_CRYSTAL) continue;
-      const [x, z] = cellCenter(map, col, row);
-      out.push({ x, y: groundY(map, x, z), z });
-    }
-  return out;
-}
-
-/** How long the flash when it fills lasts, and the arc takes to reach the
- * cache (seconds). */
+/** How long the flash when it fills lasts, and the arc takes to draw
+ * itself out (seconds). */
 const BURST_SECONDS = 1.6;
 const GROW_SECONDS = 1.4;
+/** How far along its way to the cache the arc goes before it fades out,
+ * high over the trees: it shows the way, not the spot. */
+const ARC_REACH = 0.62;
 /** How far the ring rolls out when it fills (world units). */
 const RING_REACH = 16;
 /** Turns a second: still when it's dull, up to this full, and faster
@@ -69,7 +59,8 @@ const SPIN_HUNT = 7;
 /** Past this, it stops animating (still drawn). */
 const ANIMATE_REACH = 90;
 
-const cradleMaterial = inSeason(
+/** The cradle's stone, shared with the treasure crystals (WildsLoot). */
+export const cradleMaterial = inSeason(
   new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
 );
 
@@ -83,15 +74,19 @@ const uniforms: HuntUniforms = {
 };
 
 /** Eases the shared uniforms toward the room's word, once a frame (by
- * whichever crystal draws first). */
+ * whichever crystal draws first). The room's first word on arriving is
+ * taken at once: the crystal is as full as it is, not filling up as you
+ * step ashore. */
 let easedAt = -1;
+let heard = false;
 function ease(frame: number, dt: number) {
   if (frame === easedAt) return;
   easedAt = frame;
   const now = performance.now();
-  const k = 1 - Math.exp(-dt * 3);
-  uniforms.uCharge.value += (huntNow(now) - uniforms.uCharge.value) * k;
   const on = wildsLoot.cache ? 1 : 0;
+  const k = wildsLoot.hunt && !heard ? 1 : 1 - Math.exp(-dt * 3);
+  heard = wildsLoot.hunt !== null;
+  uniforms.uCharge.value += (huntNow(now) - uniforms.uCharge.value) * k;
   uniforms.uHunt.value += (on - uniforms.uHunt.value) * k;
   const since = (now - wildsLoot.huntOnAt) / 1000;
   uniforms.uBurst.value =
@@ -193,9 +188,10 @@ function OneHuntCrystal({ spot }: { spot: Spot }) {
   );
 }
 
-/** The arc of light from a crystal at `spot` to the cache out. It draws
- * itself out from the crystal when the cache turns up while you're there
- * (one already out is simply there). */
+/** The arc of light from a crystal at `spot` toward the cache out,
+ * stopping in the air ARC_REACH of the way there. It draws itself out
+ * from the crystal when the cache turns up while you're there (one already
+ * out is simply there). */
 function HuntArc({
   spot,
   cache,
@@ -228,14 +224,15 @@ function HuntArc({
       from === null
         ? 1
         : Math.min(1, (performance.now() - from) / 1000 / GROW_SECONDS);
-    u.uGrow.value = grow * 1.04;
+    u.uGrow.value = grow * ARC_REACH;
     u.uOn.value = uniforms.uHunt.value;
   });
   return <mesh geometry={geometry} material={material} frustumCulled={false} />;
 }
 
-/** Every Hunt Crystal on the map (its cradle solid), and while a cache is
- * out, its arc. */
+/** Every Hunt Crystal on the map, and while a cache is out, its arc.
+ * Drawn outside the physics, so it's there seen from a sky ship; what's
+ * solid is HuntCrystalColliders. */
 export function HuntCrystals({ map }: { map: TownMap }) {
   useWildsLoot();
   const spots = useMemo(() => huntCrystalsOf(map), [map]);
@@ -243,13 +240,21 @@ export function HuntCrystals({ map }: { map: TownMap }) {
   return spots.map((s) => (
     <Fragment key={`${s.x},${s.z}`}>
       <OneHuntCrystal spot={s} />
-      <CylinderCollider
-        args={[0.5, HUNT_DAIS_R * 0.9]}
-        position={[s.x, s.y + 0.5, s.z]}
-      />
       {cache ? (
         <HuntArc key={cache.id} spot={s} cache={cache} map={map} />
       ) : null}
     </Fragment>
+  ));
+}
+
+/** Every Hunt Crystal's cradle, solid. */
+export function HuntCrystalColliders({ map }: { map: TownMap }) {
+  const spots = useMemo(() => huntCrystalsOf(map), [map]);
+  return spots.map((s) => (
+    <CylinderCollider
+      key={`${s.x},${s.z}`}
+      args={[0.5, HUNT_DAIS_R * 0.9]}
+      position={[s.x, s.y + 0.5, s.z]}
+    />
   ));
 }

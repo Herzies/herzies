@@ -8,49 +8,20 @@ import {
   useChatter,
 } from "@herzies/shared";
 import { HerzieView } from "@herzies/shared/gl";
-import { useEffect, useState } from "react";
+import { useRef } from "react";
 import { useHerzieStage } from "../lib/overlayStage";
-import { useWildsService, useWildsUpcoming } from "./town/airship/service";
-import { skyNow } from "./town/airship/skyClock";
-import { huntNow, useWildsLoot, wildsLoot } from "./town/wilds/loot";
-import { madasLines } from "./town/wilds/madas";
-
-/** How often his lines are worked out again: the countdown in them is to
- * the second (useChatter keeps them through a ref, so this doesn't restart
- * him mid-sentence). */
-const TICK_MS = 1000;
+import { MADAS_LINES } from "./town/wilds/madas";
 
 /**
- * Madas, in the Wilds' safe camp: gone funny over gold, but he knows where
- * the cache is and how near the Hunt Crystal is to bringing out the next
- * (what the room says, when you're there to hear it).
+ * Madas, in the Wilds' safe camp: gone funny over gold, and all he does is
+ * explain the treasure hunt, one line after another in order (a click
+ * moves him on), round again from the top once he's done.
  */
 export function MadasPanel({ paused }: { paused: boolean }) {
-  const service = useWildsService();
-  const upcoming = useWildsUpcoming();
-  useWildsLoot();
-  const [now, setNow] = useState(() => skyNow());
-  useEffect(() => {
-    if (paused) return;
-    setNow(skyNow());
-    const id = setInterval(() => setNow(skyNow()), TICK_MS);
-    return () => clearInterval(id);
-  }, [paused]);
-  const hunt = wildsLoot.hunt;
-  const { line, typed, advance } = useChatter(
-    madasLines(
-      service,
-      upcoming,
-      wildsLoot.cache,
-      hunt && {
-        charge: huntNow(performance.now()),
-        rate: hunt.rate,
-        listeners: hunt.listeners,
-      },
-      now,
-    ),
-    !paused,
-  );
+  const next = useRef(0);
+  const { line, typed, advance } = useChatter(MADAS_LINES, !paused, (lines) => [
+    lines[next.current++ % lines.length],
+  ]);
   const { stage: onStage } = useHerzieStage();
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">

@@ -79,6 +79,7 @@ import type { RootState } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { CraftingPanel } from "./components/CraftingPanel";
+import { HuntCrystalPanel } from "./components/HuntCrystalPanel";
 import { CrystalPanel } from "./components/CrystalPanel";
 import { Notices } from "./components/Notices";
 import { NowPlayingBox } from "./components/NowPlayingBox";
@@ -135,6 +136,7 @@ import TownCanvas from "./components/town/TownCanvas";
 import { setVitals } from "./components/town/vitals";
 import { weatherOverride } from "./components/town/weather";
 import { CRAFTING_KEY } from "./components/town/wilds/craftingSpot";
+import { HUNT_CRYSTAL_KEY } from "./components/town/wilds/huntCrystalSpot";
 import {
   handleWildsLootMessage,
   huntNow,
@@ -1112,6 +1114,7 @@ function Sandbox() {
   const [crystalOpen, setCrystalOpen] = useState(
     params.get("crystalOpen") === "1",
   );
+  const [huntOpen, setHuntOpen] = useState(params.get("huntOpen") === "1");
   const [craftingOpen, setCraftingOpen] = useState(
     params.get("craftingOpen") === "1",
   );
@@ -1190,6 +1193,7 @@ function Sandbox() {
           console.log("[town-sandbox] open", key);
           if (key === CRYSTAL_KEY) setCrystalOpen(true);
           if (key === CRAFTING_KEY) setCraftingOpen(true);
+          if (key === HUNT_CRYSTAL_KEY) setHuntOpen(true);
         }}
         onNearChange={(s) => console.log("[town-sandbox] near", s?.key ?? null)}
       />
@@ -1227,6 +1231,21 @@ function Sandbox() {
             type="button"
             className="btn relative mt-2"
             onClick={() => setCraftingOpen(false)}
+          >
+            Close
+          </button>
+        </div>
+      ) : null}
+      {huntOpen ? (
+        <div className="absolute top-12 right-3 z-40 flex w-[300px] flex-col rounded-xl border border-white/15 p-3">
+          <div className="pointer-events-none absolute inset-0 rounded-xl bg-black/70 backdrop-blur-md" />
+          <SandboxOverlayStage>
+            <HuntCrystalPanel paused={false} />
+          </SandboxOverlayStage>
+          <button
+            type="button"
+            className="btn mt-2"
+            onClick={() => setHuntOpen(false)}
           >
             Close
           </button>

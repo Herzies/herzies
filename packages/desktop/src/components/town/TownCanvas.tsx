@@ -98,7 +98,7 @@ import {
 import type { Champion } from "./Statues";
 import { Supersample } from "./Supersample";
 import { TowerChest } from "./TowerChest";
-import { Visitor } from "./Visitor";
+import { Visitor, VisitorBody } from "./Visitor";
 import { DiscVFX } from "./vfx/DiscVFX";
 import { DomeVFX } from "./vfx/DomeVFX";
 import { HasteVFX } from "./vfx/HasteVFX";
@@ -109,13 +109,21 @@ import { SlashVFX } from "./vfx/SlashVFX";
 import { SonicVFX } from "./vfx/SonicVFX";
 import { StunVFX } from "./vfx/StunVFX";
 import { mapId, World } from "./World";
-import { CraftingStation } from "./wilds/CraftingStation";
-import { HuntCrystals } from "./wilds/HuntCrystal";
+import {
+  CraftingStation,
+  CraftingStationColliders,
+} from "./wilds/CraftingStation";
 import {
   CRAFTING_KEY,
   craftingNear,
   craftingStationsOf,
 } from "./wilds/craftingSpot";
+import { HuntCrystalColliders, HuntCrystals } from "./wilds/HuntCrystal";
+import {
+  HUNT_CRYSTAL_KEY,
+  huntCrystalNear,
+  huntCrystalsOf,
+} from "./wilds/huntCrystalSpot";
 import {
   asked,
   cardInReach,
@@ -144,7 +152,8 @@ export type TownCanvasProps = {
   onNearChange: (spot: TownSpot | null) => void;
   /** What E would do at a bench or board right now — sit on one nearby,
    * stand up off it, read the bulletin board, the Crystal, the Crafting
-   * Station on the Wilds — when that changes (null: nothing). */
+   * Station or the Hunt Crystal on the Wilds — when that changes (null:
+   * nothing). */
   onBenchChange?: (prompt: BenchPrompt | null) => void;
   /** The island a portal nearby leads to (E steps in), when that changes
    * (null: none near). */
@@ -194,6 +203,7 @@ export type BenchPrompt =
   | "attune"
   | "upgrade"
   | "crafting"
+  | "hunt"
   | { pickup: string; name: string };
 
 /**
@@ -235,8 +245,9 @@ export default function TownCanvas(props: TownCanvasProps) {
   );
   // A debug override of PIXEL_SCALE (Settings, dev builds).
   const pixelSize = useTownPixelSize();
-  // Visitors stand on islands with spots for them.
-  const spots = Object.keys(map.spots).length > 0 ? props.spots : [];
+  // Visitors stand on islands with spots for them: the island drawn, so
+  // from a sky ship they're already there as you come in.
+  const spots = Object.keys(view.spots).length > 0 ? props.spots : [];
   // At Home nothing's aimed or cast (and aim mode ends on the way in).
   const { home } = useHomeMode();
   // Supersampled (Settings > Graphics): drawn at twice the resolution and
@@ -271,7 +282,8 @@ export default function TownCanvas(props: TownCanvasProps) {
         <Systems
           {...props}
           map={map}
-          spots={spots}
+          // Aboard, where you stand is the deck's: nobody to talk to.
+          spots={aboard === null ? spots : []}
           input={input}
           followsSave={!props.map}
         />
@@ -289,6 +301,24 @@ export default function TownCanvas(props: TownCanvasProps) {
             shadows={shadows}
           />
           {!view.room && <SkyShips origin={view.origin} />}
+          {/* What stands on the island, drawn with it: seen from a sky ship
+              as you come in, and the same things (not made again) once you
+              step ashore. What's solid of them is in the physics below. */}
+          {spots.map((s) => (
+            <Visitor
+              key={s.key}
+              spot={s}
+              ground={groundY(view, s.at.x, s.at.z)}
+              map={view}
+              onOpen={props.onOpen}
+              bare={aboard !== null}
+            />
+          ))}
+          {view.id === "wilds" && <SafeCamp map={view} />}
+          {/* Crafting Stations and Hunt Crystals, wherever they're
+              painted. */}
+          <CraftingStation map={view} />
+          <HuntCrystals map={view} />
           <Physics
             // A new island (or a ship's deck): a new physics world, with
             // only its colliders.
@@ -319,15 +349,14 @@ export default function TownCanvas(props: TownCanvasProps) {
               title={props.playerTitle}
               deck={aboard}
             />
-            {spots.map((s) => (
-              <Visitor
-                key={s.key}
-                spot={s}
-                ground={groundY(map, s.at.x, s.at.z)}
-                map={map}
-                onOpen={props.onOpen}
-              />
-            ))}
+            {aboard === null &&
+              spots.map((s) => (
+                <VisitorBody
+                  key={s.key}
+                  spot={s}
+                  ground={groundY(map, s.at.x, s.at.z)}
+                />
+              ))}
             <Combat
               map={map}
               stats={props.stats ?? NO_STATS}
@@ -352,18 +381,14 @@ export default function TownCanvas(props: TownCanvasProps) {
             {/* The bossroom's loot; anywhere, for the dev drop (and a
                 Wilds cache's). */}
             <LootDrops />
-            {/* The Wilds' dropped cards and caches, and the safe camp's
-                edge. */}
-            {map.id === "wilds" && (
+            {/* The Wilds' dropped cards and caches. */}
+            {map.id === "wilds" && <WildsLoot map={map} />}
+            {!map.ship && (
               <>
-                <WildsLoot map={map} />
-                <SafeCamp map={map} />
+                <CraftingStationColliders map={map} />
+                <HuntCrystalColliders map={map} />
               </>
             )}
-            {/* Crafting Stations and Hunt Crystals, wherever they're
-                painted. */}
-            <CraftingStation map={map} />
-            <HuntCrystals map={map} />
             {/* What drops while you listen, around you (see HomeDrops). */}
             {props.homeDrops && !map.combat && !map.ship && (
               <HomeDrops map={map} />
@@ -470,6 +495,9 @@ function Systems({
   const stations = useMemo(() => (map ? craftingStationsOf(map) : []), [map]);
   /** At a Crafting Station. */
   const crafting = useRef(false);
+  const huntCrystals = useMemo(() => (map ? huntCrystalsOf(map) : []), [map]);
+  /** By a Hunt Crystal (to talk to it). */
+  const hunt = useRef(false);
   /** The card on the Wilds E would pick up, if any. */
   const pickup = useRef<GroundCard | null>(null);
   // A shut portal (a sealed cave, the Tower out of season, a floor not
@@ -532,6 +560,9 @@ function Systems({
     else if (crafting.current) {
       leaveCombat();
       onOpen(CRAFTING_KEY);
+    } else if (hunt.current) {
+      leaveCombat();
+      onOpen(HUNT_CRYSTAL_KEY);
     } else if (seat.current) townLive.seat = seat.current;
   };
   const enter = (p: Portal) => {
@@ -686,6 +717,14 @@ function Systems({
       !crystal.current &&
       !board.current &&
       craftingNear(stations, townSave.x, townSave.z);
+    hunt.current =
+      !closest &&
+      !portal.current &&
+      !townLive.seat &&
+      !crystal.current &&
+      !board.current &&
+      !crafting.current &&
+      huntCrystalNear(huntCrystals, townSave.x, townSave.z);
     if (
       !closest &&
       !portal.current &&
@@ -693,6 +732,7 @@ function Systems({
       !crystal.current &&
       !board.current &&
       !crafting.current &&
+      !hunt.current &&
       benches.length > 0
     ) {
       sitting.n = 0;
@@ -728,9 +768,11 @@ function Systems({
               ? "read"
               : crafting.current
                 ? "crafting"
-                : seat.current
-                  ? "sit"
-                  : null;
+                : hunt.current
+                  ? "hunt"
+                  : seat.current
+                    ? "sit"
+                    : null;
     const was = prompt.current;
     const same =
       next === "pickup"

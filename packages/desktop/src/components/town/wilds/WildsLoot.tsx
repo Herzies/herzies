@@ -1,17 +1,28 @@
 import { RARITY_COLORS } from "@herzies/shared";
 import { itemVoxelMeshes, lootPillarMaterial } from "@herzies/shared/gl";
-import { WILDS_SAFE_CAMP } from "@herzies/shared/wilds";
 import {
   WILDS_CACHE_HOLD_MS,
   WILDS_CACHE_HOLD_RADIUS,
 } from "@herzies/shared/wilds-loot";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
+import { CylinderCollider } from "@react-three/rapier";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
+import { ambient } from "../ambient";
 import { LOOT, lootItem } from "../combat/loot";
-import { LootChest } from "../LootChest";
 import { groundY, type TownMap } from "../map";
+import { cradleMaterial } from "./HuntCrystal";
+import {
+  CRADLE_GEOMETRY,
+  HUNT_CRYSTAL_GEOMETRY,
+  HUNT_DAIS_R,
+  HUNT_FLOAT_Y,
+  HUNT_MOTE_GEOMETRY,
+  type HuntUniforms,
+  huntCrystalMaterial,
+  huntMotesMaterial,
+} from "./huntCrystalModel";
 import {
   type CacheSpot,
   type GroundCard,
@@ -26,9 +37,9 @@ import {
  * The Wilds' loot in the world (see loot.ts for what it is): every card a
  * herzie dropped where it fell, turning over the ground in its rarity's
  * light once it's yours to take (grey and dark while it's someone else's
- * first, with how long that lasts), and the cache, a chest under a beam
- * of gold seen from anywhere on the island, in a ring on the ground: stand
- * in it long enough and it's yours. The ring fills round in gold as you
+ * first, with how long that lasts), and the cache, a treasure crystal the
+ * Hunt Crystal's light points toward, in a ring on the ground: stand in
+ * it long enough and it's yours. The ring fills round in gold as you
  * hold it and in red as someone else does, and flashes red while it's
  * contested (the HUD says so too: see CacheHud). A card is picked up with
  * E (the prompt: see TownCanvas), or left lying; what a cache holds
@@ -143,7 +154,7 @@ function DroppedCard({ drop, map }: { drop: GroundCard; map: TownMap }) {
   );
 }
 
-/** The hold ring's gold: the chest's beam's (LootChest). */
+/** The hold ring's gold. */
 const GOLD = new THREE.Color("#ffd36a");
 
 /** The hold ring's bands, inner and outer radius (world units): its line
@@ -284,31 +295,59 @@ function holdRingMaterial(): THREE.ShaderMaterial {
   });
 }
 
+/** The treasure crystal's size against the Hunt Crystal's, and how long
+ * it takes to rise out of the ground. */
+const TREASURE_SCALE = 0.8;
+const POP_MS = 600;
+
+/**
+ * The cache: a treasure crystal, a small Hunt Crystal in a small cradle,
+ * standing in its hold ring. Grey stone with a glint now and then (look
+ * for it), it fills with gold from the foot as it's held (the furthest
+ * hold), spinning up as it fills; opened, it's gone and its loot fountains
+ * out (LootDrops). Its cradle is solid.
+ */
 function Cache({ cache, map }: { cache: CacheSpot; map: TownMap }) {
   const ground = groundY(map, cache.x, cache.z);
-  // Facing the camp: whoever comes out of it sees the lock.
-  const yaw = Math.atan2(
-    WILDS_SAFE_CAMP.x - cache.x,
-    WILDS_SAFE_CAMP.z - cache.z,
-  );
   const ring = useMemo(() => holdRingMaterial(), []);
   const ringGeometry = useMemo(
     () => holdRingGeometry(map, cache.x, cache.z),
     [map, cache.x, cache.z],
   );
+  const parts = useMemo(() => {
+    const u: HuntUniforms = {
+      uTime: ambient.uTime,
+      uCharge: { value: 0 },
+      uHunt: { value: 0 },
+      uBurst: { value: 0 },
+    };
+    return {
+      u,
+      crystal: huntCrystalMaterial(u),
+      motes: huntMotesMaterial(u),
+      body: null as THREE.Group | null,
+      spin: null as THREE.Group | null,
+      angle: 0,
+    };
+  }, []);
   useEffect(() => () => ring.dispose(), [ring]);
   useEffect(() => () => ringGeometry.dispose(), [ringGeometry]);
-  /** The lid lifts as a hold fills (the furthest one). */
-  const lift = useRef(0);
-  useFrame(({ clock }) => {
+  useEffect(
+    () => () => {
+      parts.crystal.dispose();
+      parts.motes.dispose();
+    },
+    [parts],
+  );
+  useFrame(({ clock }, dt) => {
     const t = clock.elapsedTime;
     const now = performance.now();
-    const pop = Math.min(1, (now - cache.at) / 600);
+    const pop = Math.min(1, (now - cache.at) / POP_MS);
     // Who's holding it: you (gold, just inside the line) and the furthest
     // of anyone else (red, inside that), counted on from the room's word.
     const mine = heldBy(wildsLoot.you, now);
     const theirs = heldByOthers(wildsLoot.you, now);
-    lift.current = Math.max(mine ?? 0, theirs ?? 0) / WILDS_CACHE_HOLD_MS;
+    const held = Math.max(mine ?? 0, theirs ?? 0) / WILDS_CACHE_HOLD_MS;
     const u = ring.uniforms;
     u.uMineFill.value = (mine ?? 0) / WILDS_CACHE_HOLD_MS;
     u.uMineOn.value = mine === null ? 0 : 1;
@@ -319,16 +358,56 @@ function Cache({ cache, map }: { cache: CacheSpot; map: TownMap }) {
       : 0;
     u.uLineA.value =
       (mine !== null ? 0.95 : 0.55 + Math.sin(t * 2) * 0.1) * pop;
+    // The crystal: gold to the hold (eased, so a word from the room
+    // glides), a glint every few seconds while nobody's holding it.
+    const c = parts.u;
+    c.uCharge.value += (held - c.uCharge.value) * (1 - Math.exp(-dt * 8));
+    c.uBurst.value = held > 0 ? 0 : 0.35 * Math.max(0, Math.sin(t * 1.7)) ** 16;
+    const fill = c.uCharge.value;
+    parts.angle += Math.min(dt, 0.1) * (0.4 + 4 * fill * fill);
+    if (parts.body) parts.body.scale.setScalar(pop * TREASURE_SCALE);
+    if (parts.spin) {
+      parts.spin.rotation.y = parts.angle;
+      parts.spin.position.y = HUNT_FLOAT_Y + Math.sin(t * 1.3) * 0.08;
+    }
   });
   return (
     <>
-      <LootChest
-        x={cache.x}
-        z={cache.z}
-        ground={ground}
-        yaw={yaw}
-        born={cache.at}
-        lift={lift}
+      <group
+        ref={(g) => {
+          parts.body = g;
+        }}
+        position={[cache.x, ground, cache.z]}
+        scale={0}
+      >
+        <mesh
+          geometry={CRADLE_GEOMETRY}
+          material={cradleMaterial}
+          castShadow
+          receiveShadow
+        />
+        <group
+          ref={(g) => {
+            parts.spin = g;
+          }}
+          position-y={HUNT_FLOAT_Y}
+        >
+          <mesh
+            geometry={HUNT_CRYSTAL_GEOMETRY}
+            material={parts.crystal}
+            castShadow
+          />
+        </group>
+        <points
+          geometry={HUNT_MOTE_GEOMETRY}
+          material={parts.motes}
+          position-y={HUNT_FLOAT_Y}
+          frustumCulled={false}
+        />
+      </group>
+      <CylinderCollider
+        args={[0.5 * TREASURE_SCALE, HUNT_DAIS_R * 0.9 * TREASURE_SCALE]}
+        position={[cache.x, ground + 0.5 * TREASURE_SCALE, cache.z]}
       />
       {/* In the island's frame: its points stand on the ground themselves. */}
       <mesh geometry={ringGeometry} material={ring} />

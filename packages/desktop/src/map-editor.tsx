@@ -62,7 +62,7 @@ import {
   CRAFTING_STATION,
   craftingFacing,
 } from "./components/town/wilds/craftingSpot";
-import { HUNT_CRYSTAL } from "./components/town/wilds/HuntCrystal";
+import { HUNT_CRYSTAL } from "./components/town/wilds/huntCrystalSpot";
 
 // The Crystal is drawn here even while the server has it off.
 showCrystalAlways();

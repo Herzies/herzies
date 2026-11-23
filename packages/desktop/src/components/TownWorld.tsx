@@ -33,6 +33,7 @@ import {
 } from "./PlayerBars";
 import { type EventCard, formatIn, isDown } from "./TownScene";
 import { TownVitals } from "./TownVitals";
+import { useAboardNear } from "./town/airship/frames";
 import { SkyDockHud } from "./town/airship/SkyDockHud";
 import { BossHud, MusicBonus } from "./town/BossHud";
 import { BossResults } from "./town/BossResults";
@@ -53,6 +54,7 @@ import type { TownMap } from "./town/map";
 import { markMet } from "./town/met";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
 import {
+  mapById,
   spotsOf,
   type TownSpot,
   townLive,
@@ -226,13 +228,18 @@ export function TownWorld({
       setCave({ kind: "soon", startsAt: at });
     else setCave({ kind: "sealed" });
   }, [bossStatus, bossAt, bossDown]);
+  // Aboard a sky ship, the island it's nearest is the one drawn (see
+  // TownCanvas), and its visitors with it: they're there before you step
+  // ashore, not made the moment you do.
+  const aboardNear = useAboardNear();
+  const island = map.ship ? mapById(aboardNear) : map;
   const spots = useMemo<TownSpot[]>(() => {
-    if (Object.keys(map.spots).length === 0) return [];
-    const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(map);
+    if (Object.keys(island.spots).length === 0) return [];
+    const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(island);
     // A map with visitors on it has a spot for one of them; the Tower
     // Guard's or Madas's alone (the Tower's door, the Wilds' camp) brings
     // only them.
-    const visitorMap = Object.keys(map.spots).some((k) => !PINNED.has(k));
+    const visitorMap = Object.keys(island.spots).some((k) => !PINNED.has(k));
     let spare = 0;
     return (
       cards
@@ -266,7 +273,7 @@ export function TownWorld({
           };
         })
     );
-  }, [cards, map]);
+  }, [cards, island]);
 
   const equippedKey = JSON.stringify(player.equipped ?? null);
   // Ground accessories (the boombox) belong to the herzie's Home, not to a
@@ -563,7 +570,9 @@ export function TownWorld({
                     ? "Upgrade crystal"
                     : bench === "crafting"
                       ? "Crafting Station"
-                      : "Stand up"}{" "}
+                      : bench === "hunt"
+                        ? "Talk to the Hunt Crystal"
+                        : "Stand up"}{" "}
           <span className="text-text-dim">[E]</span>
         </button>
       ) : null}

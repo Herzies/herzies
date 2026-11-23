@@ -343,9 +343,10 @@ export const HUNT_RING_GEOMETRY = new THREE.PlaneGeometry(2, 2).rotateX(
 const ARC_RISE = 14;
 const ARC_RISE_PER = 0.18;
 
-/** The arc of light from the crystal to the cache, `from` and `to` in the
- * island's frame: up out of the crystal, over the trees, down onto the
- * chest. Its tube's u runs along it, crystal (0) to cache (1). */
+/** The way from the crystal to the cache, `from` and `to` in the island's
+ * frame: up out of the crystal, over the trees, down onto the cache. Its
+ * tube's u runs along it, crystal (0) to cache (1); the light only ever
+ * goes part of the way (see huntArcMaterial). */
 export function huntArcGeometry(
   from: THREE.Vector3,
   to: THREE.Vector3,
@@ -359,10 +360,10 @@ export function huntArcGeometry(
   return new THREE.TubeGeometry(curve, 96, 0.22, 6, false);
 }
 
-/** The arc's light: pulses streaming along it from the crystal to the
- * cache, drawn out from the crystal (`uGrow`, 0 to 1) when it fills and
- * faded (`uOn`) when the hunt's over. Soft at its sides, like the
- * cache's beam. Additive, never written to depth. */
+/** The arc's light: pulses streaming along it away from the crystal,
+ * drawn out from it (to `uGrow` along the way, 0 to 1) when it fills,
+ * fading out over its last stretch, and faded (`uOn`) when the hunt's
+ * over. Soft at its sides. Additive, never written to depth. */
 export function huntArcMaterial(u: HuntUniforms): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     uniforms: {
@@ -391,8 +392,8 @@ export function huntArcMaterial(u: HuntUniforms): THREE.ShaderMaterial {
       void main() {
         float flow = fract(vAlong * 9.0 - uTime * 1.4);
         float pulse = smoothstep(0.0, 0.12, flow) * (1.0 - smoothstep(0.12, 0.45, flow));
-        float head = 1.0 - smoothstep(uGrow - 0.03, uGrow, vAlong);
-        float ends = smoothstep(0.0, 0.03, vAlong) * (1.0 - smoothstep(0.97, 1.0, vAlong));
+        float head = 1.0 - smoothstep(uGrow - 0.12, uGrow, vAlong);
+        float ends = smoothstep(0.0, 0.03, vAlong);
         float a = (0.3 + 0.7 * pulse) * head * ends * uOn * vFacing * vFacing;
         gl_FragColor = vec4(mix(uGold, vec3(1.0), pulse * 0.5) * a, 1.0);
         #include <colorspace_fragment>

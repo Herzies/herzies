@@ -58,6 +58,7 @@ import { BossFightHelp, BossFightPanel, makeDebugBoss } from "./BossFightPanel";
 import { BulletinPanel } from "./BulletinPanel";
 import { CraftingPanel } from "./CraftingPanel";
 import { CrystalPanel } from "./CrystalPanel";
+import { HuntCrystalPanel } from "./HuntCrystalPanel";
 import ItemInspectOverlay, {
   INSPECT_ORIGIN_ATTR,
   inspectOrigin,
@@ -79,6 +80,7 @@ import { setWildsService, setWildsUpcoming } from "./town/airship/service";
 import { BULLETIN_KEY } from "./town/Boards";
 import { setTowerOpen } from "./town/gates";
 import { CRAFTING_KEY } from "./town/wilds/craftingSpot";
+import { HUNT_CRYSTAL_KEY } from "./town/wilds/huntCrystalSpot";
 import { wildsFeed } from "./town/wildsFeed";
 import { View } from "./View";
 import { VisitorHelp } from "./VisitorHelp";
@@ -1149,6 +1151,21 @@ function EventsViewImpl({
             herzieClass={playerClass}
             onLog={onLog}
           />
+        </ScreenView>
+      );
+    }
+
+    if (selected === HUNT_CRYSTAL_KEY) {
+      return (
+        <ScreenView
+          inPanel={screenInPanel}
+          ownName
+          title="The Hunt Crystal"
+          colour="yellow"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+        >
+          <HuntCrystalPanel paused={!active || !visible} />
         </ScreenView>
       );
     }

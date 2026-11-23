@@ -13,7 +13,7 @@ import {
 } from "../map";
 import { TOWN_MAPS_LOCAL } from "../maps";
 import { CRAFTING_STATION, craftingStationsOf } from "./craftingSpot";
-import { HUNT_CRYSTAL, huntCrystalsOf } from "./HuntCrystal";
+import { HUNT_CRYSTAL, huntCrystalsOf } from "./huntCrystalSpot";
 
 const wilds = TOWN_MAPS_LOCAL.get("wilds") as TownMap;
 

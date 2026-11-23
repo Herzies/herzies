@@ -1,13 +1,14 @@
 import { CuboidCollider } from "@react-three/rapier";
-import { Fragment, useEffect, useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type { TownMap } from "../map";
 import { craftingStationsOf } from "./craftingSpot";
 import { BENCH_HALF, workbenchGeometry, workbenchMaterial } from "./models";
 
 /** Every Crafting Station's workbench on the map (see craftingSpot.ts),
  * turned to face its way. They share one geometry and material (the
- * see-through dither is per pixel, not per bench). Solid: you work at one
- * from in front. */
+ * see-through dither is per pixel, not per bench). Drawn outside the
+ * physics (so it's there seen from a sky ship); what's solid is
+ * CraftingStationColliders. */
 export function CraftingStation({ map }: { map: TownMap }) {
   const stations = useMemo(() => craftingStationsOf(map), [map]);
   const parts = useMemo(
@@ -22,20 +23,27 @@ export function CraftingStation({ map }: { map: TownMap }) {
     [parts],
   );
   return stations.map((s) => (
-    <Fragment key={`${s.x},${s.z}`}>
-      <mesh
-        geometry={parts.geometry}
-        material={parts.material}
-        position={[s.x, s.y, s.z]}
-        rotation={[0, s.yaw, 0]}
-        castShadow
-        receiveShadow
-      />
-      <CuboidCollider
-        args={[BENCH_HALF.x, 0.5, BENCH_HALF.z]}
-        position={[s.x, s.y + 0.5, s.z]}
-        rotation={[0, s.yaw, 0]}
-      />
-    </Fragment>
+    <mesh
+      key={`${s.x},${s.z}`}
+      geometry={parts.geometry}
+      material={parts.material}
+      position={[s.x, s.y, s.z]}
+      rotation={[0, s.yaw, 0]}
+      castShadow
+      receiveShadow
+    />
+  ));
+}
+
+/** Every Crafting Station's bench, solid: you work at one from in front. */
+export function CraftingStationColliders({ map }: { map: TownMap }) {
+  const stations = useMemo(() => craftingStationsOf(map), [map]);
+  return stations.map((s) => (
+    <CuboidCollider
+      key={`${s.x},${s.z}`}
+      args={[BENCH_HALF.x, 0.5, BENCH_HALF.z]}
+      position={[s.x, s.y + 0.5, s.z]}
+      rotation={[0, s.yaw, 0]}
+    />
   ));
 }
