@@ -71,7 +71,7 @@ export const WILDS_RECIPES: readonly WildsRecipe[] = [
   {
     id: "wildwood-lute",
     base: "lute",
-    bits: { tonewood: 16, "sky-string": 8, "storm-hide": 3 },
+    bits: { tonewood: 12, "sky-string": 8, "storm-hide": 4 },
   },
   {
     id: "stormcut-discs",
