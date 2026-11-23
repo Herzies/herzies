@@ -8,14 +8,14 @@ import {
 } from "../map";
 
 /**
- * Crafting Stations: where you make a Wilds instrument out of your class's
- * own and bits, and tune one with bits. Painted on any map like any other
- * object (CRAFTING_STATION); the Wilds has one in its safe camp by the Sky
- * Dock. Walk up to any of them and press E for the one window
- * (CraftingPanel); the crafting and tuning themselves are the web API's, so
- * where the stations stand is only where the app offers them. The bench
- * itself is CraftingStation.tsx; this is what the app around the Town
- * needs, without three.js.
+ * Crafting Stations: where you make any class's Wilds instrument out of
+ * that class's own and bits, and tune one with bits. Painted on any map
+ * like any other object (CRAFTING_STATION); the Wilds has one in its safe
+ * camp by the Sky Dock. Walk up to any of them and press E for the one
+ * window (CraftingPanel); the crafting and tuning themselves are the web
+ * API's, so where the stations stand is only where the app offers them.
+ * The bench itself is CraftingStation.tsx; this is what the app around
+ * the Town needs, without three.js.
  */
 
 /** The map char for a Crafting Station ("workbench"). Painted with \ in

@@ -31,13 +31,21 @@ import { Tooltip } from "./Tooltip";
 type Inspecting = { itemId: string; level: number; origin?: string };
 type OnInspect = (target: Inspecting) => void;
 
+/** The window's two tabs. */
+type Tab = "craft" | "tune";
+const TABS: { id: Tab; name: string }[] = [
+  { id: "craft", name: "Craft" },
+  { id: "tune", name: "Tune" },
+];
+
 /**
  * The Crafting Station's window, opened at any Crafting Station's bench (the
- * Wilds' safe camp has one; see town/wilds/craftingSpot.ts): make your
- * class's Wilds instrument out of its own and bits, and tune any instrument
- * you have with bits. Laid out like the Crystal's (CrystalPanel): the name,
- * a line, then each thing to do with its cost and its one button; your bits
- * at the foot, as a stall shows your coins.
+ * Wilds' safe camp has one; see town/wilds/craftingSpot.ts), in two tabs:
+ * Craft (first) makes any class's Wilds instrument out of that class's own
+ * and bits, yours first; Tune tunes any instrument you have with bits.
+ * Laid out like the Crystal's (CrystalPanel): the name, a line, the tabs,
+ * then each thing to do with its cost and its one button; your bits at the
+ * foot, as a stall shows your coins.
  *
  * Every card named here — what a recipe makes and what from, each bit in a
  * cost, the instruments to tune, your bits — opens Inspect on a click, as a
@@ -56,11 +64,11 @@ export function CraftingPanel({
 }: {
   /** Every copy you own. */
   units: readonly ItemUnit[];
-  /** Your class: only its recipes are shown (all of them, before you've
-   * chosen one). */
+  /** Your class: its recipe comes first (any class may make any). */
   herzieClass: HerzieClass | null;
   onLog?: (message: string) => void;
 }) {
+  const [tab, setTab] = useState<Tab>("craft");
   /** The recipe or unit an answer is on its way for. */
   const [busy, setBusy] = useState<string | null>(null);
   const [inspecting, setInspecting] = useState<Inspecting | null>(null);
@@ -69,9 +77,10 @@ export function CraftingPanel({
   for (const u of units)
     if (isInBag(u)) bits[u.itemId] = (bits[u.itemId] ?? 0) + 1;
 
-  const recipes = WILDS_RECIPES.filter(
-    (r) =>
-      herzieClass === null || getItem(r.base)?.requiredClass === herzieClass,
+  const classOf = (r: WildsRecipe) => getItem(r.base)?.requiredClass ?? null;
+  const recipes = [...WILDS_RECIPES].sort(
+    (a, b) =>
+      Number(classOf(b) === herzieClass) - Number(classOf(a) === herzieClass),
   );
   // Every instrument you have, worn or in the bag, best first.
   const tunable = units
@@ -121,96 +130,119 @@ export function CraftingPanel({
         a storm.
       </div>
 
-      <List className="min-h-0 flex-1">
-        <Heading>Make</Heading>
-        {recipes.map((r) => {
-          const base = units.find((u) => u.itemId === r.base && isInBag(u));
-          const worn = !base && units.some((u) => u.itemId === r.base);
-          const ok = !!base && canAfford(bits, r.bits);
-          // The base's tuning is kept, so the card shows what you'd get.
-          const level = base?.upgradeLevel ?? 0;
-          return (
-            <Row
-              key={r.id}
-              itemId={r.id}
-              level={level}
-              origin={`craft:${r.id}`}
-              onInspect={setInspecting}
-              sub={
-                <>
-                  from{" "}
-                  <CardLink
-                    itemId={r.base}
-                    level={level}
-                    onInspect={setInspecting}
-                  >
-                    {nameOf(r.base)}
-                  </CardLink>
-                  {level > 0 ? ` +${level} (kept)` : ""}
-                  {base ? null : (
-                    <span className="text-red">
-                      {worn ? " · take it off first" : " · you need one"}
-                    </span>
-                  )}
-                </>
-              }
-              cost={r.bits}
-              have={bits}
-              action={
-                <button
-                  type="button"
-                  className={cn("btn", ok ? "text-cyan" : "text-text-dim")}
-                  disabled={!ok || busy !== null}
-                  onClick={() => craft(r)}
-                >
-                  {busy === r.id ? "Making..." : "Craft"}
-                </button>
-              }
-            />
-          );
-        })}
+      <div className="grid grid-cols-2 gap-1" role="tablist">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={t.id === tab}
+            className={cn(
+              "btn px-1 py-1",
+              t.id === tab
+                ? "border-cyan text-text"
+                : "border-[#555] text-text-dim",
+            )}
+            onClick={() => setTab(t.id)}
+          >
+            {t.name}
+          </button>
+        ))}
+      </div>
 
-        <Heading>Tune</Heading>
-        {tunable.length === 0 ? (
-          <div className="px-2 py-1.5 text-ui-sm text-text-dim">
-            No instruments to tune.
-          </div>
-        ) : (
-          tunable.map((u) => {
-            const cost = tuningCost(u.upgradeLevel);
-            const ok = cost !== null && canAfford(bits, cost);
+      <List className="min-h-0 flex-1">
+        {tab === "craft" &&
+          recipes.map((r) => {
+            const base = units.find((u) => u.itemId === r.base && isInBag(u));
+            const worn = !base && units.some((u) => u.itemId === r.base);
+            const ok = !!base && canAfford(bits, r.bits);
+            // The base's tuning is kept, so the card shows what you'd get.
+            const level = base?.upgradeLevel ?? 0;
             return (
               <Row
-                key={u.id}
-                itemId={u.itemId}
-                level={u.upgradeLevel}
-                origin={`tune:${u.id}`}
+                key={r.id}
+                itemId={r.id}
+                level={level}
+                origin={`craft:${r.id}`}
                 onInspect={setInspecting}
                 sub={
-                  cost === null
-                    ? `Fully tuned at +${TUNING_MAX_LEVEL}: Power Dice from here`
-                    : `+${u.upgradeLevel} → +${u.upgradeLevel + 1}${
-                        u.equippedSlot !== null ? " · worn" : ""
-                      }`
+                  <>
+                    from{" "}
+                    <CardLink
+                      itemId={r.base}
+                      level={level}
+                      onInspect={setInspecting}
+                    >
+                      {nameOf(r.base)}
+                    </CardLink>
+                    {level > 0 ? ` +${level} (kept)` : ""}
+                    {base ? null : (
+                      <span className="text-red">
+                        {worn ? " · take it off first" : " · you need one"}
+                      </span>
+                    )}
+                  </>
                 }
-                cost={cost}
+                cost={r.bits}
                 have={bits}
                 action={
-                  cost === null ? null : (
-                    <button
-                      type="button"
-                      className={cn("btn", ok ? "text-cyan" : "text-text-dim")}
-                      disabled={!ok || busy !== null}
-                      onClick={() => tune(u)}
-                    >
-                      {busy === u.id ? "Tuning..." : "Tune"}
-                    </button>
-                  )
+                  <button
+                    type="button"
+                    className={cn("btn", ok ? "text-cyan" : "text-text-dim")}
+                    disabled={!ok || busy !== null}
+                    onClick={() => craft(r)}
+                  >
+                    {busy === r.id ? "Making..." : "Craft"}
+                  </button>
                 }
               />
             );
-          })
-        )}
+          })}
+
+        {tab === "tune" &&
+          (tunable.length === 0 ? (
+            <div className="px-2 py-1.5 text-ui-sm text-text-dim">
+              No instruments to tune.
+            </div>
+          ) : (
+            tunable.map((u) => {
+              const cost = tuningCost(u.upgradeLevel);
+              const ok = cost !== null && canAfford(bits, cost);
+              return (
+                <Row
+                  key={u.id}
+                  itemId={u.itemId}
+                  level={u.upgradeLevel}
+                  origin={`tune:${u.id}`}
+                  onInspect={setInspecting}
+                  sub={
+                    cost === null
+                      ? `Fully tuned at +${TUNING_MAX_LEVEL}: Power Dice from here`
+                      : `+${u.upgradeLevel} → +${u.upgradeLevel + 1}${
+                          u.equippedSlot !== null ? " · worn" : ""
+                        }`
+                  }
+                  cost={cost}
+                  have={bits}
+                  action={
+                    cost === null ? null : (
+                      <button
+                        type="button"
+                        className={cn(
+                          "btn",
+                          ok ? "text-cyan" : "text-text-dim",
+                        )}
+                        disabled={!ok || busy !== null}
+                        onClick={() => tune(u)}
+                      >
+                        {busy === u.id ? "Tuning..." : "Tune"}
+                      </button>
+                    )
+                  }
+                />
+              );
+            })
+          ))}
       </List>
 
       {/* Your bits, bottom right. */}
@@ -261,14 +293,6 @@ export function CraftingPanel({
 
 function nameOf(id: string): string {
   return getItem(id)?.name ?? id;
-}
-
-function Heading({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="mt-1 px-2 pb-0.5 text-[10px] uppercase tracking-wider text-text-dim">
-      {children}
-    </div>
-  );
 }
 
 /** A card named in a line of text (a recipe's base, a bit in a cost): a
