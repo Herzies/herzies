@@ -134,11 +134,11 @@ async fn wait_for_callback(
             continue;
         }
 
-        let html = "<h1>Logged in! You can close this window.</h1>";
+        // The browser tab lands on the website's "you're in" page: the
+        // styling lives with the rest of the site, not in this listener.
         let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            html.len(),
-            html
+            "HTTP/1.1 303 See Other\r\nLocation: {}/auth/desktop/done\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            web_url
         );
         let _ = stream.write_all(response.as_bytes()).await;
         let _ = stream.shutdown().await;

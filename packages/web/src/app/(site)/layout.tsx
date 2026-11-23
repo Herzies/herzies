@@ -20,24 +20,29 @@ export const metadata: Metadata = {
     template: "%s | Herzies",
   },
   description:
-    "Hatch your herzie, play music, and watch it evolve. A desktop digital pet powered by your listening habits. Works with Apple Music and Spotify on macOS and Windows.",
+    "A free desktop pet for macOS and Windows that grows while you listen to music. Works with Spotify, Apple Music, Tidal and more. Collect items, trade, and raid bosses with friends in a live multiplayer Town.",
   keywords: [
     "digital pet",
-    "music",
+    "desktop pet",
+    "virtual pet",
+    "tamagotchi",
+    "music game",
+    "idle game",
     "macos",
     "windows",
     "apple music",
     "spotify",
+    "tidal",
   ],
   openGraph: {
-    title: "Herzies",
-    description: "Your digital pet that grows by listening to music.",
+    title: "Herzies — your digital pet that grows by listening to music",
+    description:
+      "A free desktop pet for macOS and Windows. Play music, level up your herzie, and hang out with other herzies in the Town.",
     siteName: "Herzies",
     type: "website",
-    url: "https://www.herzies.app",
     images: [
       {
-        url: "/og.png?v=2",
+        url: "/og.png?v=3",
         width: 1200,
         height: 630,
         alt: "Herzies — your digital pet that grows by listening to music",
@@ -46,9 +51,10 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Herzies",
-    description: "Your digital pet that grows by listening to music.",
-    images: ["/og.png?v=2"],
+    title: "Herzies — your digital pet that grows by listening to music",
+    description:
+      "A free desktop pet for macOS and Windows. Play music, level up your herzie, and hang out with other herzies in the Town.",
+    images: ["/og.png?v=3"],
   },
   robots: {
     index: true,

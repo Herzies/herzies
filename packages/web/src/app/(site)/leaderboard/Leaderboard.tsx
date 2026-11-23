@@ -3,27 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLoaderHold } from "@/components/page-loader/useLoaderHold";
 import { createSupabaseClient } from "@/lib/supabase";
+import { fetchLeaderboard, type HerzieRow } from "./data";
 import { LeaderboardEntry } from "./LeaderboardEntry";
 
 const POLL_INTERVAL = 10_000;
-
-interface HerzieRow {
-  name: string;
-  stage: number;
-  level: number;
-  appearance: {
-    headIndex: number;
-    eyesIndex: number;
-    mouthIndex: number;
-    accessoryIndex: number;
-    limbsIndex?: number;
-    bodyIndex?: number;
-    legsIndex?: number;
-    colorScheme: string;
-  };
-  total_minutes_listened: number;
-  genre_minutes: Record<string, number>;
-}
 
 function getTopGenres(
   genreMinutes: Record<string, number>,
@@ -36,30 +19,30 @@ function getTopGenres(
     .map(([genre]) => genre);
 }
 
-export function Leaderboard() {
-  const [rows, setRows] = useState<HerzieRow[]>([]);
-  const [loading, setLoading] = useState(true);
+/** `initialRows` come from the server (null if it couldn't reach the
+ * database); the browser keeps them fresh. */
+export function Leaderboard({
+  initialRows,
+}: {
+  initialRows: HerzieRow[] | null;
+}) {
+  const [rows, setRows] = useState(initialRows);
 
-  const fetchLeaderboard = useCallback(async () => {
-    const supabase = createSupabaseClient();
-    const { data } = await supabase
-      .from("herzies")
-      .select(
-        "name, stage, level, xp, appearance, total_minutes_listened, genre_minutes",
-      )
-      .order("xp", { ascending: false })
-      .limit(100);
-    setRows((data ?? []) as HerzieRow[]);
-    setLoading(false);
+  const refresh = useCallback(async () => {
+    const fresh = await fetchLeaderboard(createSupabaseClient());
+    // A failed poll keeps what's shown; a failed first load shows the
+    // empty board rather than loading forever.
+    setRows((shown) => fresh ?? shown ?? []);
   }, []);
 
   useEffect(() => {
-    fetchLeaderboard();
-    const interval = setInterval(fetchLeaderboard, POLL_INTERVAL);
+    refresh();
+    const interval = setInterval(refresh, POLL_INTERVAL);
     return () => clearInterval(interval);
-  }, [fetchLeaderboard]);
+  }, [refresh]);
 
   // The page loader stays up until the first rows are in.
+  const loading = rows === null;
   useLoaderHold(loading);
 
   if (loading) {

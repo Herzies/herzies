@@ -20,21 +20,28 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: "Herzies — Your digital pet that grows by listening to music",
-  description:
-    "Hatch your herzie, play music, and watch it evolve. A digital pet powered by your listening habits. Works with Apple Music and Spotify on macOS and Windows.",
   alternates: { canonical: "https://www.herzies.app" },
 };
 
 const jsonLd = {
   "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
+  "@type": "VideoGame",
   name: "Herzies",
-  applicationCategory: "EntertainmentApplication",
-  operatingSystem: "macOS, Windows",
+  applicationCategory: "GameApplication",
+  genre: ["Virtual pet", "Idle game", "RPG"],
+  gamePlatform: ["macOS", "Windows"],
+  operatingSystem: "macOS 10.15+, Windows",
+  playMode: ["SinglePlayer", "MultiPlayer"],
   description:
-    "Your digital pet that grows by listening to music. Works with Apple Music and Spotify.",
+    "A free desktop pet that grows while you listen to music. It picks up what's playing in Spotify, Apple Music, Tidal and other players, turns listening time into XP and item drops, and lets you trade, duel and raid bosses with other herzies in a live multiplayer Town.",
   url: "https://www.herzies.app",
+  image: "https://www.herzies.app/og.png?v=3",
+  downloadUrl: "https://www.herzies.app/download",
   installUrl: "https://github.com/Herzies/herzies/releases/latest",
+  sameAs: [
+    "https://github.com/Herzies/herzies",
+    "https://discord.gg/DxECVqT5sh",
+  ],
   offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
 };
 
