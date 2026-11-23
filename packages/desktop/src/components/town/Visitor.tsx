@@ -138,6 +138,7 @@ export function Visitor({
         dt,
       });
       y = groundY(map, roam.at.x, roam.at.z);
+      herzie.root.position.set(roam.at.x, y, roam.at.z);
       herzie.dancing = roam.dancing;
     }
     const here = roam?.at ?? at;
