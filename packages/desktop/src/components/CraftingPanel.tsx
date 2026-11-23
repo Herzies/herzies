@@ -24,6 +24,7 @@ import ItemInspectOverlay, {
   inspectOrigin,
 } from "./ItemInspectOverlay";
 import { List } from "./List";
+import { TabButton } from "./TabButton";
 import { Tooltip } from "./Tooltip";
 
 /** A card to open Inspect on: which, at what tuning, and (for one shown
@@ -130,23 +131,15 @@ export function CraftingPanel({
         a storm.
       </div>
 
-      <div className="grid grid-cols-2 gap-1" role="tablist">
+      <div className="flex shrink-0 gap-1 border-b border-white/15 text-ui">
         {TABS.map((t) => (
-          <button
+          <TabButton
             key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={t.id === tab}
-            className={cn(
-              "btn px-1 py-1",
-              t.id === tab
-                ? "border-cyan text-text"
-                : "border-[#555] text-text-dim",
-            )}
+            active={t.id === tab}
             onClick={() => setTab(t.id)}
           >
             {t.name}
-          </button>
+          </TabButton>
         ))}
       </div>
 
