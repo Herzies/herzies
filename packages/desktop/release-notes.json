@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.1.0-beta.75",
+    "highlights": [
+      "press E next to another herzie to see their profile or challenge them to a duel; 1, 2… pick from the menu",
+      "titles over names are white, and your own name steps aside while you aim",
+      "fixes: Pip walks with his name again, NPC windows fit whoever's talking"
+    ]
+  },
+  {
     "version": "0.1.0-beta.74",
     "highlights": [
         "bug fix"
