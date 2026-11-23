@@ -1,3 +1,4 @@
+import { onWindowVisibility, windowVisibleNow } from "../../tauri-bridge";
 import { bellStrikeAt } from "./airship/bell";
 
 /**
@@ -7,7 +8,9 @@ import { bellStrikeAt } from "./airship/bell";
  * hundred casts don't sound like one sample on repeat.
  *
  * Quiet by design: the music the herzie listens to is the point, these sit
- * under it. Muted with `setSfxMuted` (remembered).
+ * under it. Muted with `setSfxMuted` (remembered), and silent whenever the
+ * window's off screen (closed to the menu bar, minimised): see
+ * onWindowVisibility below.
  */
 
 let ctx: AudioContext | null = null;
@@ -35,24 +38,28 @@ export function setSfxMuted(on: boolean): void {
   } catch {
     // Not remembered, then.
   }
-  if (master) master.gain.value = on ? 0 : VOLUME;
+  if (master) master.gain.value = on || !windowVisibleNow() ? 0 : VOLUME;
 }
 
 const VOLUME = 0.35;
 
 /** The audio graph, made on first use (after a key or click, so the
- * browser lets it play). */
-function audio(): {
+ * browser lets it play). Off screen, nothing new sounds (it would all
+ * burst out at once on the way back), but a `held` sound (the ship's
+ * loop, a loot hum) may be set up then, to sound once the window's back. */
+function audio(held = false): {
   ctx: AudioContext;
   out: GainNode;
   noise: AudioBuffer;
 } | null {
   if (muted) return null;
+  const shown = windowVisibleNow();
+  if (!shown && !held) return null;
   try {
     if (!ctx) {
       ctx = new AudioContext();
       master = ctx.createGain();
-      master.gain.value = VOLUME;
+      master.gain.value = shown ? VOLUME : 0;
       // A gentle limiter, so a burst of hits never clips.
       const limit = ctx.createDynamicsCompressor();
       limit.threshold.value = -10;
@@ -61,43 +68,41 @@ function audio(): {
       noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
       const d = noise.getChannelData(0);
       for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-      document.addEventListener("visibilitychange", onVisibility);
+      if (!shown) void ctx.suspend();
     }
-    if (ctx.state === "suspended") void ctx.resume();
-    // A sound while hidden: the quiet's counted from this one.
-    if (document.hidden) quietWhenHidden();
+    if (shown && ctx.state === "suspended") void ctx.resume();
     return { ctx, out: master as GainNode, noise: noise as AudioBuffer };
   } catch {
     return null;
   }
 }
 
-/** Hidden this long (closed to the menu bar, minimised) with nothing held
- * sounding, the context lets go of the audio thread: every sound but a
- * held one (the ship's loop, a loot hum) is long over by then. */
-const HIDDEN_QUIET_MS = 30_000;
-let quietTimer: ReturnType<typeof setTimeout> | undefined;
-/** Loot hums sounding (the ship's loop is `shipLoop`). */
-let hums = 0;
+/** How quickly the sound fades out as the window goes (s, a time
+ * constant), and when the audio thread is let go after (ms). */
+const HIDE_FADE = 0.03;
+const HIDE_SUSPEND_MS = 150;
+let suspendTimer: ReturnType<typeof setTimeout> | undefined;
 
-function quietWhenHidden(): void {
-  clearTimeout(quietTimer);
-  quietTimer = setTimeout(() => {
-    if (!ctx || !document.hidden || hums > 0 || shipLoop) return;
-    if (ctx.state === "running") void ctx.suspend();
-  }, HIDDEN_QUIET_MS);
-}
-
-/** Never suspended on screen: back, it's picked up again at once (rather
- * than with the next sound, as audio() would), held sounds and all. */
-function onVisibility(): void {
-  if (document.hidden) {
-    quietWhenHidden();
+/** The window gone (closed to the menu bar, minimised, covered): every
+ * sound stops at once, held ones (the ship's loop, loot hums) included,
+ * and the context lets go of the audio thread. Back on screen, it picks up
+ * again at once, held sounds where they were. */
+onWindowVisibility(() => {
+  if (!ctx || !master) return;
+  clearTimeout(suspendTimer);
+  const now = ctx.currentTime;
+  master.gain.cancelScheduledValues(now);
+  if (!windowVisibleNow()) {
+    master.gain.setTargetAtTime(0, now, HIDE_FADE);
+    const c = ctx;
+    suspendTimer = setTimeout(() => {
+      if (!windowVisibleNow() && c.state === "running") void c.suspend();
+    }, HIDE_SUSPEND_MS);
     return;
   }
-  clearTimeout(quietTimer);
-  if (ctx?.state === "suspended") void ctx.resume();
-}
+  master.gain.value = muted ? 0 : VOLUME;
+  if (ctx.state === "suspended") void ctx.resume();
+});
 
 const wobble = (amount = 0.05) => 1 + (Math.random() * 2 - 1) * amount;
 
@@ -656,7 +661,7 @@ export function sfxLootHum(tier: LootTier): {
   stop: () => void;
 } | null {
   if (tier < 2) return null;
-  const a = audio();
+  const a = audio(true);
   if (!a) return null;
   const { ctx: c, out } = a;
   const g = c.createGain();
@@ -684,14 +689,10 @@ export function sfxLootHum(tier: LootTier): {
   g.disconnect();
   g.connect(swell).connect(out);
   lfo.start();
-  hums++;
-  let stopped = false;
   const peak = 0.02 + tier * 0.008;
   return {
     level: (v) => g.gain.setTargetAtTime(peak * v, c.currentTime, 0.15),
     stop: () => {
-      if (!stopped) hums--;
-      stopped = true;
       const t = c.currentTime;
       g.gain.setTargetAtTime(0, t, 0.08);
       for (const o of [...oscs, lfo]) o.stop(t + 0.5);
@@ -1253,7 +1254,7 @@ export const shipAmbience = {
       if (shipLoop) shipAmbience.stop();
       return;
     }
-    const a = audio();
+    const a = audio(true);
     if (!a) return;
     shipLoop ??= shipLoopOf(a);
     const s = shipLoop;

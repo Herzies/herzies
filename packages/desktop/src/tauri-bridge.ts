@@ -902,6 +902,25 @@ export function useWindowWaking(): boolean {
   return waking;
 }
 
+/** Whether the window is on screen at all, now: not closed to the menu bar
+ * (the app says so), minimised or covered (the browser does). */
+export function windowVisibleNow(): boolean {
+  return windowShown && (typeof document === "undefined" || !document.hidden);
+}
+
+/** Calls `cb` whenever the window may have come on screen or gone off it
+ * (see windowVisibleNow): for what isn't React, like the game's sounds. */
+export function onWindowVisibility(cb: () => void): () => void {
+  shownListeners.add(cb);
+  if (typeof document !== "undefined")
+    document.addEventListener("visibilitychange", cb);
+  return () => {
+    shownListeners.delete(cb);
+    if (typeof document !== "undefined")
+      document.removeEventListener("visibilitychange", cb);
+  };
+}
+
 /**
  * Whether the window is on screen at all: false while it's closed to the
  * menu bar (the app says so), or minimised or covered (the browser does).
@@ -909,8 +928,7 @@ export function useWindowWaking(): boolean {
  * polling waits for focus (useWindowFocused).
  */
 export function useWindowVisible(): boolean {
-  const read = () =>
-    windowShown && (typeof document === "undefined" || !document.hidden);
+  const read = windowVisibleNow;
   const [visible, setVisible] = useState(read);
   useEffect(() => {
     const update = () => setVisible(read());
