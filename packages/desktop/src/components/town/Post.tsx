@@ -12,7 +12,7 @@ import { ambient } from "./ambient";
 import { townLook } from "./depth";
 import { homeMode, markWorldSettled } from "./homeMode";
 import { skyUniforms } from "./Islands";
-import { SUPERSAMPLE, townSupersample } from "./pixelSize";
+import { SUPERSAMPLE, townSupersample, useTownSupersample } from "./pixelSize";
 import { warp, warpAmount } from "./portal";
 import { DistortionBuffer, SonicDistortionEffect } from "./vfx/distortion";
 import { HomeFadeEffect } from "./vfx/homeFade";
@@ -63,6 +63,9 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
   const aoPass = useRef<AOPass>(null);
   const gl = useThree((s) => s.gl);
   const camera = useThree((s) => s.camera);
+  // Supersampled, the composer's buffers are twice the Town's resolution:
+  // the occlusion's drawn at half that, the Town's own, as it is without.
+  const supersample = useTownSupersample();
   const buffer = useMemo(() => new DistortionBuffer(), []);
   const effect = useMemo(() => new SonicDistortionEffect(buffer), [buffer]);
   const fade = useMemo(() => new HomeFadeEffect(), []);
@@ -199,7 +202,7 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
         <N8AO
           ref={aoPass}
           quality="performance"
-          halfRes={false}
+          halfRes={supersample}
           aoRadius={1.2}
           distanceFalloff={0.4}
           intensity={DAY_AO}
