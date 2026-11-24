@@ -18,7 +18,6 @@ import {
   ItemStatLines,
   ItemTypeTag,
   ModifierEffectTag,
-  SetTag,
   type TagTooltip,
 } from "./tags.js";
 
@@ -135,19 +134,18 @@ export function ItemCard({
               style={{ "--foil": 0.6 } as CSSProperties}
             />
           )}
+          {artist ? (
+            <span className="absolute right-1 bottom-0.5 max-w-[90%] truncate text-[6px] text-white italic [text-shadow:0_1px_2px_#000,0_0_4px_#000]">
+              Illus. {artist}
+            </span>
+          ) : null}
         </div>
 
-        <div className="-mt-0.5 flex items-center gap-1">
-          <ItemTypeTag item={item} className="shrink-0" />
-          <ModifierEffectTag item={item} tooltip={tooltip} />
-          <SetTag itemId={itemId} tooltip={tooltip} />
-          <span
-            className="ml-auto text-ui-sm italic"
-            style={{ color: rarityColor }}
-          >
-            {RARITY_LABELS[item.rarity]}
-          </span>
-        </div>
+        {item.modifier && (
+          <div className="-mt-0.5 flex">
+            <ModifierEffectTag item={item} tooltip={tooltip} />
+          </div>
+        )}
 
         <ItemStatLines item={item} level={level} />
 
@@ -163,19 +161,6 @@ export function ItemCard({
               {set.name} set {equippedCount}/{set.itemIds.length}
             </div>
             <div className="text-text-dim">{set.effect}</div>
-            <div>
-              {set.itemIds.map((id, i) => (
-                <span
-                  key={id}
-                  className={
-                    equippedIds.has(id) ? "text-white" : "text-text-dim"
-                  }
-                >
-                  {i > 0 ? " · " : ""}
-                  {getItem(id)?.name ?? id}
-                </span>
-              ))}
-            </div>
           </div>
         )}
 
@@ -184,12 +169,14 @@ export function ItemCard({
             className="inline-block size-1.5 rotate-45"
             style={{ background: rarityColor }}
           />
+          <span className="italic" style={{ color: rarityColor }}>
+            {RARITY_LABELS[item.rarity]}
+          </span>
+          <span>·</span>
+          <ItemTypeTag item={item} variant="text" />
           {meta ? <span>{meta}</span> : null}
-          {artist ? (
-            <span className="ml-auto truncate italic">Illus. {artist}</span>
-          ) : null}
           {number > 0 && (
-            <span className={cx("shrink-0", !artist && "ml-auto")}>
+            <span className="ml-auto shrink-0">
               № {number}/{ITEMS.length}
             </span>
           )}

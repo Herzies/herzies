@@ -83,7 +83,7 @@ export function ItemPreviewCard({
   );
 }
 
-/** The card's set and modifier tags explain themselves on hover. */
+/** The card's modifier tag explains itself on hover. */
 function tagTooltip(label: string, tag: React.ReactElement) {
   return <Tooltip label={label}>{tag}</Tooltip>;
 }
