@@ -1636,6 +1636,9 @@ describe("stats", () => {
     expect(formatStatBonus("critDamage", 10)).toBe("+10%");
     expect(formatStatBonus("sonicPower", 5)).toBe("+5");
     expect(formatStat("sonicPower", 5)).toBe("5");
+    // Float noise from summing and scaling tenths doesn't show.
+    expect(formatStat("def", 125.4 * 1.5)).toBe("188.1");
+    expect(formatStat("def", 0.1 + 0.2)).toBe("0.3");
   });
 });
 
