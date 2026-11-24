@@ -7,6 +7,7 @@ import type { AppState } from "../tauri-bridge";
 import { herzies, useGhostMode, useWindowPinned } from "../tauri-bridge";
 
 import { Checkbox } from "./Checkbox";
+import { HotbarKeySettings } from "./HotbarKeySettings";
 import { TabButton } from "./TabButton";
 import { debugDropLoot } from "./town/combat/fight";
 import { debugBossResults } from "./town/combat/results";
@@ -46,7 +47,14 @@ const DUEL_REQUESTS: readonly (readonly [DuelRequests, string])[] = [
 ];
 
 /** Debug is for dev builds only. */
-const TABS = ["Account", "Privacy", "Controls", "Graphics", "Debug"] as const;
+const TABS = [
+  "Account",
+  "Privacy",
+  "Controls",
+  "Graphics",
+  "Audio",
+  "Debug",
+] as const;
 type SettingsTab = (typeof TABS)[number];
 const tabs: readonly SettingsTab[] = import.meta.env.DEV
   ? TABS
@@ -344,37 +352,7 @@ export function SettingsView({
             </label>
           </div>
           <div className="mb-4">
-            <div className="mb-1.5 text-ui text-text-dim">Display</div>
-            <Checkbox
-              checked={fpsShown}
-              onChange={setFpsShown}
-              className="items-start"
-            >
-              <span className="min-w-0">
-                <span className="block text-ui">Show FPS</span>
-                <span className="block text-ui-sm text-text-dim">
-                  Frames per second, top right in Town.
-                </span>
-              </span>
-            </Checkbox>
-          </div>
-          <div className="mb-4">
-            <div className="mb-1.5 text-ui text-text-dim">Sound</div>
-            <button
-              type="button"
-              className={cn(
-                "btn",
-                townSounds
-                  ? "border-cyan text-cyan"
-                  : "border-[#555] text-text-dim",
-              )}
-              onClick={() => {
-                setSfxMuted(townSounds);
-                setTownSounds(!townSounds);
-              }}
-            >
-              {townSounds ? "Town sounds: On" : "Town sounds: Off"}
-            </button>
+            <HotbarKeySettings />
           </div>
           <div className="mb-4">
             <div className="mb-1.5 text-ui text-text-dim">
@@ -407,6 +385,38 @@ export function SettingsView({
                 Smooths the Town's pixels so distant things don't flicker as the
                 camera moves. Takes more from your graphics card: turn it off if
                 the Town stutters.
+              </span>
+            </span>
+          </Checkbox>
+          <Checkbox
+            checked={fpsShown}
+            onChange={setFpsShown}
+            className="items-start"
+          >
+            <span className="min-w-0">
+              <span className="block text-ui">Show FPS</span>
+              <span className="block text-ui-sm text-text-dim">
+                Frames per second, top right in Town.
+              </span>
+            </span>
+          </Checkbox>
+        </div>
+      )}
+
+      {tab === "Audio" && (
+        <div className="mb-4 flex flex-col gap-3">
+          <Checkbox
+            checked={townSounds}
+            onChange={(on) => {
+              setSfxMuted(!on);
+              setTownSounds(on);
+            }}
+            className="items-start"
+          >
+            <span className="min-w-0">
+              <span className="block text-ui">Town sounds</span>
+              <span className="block text-ui-sm text-text-dim">
+                The Town's sound effects.
               </span>
             </span>
           </Checkbox>

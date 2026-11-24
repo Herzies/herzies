@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useInDuel } from "../components/town/duel/store";
 import { useHomeMode } from "../components/town/homeMode";
 import { townSave } from "../components/town/runtime";
+import { loadoutCooldownLeft, markLoadoutSwitched } from "../lib/loadoutState";
 import {
   loadoutRefusalText,
   predictLoadoutSwitch,
@@ -27,11 +28,12 @@ const PENDING_MAX_MS = 2_000;
 const SETTLE_MS = LOADOUT_SWITCH_GAP_MS + 250;
 
 /**
- * Switching loadouts from the Deck's 1 | 2 tabs. The tab and the gear move
- * at once: the copies through the same optimistic layer as an equip
- * (`onPredictUnits`, predicted with `predictLoadoutSwitch`), the tab through
- * `pending` until the server's loadouts agree. One switch at a time, and the
- * tabs stay off until the server would take the next one (`settling`).
+ * Switching loadouts from the Deck's 1 | 2 tabs or a hotbar key. The tab and
+ * the gear move at once: the copies through the same optimistic layer as an
+ * equip (`onPredictUnits`, predicted with `predictLoadoutSwitch`), the tab
+ * through `pending` until the server's loadouts agree. One switch at a time,
+ * the tabs stay off until the server would take the next one (`settling`),
+ * and a switch is refused within LOADOUT_COOLDOWN_MS of the last.
  *
  * Not in a fight: a duel (from the accept on), the boss's cave or the
  * Tower. The server's duel stats were taken at the accept anyway; this keeps
@@ -120,6 +122,11 @@ export function useLoadoutSwitch({
         notify(blocked);
         return;
       }
+      const wait = loadoutCooldownLeft();
+      if (wait > 0) {
+        notify(`Loadouts switch again in ${Math.ceil(wait / 1000)}s`);
+        return;
+      }
       const from = now.loadouts;
       const prediction = predictLoadoutSwitch(
         now.units,
@@ -136,6 +143,7 @@ export function useLoadoutSwitch({
       setSettling(true);
       // Set here too, so a second click before the re-render is dropped.
       latest.current.settling = true;
+      markLoadoutSwitched();
       const call = herzies.switchLoadout(to);
       onPredictUnits(
         (base) =>
@@ -157,6 +165,8 @@ export function useLoadoutSwitch({
         (e: unknown) => {
           setPending(null);
           setSettling(false);
+          // Nothing switched: no wait before trying again.
+          markLoadoutSwitched(Number.NEGATIVE_INFINITY);
           notify(
             loadoutRefusalText(e instanceof Error ? e.message : String(e)),
           );

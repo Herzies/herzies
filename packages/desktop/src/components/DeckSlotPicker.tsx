@@ -54,6 +54,7 @@ export function DeckSlotPicker({
   onClear,
   onClose,
   extra,
+  above = false,
 }: {
   x: number;
   y: number;
@@ -67,6 +68,10 @@ export function DeckSlotPicker({
   onClose: () => void;
   /** Rows of another kind, before the items (the hotbar's class skill). */
   extra?: ReactNode;
+  /** Open upward from `y` whatever the room below: the hotbar's, whose
+   * `y` is the slot's top (under it are only the chat and the window's
+   * edge, and its `extra` rows would run off it). */
+  above?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -98,7 +103,7 @@ export function DeckSlotPicker({
   const fitsRight =
     x + CURSOR_GAP + EST_WIDTH <= window.innerWidth - EDGE_PADDING;
   const fitsBelow =
-    y + CURSOR_GAP + estHeight <= window.innerHeight - EDGE_PADDING;
+    !above && y + CURSOR_GAP + estHeight <= window.innerHeight - EDGE_PADDING;
 
   return createPortal(
     <div

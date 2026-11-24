@@ -72,7 +72,6 @@ import {
   entityAt,
   instrumentNeeded,
   noteSkillCast,
-  queueSkill,
   setBuff,
   setSelfAt,
   shuffleOf,
@@ -136,8 +135,9 @@ const typing = (t: EventTarget | null) => {
  *   Esc, or Tab again: out.
  * - Left click or F: cast. Holding it keeps casting; a press mid-cast is
  *   kept for the next.
- * - Q or 1: your class skill, if you have one. In a fight the server runs
- *   it; anywhere else it's practice on the dummies (no XP).
+ * - A hotbar key holding a class skill (1/Q to begin with: hotbarKeys.ts).
+ *   In a fight the server runs it; anywhere else it's practice on the
+ *   dummies (no XP).
  *
  * Aiming is the usual third-person way: a ray from the camera through the
  * crosshair finds what you're pointing at, and the wave flies from the
@@ -220,11 +220,6 @@ export function Combat({
         // A Bard's lute: attack ⇄ heal.
         e.preventDefault();
         toggleStance();
-      } else if (e.code === "KeyQ" && !e.repeat && skills.list.length) {
-        // Q stays a shortcut for your first class skill, wherever it sits
-        // on the hotbar (its number key is the hotbar's: town/input.ts).
-        e.preventDefault();
-        queueSkill(1);
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {

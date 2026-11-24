@@ -346,7 +346,7 @@ const player = {
 };
 // `?hotbar=star-candy`: that item on slot 2, with three in a pretend bank.
 const hotbarParam = params.get("hotbar");
-if (hotbarParam) assignHotbar("2", hotbarParam);
+if (hotbarParam) assignHotbar(1, hotbarParam);
 const hotbarUnits: ItemUnit[] = hotbarParam
   ? [0, 1, 2].map((i) => ({
       id: `sandbox-${i}`,

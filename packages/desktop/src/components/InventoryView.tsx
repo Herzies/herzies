@@ -74,7 +74,9 @@ import { TabButton } from "./TabButton";
 import { HoverPreview, Tooltip } from "./Tooltip";
 import { useCrystal } from "./town/crystalState";
 import { eat } from "./town/eat";
-import { assignHotbar, HOTBAR_KEYS } from "./town/hotbarSlots";
+import { hotbarSlotAt, hotbarTakes, setHotbarDrag } from "./town/hotbarDrop";
+import { addToHotbar, assignHotbar } from "./town/hotbarSlots";
+import { type HotbarHandlers, provideHotbarHandlers } from "./town/hotbarUse";
 
 /** Rarities worth a second look before they're sold for coin. */
 const CONFIRM_SELL_RARITIES: ReadonlySet<Rarity> = new Set([
@@ -998,6 +1000,9 @@ function InventoryViewImpl({
         x: e.clientX,
         y: e.clientY,
       });
+      // Something for the hotbar: it rises to be reached (hotbarDrop).
+      if (hotbarTakes(sourceItemId(state.source)))
+        setHotbarDrag({ over: hotbarSlotAt(e.clientX, e.clientY) });
     };
 
     // Scrolls the grid while a drag is held near its top or bottom edge, so a
@@ -1052,6 +1057,7 @@ function InventoryViewImpl({
       const state = dragRef.current;
       dragRef.current = null;
       setDragVisual(null);
+      setHotbarDrag(null);
       if (!state?.dragging) return;
       // Any drag that got this far ends in a click the item must not act on —
       // including one let go over the slot it started on, which is "picked it
@@ -1060,6 +1066,15 @@ function InventoryViewImpl({
       // never becomes a drag at all.
       const { source, overIndex } = state;
       suppressClickRef.current = true;
+      // Let go over a hotbar slot: the item goes there, and stays where it
+      // was (worn or in the bag).
+      const slot = hotbarSlotAt(e.clientX, e.clientY);
+      const itemId = sourceItemId(source);
+      if (slot !== null) {
+        if (hotbarTakes(itemId)) assignHotbar(slot, itemId);
+        else notify("Only things to eat or wear go on the hotbar");
+        return;
+      }
       if (source.kind === "deck") {
         // Let go over the herzie, it stays on — moving sides if it's an
         // Accessory dropped on the other one; anywhere else, it comes off.
@@ -1477,6 +1492,63 @@ function InventoryViewImpl({
     if (!ok) preferredSlotRef.current = null;
   };
   returnDropRef.current = handleReturnDrop;
+
+  /** A card's hotbar key pressed: off if a copy is worn, else on — from the
+   * bag, or a copy only the other loadout holds — in the loadout you're on.
+   * Through handleEquip, as a click in the deck would. */
+  const toggleCardFromHotbar = (
+    itemId: string,
+    from?: { x: number; y: number },
+  ) => {
+    const worn = units.find(
+      (u) => u.itemId === itemId && u.equippedSlot !== null,
+    );
+    const copy =
+      worn?.id ??
+      tiles.find((t) => t.itemId === itemId)?.unitIds[0] ??
+      units.find((u) => u.itemId === itemId)?.id;
+    if (!copy) {
+      notify(`No "${getItem(itemId)?.name ?? itemId}" left`);
+      return;
+    }
+    void handleEquip(copy, undefined, from);
+  };
+  const hotbarRef = useRef<HotbarHandlers>({
+    toggleCard: () => {},
+    switchLoadout: () => {},
+    activeLoadout: () => null,
+  });
+  hotbarRef.current = {
+    toggleCard: toggleCardFromHotbar,
+    switchLoadout: loadout.switchTo,
+    activeLoadout: () => (loadouts ? loadout.active : null),
+  };
+  // Mounted for the app's whole life: the hotbar's way to the deck.
+  useEffect(
+    () =>
+      provideHotbarHandlers({
+        toggleCard: (itemId, from) =>
+          hotbarRef.current.toggleCard(itemId, from),
+        switchLoadout: (to) => hotbarRef.current.switchLoadout(to),
+        activeLoadout: () => hotbarRef.current.activeLoadout(),
+      }),
+    [],
+  );
+
+  /** The right-click menus' "Add to hotbar": onto its first empty slot. */
+  const hotbarMenuItems = (itemId: string, close: () => void) =>
+    hotbarTakes(itemId)
+      ? [
+          {
+            label: "Add to hotbar",
+            onClick: () => {
+              if (!addToHotbar(itemId))
+                notify("The hotbar's full: drag it onto a slot instead");
+              close();
+            },
+          },
+        ]
+      : [];
 
   /** The side a worn Accessory would move to if let go over `over` — the other
    * Accessory box, or nothing. It's the only move there is within the deck:
@@ -2227,6 +2299,7 @@ function InventoryViewImpl({
                     setDeckMenu(null);
                   },
                 },
+                ...hotbarMenuItems(unit.itemId, () => setDeckMenu(null)),
                 // Sells exactly the worn copy — a box holds one, so there's no
                 // quantity to pick. Selling it takes it off; rare and up still
                 // ask first (see requestSell). A copy the other loadout also
@@ -2267,8 +2340,7 @@ function InventoryViewImpl({
                     setTileMenu(null);
                   },
                 },
-                // A consumable: eat one now, or put the stack on a Town
-                // hotbar key.
+                // A consumable: eat one now.
                 ...(def?.consumable
                   ? [
                       {
@@ -2281,15 +2353,9 @@ function InventoryViewImpl({
                           setTileMenu(null);
                         },
                       },
-                      ...HOTBAR_KEYS.map((key) => ({
-                        label: `Hotbar ${key}`,
-                        onClick: () => {
-                          assignHotbar(key, tile.itemId);
-                          setTileMenu(null);
-                        },
-                      })),
                     ]
                   : []),
+                ...hotbarMenuItems(tile.itemId, () => setTileMenu(null)),
                 ...(def?.sellPrice
                   ? [
                       {
