@@ -103,10 +103,12 @@ export function useDragToHotbar(): {
         setHotbarDrag({ over: hotbarSlotAt(ev.clientX, ev.clientY) });
       };
       const up = (ev: PointerEvent) => {
+        // Hit-tested before `done()` lowers the hotbar under the windows
+        // again: a slot a window covers is only reachable while it's raised.
+        const over = dragging ? hotbarSlotAt(ev.clientX, ev.clientY) : null;
         done();
         if (!dragging) return;
         dragged.current = true;
-        const over = hotbarSlotAt(ev.clientX, ev.clientY);
         const { from } = opts;
         if (from === undefined) {
           if (over !== null) assignHotbar(over, value);
