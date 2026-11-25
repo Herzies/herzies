@@ -516,6 +516,74 @@ export function sfxRimshotSlam(): void {
     );
 }
 
+/** A Silencio's wind-up: a long "shhh" of breath swelling over `seconds`,
+ * the lute's low strings humming under it and drawing down as the breath
+ * is held, timed to burst on the sweep. Stop it (the wind-up cut short) and
+ * it falls silent at once. */
+export function sfxSilencioWindup(seconds: number): { stop(): void } {
+  const a = audio();
+  if (!a) return { stop() {} };
+  const { ctx: c } = a;
+  // Its own bus, so it can be cut.
+  const bus = c.createGain();
+  bus.gain.value = 1;
+  bus.connect(a.out);
+  const sub = { ...a, out: bus as AudioNode as GainNode };
+  const k = wobble(0.02);
+  // The breath: bright noise, a gentle band, swelling to the burst.
+  const src = c.createBufferSource();
+  src.buffer = a.noise;
+  src.loop = true;
+  const f = c.createBiquadFilter();
+  f.type = "bandpass";
+  f.frequency.setValueAtTime(3800 * k, c.currentTime);
+  f.frequency.linearRampToValueAtTime(5200 * k, c.currentTime + seconds);
+  f.Q.value = 0.8;
+  const g = c.createGain();
+  const t = c.currentTime;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.11, t + seconds * 0.85);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + seconds + 0.05);
+  src.connect(f).connect(g).connect(bus);
+  src.start(t, Math.random() * 0.4);
+  src.stop(t + seconds + 0.08);
+  // The strings: a low fifth, sinking a touch as it's drawn in.
+  tone(sub, "triangle", 147 * k, 139 * k, 0.07, seconds * 0.4, seconds * 0.6);
+  tone(sub, "triangle", 220 * k, 208 * k, 0.05, seconds * 0.4, seconds * 0.6);
+  return {
+    stop() {
+      const now = c.currentTime;
+      bus.gain.cancelScheduledValues(now);
+      bus.gain.setValueAtTime(bus.gain.value, now);
+      bus.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
+      setTimeout(() => bus.disconnect(), 120);
+    },
+  };
+}
+
+/** A Silencio bursting: a soft whoosh rushing out and down, a muffled
+ * thump under it, and a strum of muted strings falling away to nothing. */
+export function sfxSilencio(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.04);
+  noiseBurst(a, "bandpass", 2600 * k, 280 * k, 1.1, 0.34, 0.5);
+  tone(a, "sine", 96 * k, 44, 0.42, 0.006, 0.4);
+  // The strum, damped at once: low to high, quieter with each string.
+  const strings = [196, 247, 294, 392];
+  for (let i = 0; i < strings.length; i++)
+    tone(
+      a,
+      "triangle",
+      strings[i] * k,
+      strings[i] * k * 0.97,
+      0.09 - i * 0.015,
+      0.002,
+      0.12,
+      i * 0.018,
+    );
+}
+
 /** A stun taking: a dizzy wobble of little bells, round and round. */
 export function sfxStun(): void {
   const a = audio();

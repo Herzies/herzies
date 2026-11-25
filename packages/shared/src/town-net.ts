@@ -1082,18 +1082,20 @@ export type ServerMessage =
    * can see it; a blow a dome took, or one on the boss, sends none. Older
    * apps ignore it. */
   | { t: "trap"; by: number; target: number; mob?: true; until: number }
-  /** A Forbidden Frequency bleed on herzie `target` (a mob's id when `mob`;
-   * the boss when `boss`, `target` 0): `stacks` of it until `until` (server
-   * ms), thrown by `by` (its newest thrower's entity id). Sent when a hit
-   * adds a stack or starts it over, and with `stacks` 0 when it ends
-   * early (the target fell). Its ticks' damage comes as ordinary hits.
-   * Older apps ignore it. */
+  /** A bleed on herzie `target` (a mob's id when `mob`; the boss when
+   * `boss`, `target` 0): `stacks` of it until `until` (server ms), thrown
+   * by `by` (its newest thrower's entity id). Forbidden Frequency's, or
+   * Silencio's when `skill` says so (its own, beside the other: one of
+   * each on a target). Sent when a hit adds a stack or starts it over, and
+   * with `stacks` 0 when it ends early (the target fell). Its ticks'
+   * damage comes as ordinary hits. Older apps ignore it. */
   | {
       t: "bleed";
       by: number;
       target: number;
       mob?: true;
       boss?: true;
+      skill?: "silencio";
       stacks: number;
       until: number;
     }

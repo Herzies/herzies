@@ -108,15 +108,15 @@ function Statue({
         zIndexRange={[20, 0]}
         style={{ pointerEvents: "none" }}
       >
-        {/* "champion" over the name, smaller, as a worn title reads over a
-            herzie's. */}
+        {/* "champion" under the name, smaller, as a worn title reads under
+            a herzie's. */}
         <div
           ref={plaque}
           style={{ opacity: 0 }}
           className="whitespace-nowrap text-center text-[9px] leading-tight text-white [text-shadow:0_1px_3px_#000,0_0_6px_#000]"
         >
-          champion
           <div className="text-[10px] text-white">{champion.name}</div>
+          champion
         </div>
       </Html>
     </group>

@@ -36,7 +36,6 @@ import {
   type LoadoutTarget,
   loadoutOfSlot,
   loadoutSlot,
-  MAX_CLASS_SKILLS,
   skillOfSlot,
   skillSlot,
   useHotbar,
@@ -451,17 +450,15 @@ export function Hotbar({
       </button>
     );
   const extraRows = [
-    ...skills.list
-      .slice(0, MAX_CLASS_SKILLS)
-      .map((s, i) =>
-        pickRow(
-          s.id,
-          SKILL_ABBR[s.id],
-          skillTextColour(s.id),
-          SKILL_DEFS[s.id].name,
-          skillSlot(i + 1),
-        ),
+    ...skills.list.map((s, i) =>
+      pickRow(
+        s.id,
+        SKILL_ABBR[s.id],
+        skillTextColour(s.id),
+        SKILL_DEFS[s.id].name,
+        skillSlot(i + 1),
       ),
+    ),
     ...(loadouts
       ? ([1, 2, "swap"] as const).map((n) =>
           pickRow(

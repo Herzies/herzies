@@ -12,7 +12,7 @@
 // Duels too: in each tab, click the other's name (or stand by them and
 // press E), then "Challenge to duel" ([1])
 // (within 8 u); `&title=` wears a title (a titles.ts id, e.g.
-// `&title=duel-10`), shown over the name and on the duel's cards.
+// `&title=duel-10`), shown under the name and on the duel's cards.
 // `?map=bossroom` (with `?net=local`) joins the boss's cave on `wrangler dev`
 // (`&lobby=20` makes it a raid that locks 20 s after loading; `&per=` sets
 // its health per herzie)

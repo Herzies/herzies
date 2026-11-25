@@ -45,10 +45,12 @@ import {
   MULTISPIN,
   multispinRecords,
   RIMSHOT,
+  SILENCIO,
   SKILL_COOLDOWN_GRACE_MS,
   SKILL_DEFS,
   type SkillId,
   shuffleBounces,
+  skillDurationMs,
   skillValue,
 } from "@herzies/shared/skills";
 import { buffMult, healMult } from "@herzies/shared/stats";
@@ -61,7 +63,7 @@ import {
   TOWN_MAPS,
   type TownMapId,
 } from "@herzies/shared/town-net";
-import { Bleeds } from "./bleed";
+import { BLEED_SKILLS, type BleedSkill, Bleeds, bleedTag } from "./bleed";
 import {
   focused,
   quickness,
@@ -170,8 +172,15 @@ type Fighter = PvpKit & {
   rootUntil: number;
   rootAt: { x: number; z: number };
   roots: StunReturns;
-  /** A Rimshot winding up: it lands at `until` where it began. */
-  slam: { until: number; x: number; z: number; level: number } | null;
+  /** A Rimshot or a Silencio winding up: it lands at `until` where it
+   * began. */
+  slam: {
+    skill: "rimshot" | "silencio";
+    until: number;
+    x: number;
+    z: number;
+    level: number;
+  } | null;
   /** Its Multispin's records, while they spin. */
   spin: Spin | null;
   /** Outside the ring: it yields at `outUntil`; while stunned (or held)
@@ -203,9 +212,9 @@ type Duel = {
   /** Hits in flight: rolled at the cast, judged as they land. */
   pending: PendingHit[];
   domes: ShelterDome[];
-  /** Forbidden Frequency's discs and bleeds, by the bleeding duelist's
-   * uid. */
-  bleeds: Bleeds;
+  /** Bleeds by the bleeding duelist's uid: Forbidden Frequency's discs
+   * and bleeds, and Silencio's. */
+  bleeds: Record<BleedSkill, Bleeds>;
 };
 
 type PendingHit = {
@@ -219,7 +228,8 @@ type PendingHit = {
   /** A Cymbal Trap's: how long it holds its victim (ms, before the
    * returns). */
   hold?: number;
-  /** One of a Forbidden Frequency's bleed hits (said so to its thrower). */
+  /** One of a Forbidden Frequency's or a Silencio's bleed hits (said so
+   * to its thrower). */
   bleed?: true;
 };
 
@@ -689,7 +699,7 @@ export class DuelRuntime {
         BARD_BUFF_MAX[skillId],
         value * buffMult(f.stats.euphony),
       );
-      const until = now + (def.durationMs ?? 0);
+      const until = now + skillDurationMs(skillId, level);
       out.push(
         all(
           buffMsg(
@@ -702,7 +712,7 @@ export class DuelRuntime {
       // Records round it for its length: the opponent takes a hit from
       // each it touches (stepSpins). The app draws them from the buff.
       const records = multispinRecords(level);
-      const until = now + (def.durationMs ?? 0);
+      const until = now + skillDurationMs(skillId, level);
       f.spin = new Spin(now, until, records);
       out.push(
         all(
@@ -714,7 +724,7 @@ export class DuelRuntime {
       );
     } else if (skillId === "shuffle") {
       // Nothing near the opponent to bounce on to: a buff, for the HUD.
-      const until = now + (def.durationMs ?? 0);
+      const until = now + skillDurationMs(skillId, level);
       const bounces = shuffleBounces(level);
       out.push(
         all(
@@ -755,7 +765,7 @@ export class DuelRuntime {
             )
           : null;
       if (hit)
-        d.bleeds.throw({
+        d.bleeds["forbidden-frequency"].throw({
           at: now + discLandsAfterMs(hit.dist),
           by: uid,
           key: o.uid,
@@ -784,9 +794,10 @@ export class DuelRuntime {
           CYMBAL_TRAP.damage * duelAttackShare("melee", STRIKE_DAMAGE),
           Math.round(value * 1000),
         );
-    } else if (skillId === "rimshot") {
+    } else if (skillId === "rimshot" || skillId === "silencio") {
       // The wind-up: it lands where it began, when it's done (stepSlams).
       f.slam = {
+        skill: skillId,
         until: now + (def.castMs ?? 0),
         x: pos.x,
         z: pos.z,
@@ -797,7 +808,8 @@ export class DuelRuntime {
   }
 
   /** Advance to `now`: challenges run out, countdowns end, hits land,
-   * Rimshots slam, the ring's edge and the clock are judged. */
+   * Rimshots slam and Silencios burst, the ring's edge and the clock are
+   * judged. */
   step(now: number): DuelEffects {
     const e = effects();
     for (const ask of [...this.asks.values()]) {
@@ -845,8 +857,11 @@ export class DuelRuntime {
     d.domes = d.domes.filter((x) => x.until > now);
   }
 
-  /** Rimshots whose wind-up is done slam: the opponent, if within reach
-   * of where it began, takes the blow and rolls for a stun. */
+  /** Wind-ups that are done land where they began. A Rimshot's slam: the
+   * opponent, if within reach, takes the blow and rolls for a stun. A
+   * Silencio's wave: the opponent, if within reach, bleeds (stepBleeds:
+   * a dome of its own takes it); a herzie moves itself, so it isn't
+   * flung. */
   private stepSlams(d: Duel, now: number, e: DuelEffects) {
     for (const [f, o] of [
       [d.a, d.b],
@@ -857,12 +872,22 @@ export class DuelRuntime {
       f.slam = null;
       if (!inDuelRing(d.centre, s)) continue;
       const seen = seenAt(this.history, o.uid, now);
+      const reach = s.skill === "silencio" ? SILENCIO.radius : RIMSHOT.radius;
       if (
         !seen ||
-        Math.hypot(seen.x - s.x, seen.z - s.z) >
-          RIMSHOT.radius + HERZIE_BODY.radius
+        Math.hypot(seen.x - s.x, seen.z - s.z) > reach + HERZIE_BODY.radius
       )
         continue;
+      if (s.skill === "silencio") {
+        d.bleeds.silencio.throw({
+          at: now,
+          by: f.uid,
+          key: o.uid,
+          level: s.level,
+          stats: focused(f.stats, f.buffs, now),
+        });
+        continue;
+      }
       // Two blows of a stick.
       this.queue(
         d,
@@ -877,51 +902,55 @@ export class DuelRuntime {
     }
   }
 
-  /** Forbidden Frequency discs that arrived take hold (unless a dome took
-   * them), and bleeds tick: stacks × its share of a wave at a disc's share
-   * (as Backspin's), from its thrower's stats without a crit and as hard
-   * as its Rage makes it, landing as a hit at once (so Def and domes have
-   * their say in land). */
+  /** Bleeds that arrived (Forbidden Frequency's discs, Silencio's at once)
+   * take hold (unless a dome took them), and bleeds tick: stacks × its
+   * skill's share of a wave at a disc's share (as Backspin's), from its
+   * thrower's stats without a crit and as hard as its Rage makes it,
+   * landing as a hit at once (so Def and domes have their say in land). */
   private stepBleeds(d: Duel, now: number, e: DuelEffects) {
-    for (const disc of d.bleeds.landed(now)) {
-      const [victim, by] = this.pair(d, disc.key);
-      const dome = shelterOf(
-        d.domes.filter((x) => x.by === victim.uid),
-        {
-          uid: victim.uid,
-          alive: true,
-          maxHp: victim.maxHp,
-          posAt: (t) => this.history.at(victim.uid, t),
-        },
-        disc.at,
-      );
-      if (dome) continue;
-      const b = d.bleeds.stack(disc, now);
-      e.out.push(
-        all({
-          t: "bleed",
-          by: by.id,
-          target: victim.id,
-          stacks: b.stacks,
-          until: b.until,
-        }),
-      );
-    }
-    for (const { key, bleed: b } of d.bleeds.ticks(now)) {
-      const [victim, by] = this.pair(d, key);
-      const { amount } = hitDamage({ ...b.stats, critChance: 0 }, this.rand);
-      d.pending.push({
-        at: now,
-        by: by.uid,
-        to: victim.uid,
-        amount,
-        crit: false,
-        mult:
-          skillValue("forbidden-frequency", b.level) *
-          DUEL.discShare *
-          buffMultiplier(by.buffs, "damage", now),
-        bleed: true,
-      });
+    for (const skill of BLEED_SKILLS) {
+      const bleeds = d.bleeds[skill];
+      for (const disc of bleeds.landed(now)) {
+        const [victim, by] = this.pair(d, disc.key);
+        const dome = shelterOf(
+          d.domes.filter((x) => x.by === victim.uid),
+          {
+            uid: victim.uid,
+            alive: true,
+            maxHp: victim.maxHp,
+            posAt: (t) => this.history.at(victim.uid, t),
+          },
+          disc.at,
+        );
+        if (dome) continue;
+        const b = bleeds.stack(disc, now);
+        e.out.push(
+          all({
+            t: "bleed",
+            by: by.id,
+            target: victim.id,
+            ...bleedTag(skill),
+            stacks: b.stacks,
+            until: b.until,
+          }),
+        );
+      }
+      for (const { key, bleed: b } of bleeds.ticks(now)) {
+        const [victim, by] = this.pair(d, key);
+        const { amount } = hitDamage({ ...b.stats, critChance: 0 }, this.rand);
+        d.pending.push({
+          at: now,
+          by: by.uid,
+          to: victim.uid,
+          amount,
+          crit: false,
+          mult:
+            skillValue(skill, b.level) *
+            DUEL.discShare *
+            buffMultiplier(by.buffs, "damage", now),
+          bleed: true,
+        });
+      }
     }
   }
 
@@ -1153,7 +1182,10 @@ export class DuelRuntime {
       suddenSaid: false,
       pending: [],
       domes: [],
-      bleeds: new Bleeds(FORBIDDEN_FREQUENCY.herzieMs),
+      bleeds: {
+        "forbidden-frequency": new Bleeds(FORBIDDEN_FREQUENCY.herzieMs),
+        silencio: new Bleeds(SKILL_DEFS.silencio.durationMs ?? 0, 1),
+      },
     };
     e.out.push(all(this.stateMsg(d)));
     for (const f of [d.a, d.b]) {
@@ -1293,7 +1325,7 @@ export class DuelRuntime {
     return f.buffs.find((b) => b.id === next.id) as Buff;
   }
 
-  /** A Rimshot winding up is lost; the room sees it stop. */
+  /** A Rimshot or a Silencio winding up is lost; the room sees it stop. */
   private dropSlam(f: Fighter, e: DuelEffects) {
     if (!f.slam) return;
     f.slam = null;

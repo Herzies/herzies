@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildCreatureModel,
   castHand,
+  HUSH,
+  hushBody,
   SLAM,
   type Sphere,
   slamBody,
@@ -16,6 +18,8 @@ import {
   DRAW_SECONDS,
   HerzieModel,
   HITSTOP_SECONDS,
+  HUSH_RELEASE_SECONDS,
+  HUSH_SECONDS,
   JUMP_AIR_SECONDS,
   JUMP_HEIGHT,
   MODEL_SCALE,
@@ -1201,6 +1205,52 @@ describe("a slam (Rimshot)", () => {
     expect(h.casting).toBe(false);
     h.update(0.6, 0);
     expect(h.released).toBe(false);
+  });
+});
+
+describe("a hush (Silencio)", () => {
+  const BARD = {
+    seed: "model-test",
+    stage: 3,
+    equipped: { main_hand: "lute" },
+  };
+
+  it("bursts once, at the end of Silencio's wind-up, and takes its own time", () => {
+    const h = new HerzieModel(BARD);
+    h.cast(0, { style: "hush" });
+    let burst = 0;
+    let at = -1;
+    let t = 0;
+    for (; t < HUSH_SECONDS + 0.2; t += 1 / 120) {
+      h.update(1 / 120, 0);
+      if (h.released) {
+        burst++;
+        at = t;
+      }
+      if (!h.casting) break;
+    }
+    expect(burst).toBe(1);
+    expect(at).toBeCloseTo(HUSH_RELEASE_SECONDS, 1);
+    expect(HUSH_RELEASE_SECONDS * 1000).toBeCloseTo(
+      SKILL_DEFS.silencio.castMs ?? 0,
+    );
+    expect(t).toBeGreaterThan(HUSH_SECONDS - 0.02);
+  });
+
+  it("draws the lute in before the chest, then sweeps it out wide", () => {
+    // Creature space: y down, front −z; an arm-l's outward side is −x.
+    const close = castHand(HUSH.gather - 0.01, 0, "arm-l", "hush");
+    expect(close.dir[2]).toBeLessThan(-0.8);
+    expect(close.reach).toBeLessThan(0.9);
+    const wide = castHand(HUSH.release + 0.01, 0, "arm-l", "hush");
+    expect(Math.abs(wide.dir[0])).toBeGreaterThan(0.8);
+    expect(wide.reach).toBeGreaterThan(1.5);
+  });
+
+  it("crouches over it, then stretches open on the burst", () => {
+    expect(hushBody(HUSH.drawn).squash).toBeGreaterThan(0.05);
+    expect(hushBody(HUSH.release + 0.005).squash).toBeLessThan(-0.08);
+    expect(Math.abs(hushBody(0.999).squash)).toBeLessThan(0.03);
   });
 });
 

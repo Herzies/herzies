@@ -37,6 +37,7 @@ import {
   cymbalLandsAfterMs,
   MULTISPIN,
   RIMSHOT,
+  SILENCIO,
   SKILL_DEFS,
   shuffleOn,
   skillValue,
@@ -48,7 +49,7 @@ import {
   towerMob,
 } from "@herzies/shared/tower";
 import type { TowerFloor, TowerMob } from "@herzies/shared/town-net";
-import { Bleeds } from "./bleed";
+import { BLEED_SKILLS, type BleedSkill, Bleeds, bleedTag } from "./bleed";
 import {
   type BossEvent,
   type BossPlayer,
@@ -89,10 +90,14 @@ export class TowerEngine {
   private buffs = new Map<string, Buff[]>();
   /** Cymbrella domes standing (or about to). */
   private domes: ShelterDome[] = [];
-  /** Forbidden Frequency's discs and bleeds, by mob id (a minute each). */
-  private bleeds = new Bleeds(
-    SKILL_DEFS["forbidden-frequency"].durationMs ?? 0,
-  );
+  /** Bleeds by mob id: Forbidden Frequency's discs and bleeds (a minute
+   * each), and Silencio's (one stack each). */
+  private bleeds: Record<BleedSkill, Bleeds> = {
+    "forbidden-frequency": new Bleeds(
+      SKILL_DEFS["forbidden-frequency"].durationMs ?? 0,
+    ),
+    silencio: new Bleeds(SKILL_DEFS.silencio.durationMs ?? 0, 1),
+  };
   /** Each herzie's climb's boons, added up (towerBoonTotals). */
   private boons = new Map<string, Record<TowerBoonId, number>>();
   /** For a Rimshot's stun (apart from the pack's own rolls). */
@@ -284,7 +289,7 @@ export class TowerEngine {
     this.pack.floor++;
     this.cleared = false;
     this.chest = null;
-    this.bleeds.clear();
+    for (const skill of BLEED_SKILLS) this.bleeds[skill].clear();
     this.pack.spawnFloor(now);
     return true;
   }
@@ -467,7 +472,7 @@ export class TowerEngine {
       DISC_RANGE,
     );
     if (!target) return false;
-    this.bleeds.throw({
+    this.bleeds["forbidden-frequency"].throw({
       at: now + discLandsAfterMs(target.dist),
       by: uid,
       key: String(target.mob.id),
@@ -477,31 +482,58 @@ export class TowerEngine {
     return true;
   }
 
-  /** Discs that arrived take hold on mobs still standing, and bleeds tick
-   * (see BossEngine's). */
-  private stepBleeds(now: number, events: TowerEvent[]) {
-    for (const d of this.bleeds.landed(now)) {
-      if (!this.pack.byId(Number(d.key))) continue;
-      const b = this.bleeds.stack(d, now);
-      events.push({
-        t: "bleed",
-        uid: b.by,
-        mob: Number(d.key),
-        stacks: b.stacks,
-        until: b.until,
+  /** Silencio bursts at `at`, like {@link BossEngine.silencio}: every mob
+   * whose body is within SILENCIO.radius bleeds, and is shoved out before
+   * its wave. How many it caught. */
+  silencio(
+    uid: string,
+    at: { x: number; z: number },
+    stats: HitStats,
+    level: number,
+    now: number,
+  ): number {
+    const caught = this.pack.within(at, SILENCIO.radius, now - SEEN_LAG_MS);
+    for (const m of caught)
+      this.bleeds.silencio.throw({
+        at: now,
+        by: uid,
+        key: String(m.id),
+        level,
+        stats,
       });
-    }
-    for (const { key, bleed: b } of this.bleeds.ticks(now)) {
-      const mob = this.pack.byId(Number(key));
-      if (!mob) continue;
-      this.pack.queue(
-        b.by,
-        mob,
-        now,
-        { ...b.stats, critChance: 0 },
-        skillValue("forbidden-frequency", b.level) * this.damageMult(b.by, now),
-        "forbidden-frequency",
-      );
+    this.pack.wave(at, now);
+    return caught.length;
+  }
+
+  /** Bleeds that arrived take hold on mobs still standing, and bleeds
+   * tick (see BossEngine's). */
+  private stepBleeds(now: number, events: TowerEvent[]) {
+    for (const skill of BLEED_SKILLS) {
+      const bleeds = this.bleeds[skill];
+      for (const d of bleeds.landed(now)) {
+        if (!this.pack.byId(Number(d.key))) continue;
+        const b = bleeds.stack(d, now);
+        events.push({
+          t: "bleed",
+          uid: b.by,
+          mob: Number(d.key),
+          ...bleedTag(skill),
+          stacks: b.stacks,
+          until: b.until,
+        });
+      }
+      for (const { key, bleed: b } of bleeds.ticks(now)) {
+        const mob = this.pack.byId(Number(key));
+        if (!mob) continue;
+        this.pack.queue(
+          b.by,
+          mob,
+          now,
+          { ...b.stats, critChance: 0 },
+          skillValue(skill, b.level) * this.damageMult(b.by, now),
+          skill,
+        );
+      }
     }
   }
 
@@ -569,15 +601,18 @@ export class TowerEngine {
     for (const ev of this.pack.update(now, players, this.judge)) {
       events.push(ev);
       if (ev.t !== "mobDown") continue;
-      const b = this.bleeds.end(String(ev.mob));
-      if (b)
-        events.push({
-          t: "bleed",
-          uid: b.by,
-          mob: ev.mob,
-          stacks: 0,
-          until: now,
-        });
+      for (const skill of BLEED_SKILLS) {
+        const b = this.bleeds[skill].end(String(ev.mob));
+        if (b)
+          events.push({
+            t: "bleed",
+            uid: b.by,
+            mob: ev.mob,
+            ...bleedTag(skill),
+            stacks: 0,
+            until: now,
+          });
+      }
     }
     if (!this.cleared && this.pack.size > 0 && !this.pack.alive.length) {
       this.cleared = true;

@@ -801,8 +801,8 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       setHealer(m.id, m.heal);
       return;
     case "channel": {
-      // A Rimshot's wind-up cut short (its Percussionist knocked out): not a
-      // Resurrect at all.
+      // A Rimshot's or a Silencio's wind-up cut short (its caster knocked
+      // out, stunned or gone): not a Resurrect at all.
       if (m.target === null && cancelSlam(m.by)) return;
       if (m.target === null) {
         const was = skills.channels.get(m.by);
@@ -865,9 +865,10 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       if (m.skill === "taunt") sfxTaunt();
       // A teammate's dome going up: the call to run in.
       else if (m.skill === "cymbrella") sfxDomeUp();
-      // A teammate's Rimshot winding up (their herzie plays it: see
-      // RemotePlayers).
-      else if (m.skill === "rimshot") beginSlam(m.by, m.x, m.z, now);
+      // A teammate's Rimshot or Silencio winding up (their herzie plays
+      // it: see RemotePlayers).
+      else if (m.skill === "rimshot" || m.skill === "silencio")
+        beginSlam(m.by, m.skill, m.x, m.z, now);
       // A Cymbal Trap thrown (their herzie throws it: see RemotePlayers).
       else if (m.skill === "cymbal-trap") {
         throwCymbal(m.by, m.x, m.z, m.yaw, now);
@@ -901,9 +902,11 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       sfxCymbalClang();
       return;
     case "bleed": {
-      // A Forbidden Frequency's bleed on something (yours too), its
-      // stacks and how long; 0 stacks: over. Its ticks come as hits.
+      // A bleed on something (yours too), Forbidden Frequency's or
+      // Silencio's, its stacks and how long; 0 stacks: over. Its ticks
+      // come as hits.
       const landed = setBleed(
+        m.skill ?? "forbidden-frequency",
         m.boss
           ? { kind: "boss" }
           : m.mob
@@ -914,7 +917,9 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
         m.by,
         now,
       );
-      if (landed) sfxBleedStack();
+      // A Silencio's lands on everything it caught at once: its burst is
+      // the sound of it (sfxSilencio), not a tick a target.
+      if (landed && !m.skill) sfxBleedStack();
       return;
     }
     case "buff":
@@ -945,9 +950,9 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
         clearBuff(clock.you() ?? -1, id);
       // Nor the dome you put up: nobody may run into one that isn't there.
       if (id === "cymbrella") removeDome(clock.you() ?? -1);
-      // Nor the Rimshot you wound up: it never lands (Combat sees the slam
-      // gone and stops the swing, the root and the drum roll).
-      if (id === "rimshot") cancelSlam(clock.you() ?? -1);
+      // Nor the Rimshot or Silencio you wound up: it never lands (Combat
+      // sees it gone and stops the motion, the root and the wind-up sound).
+      if (id === "rimshot" || id === "silencio") cancelSlam(clock.you() ?? -1);
       // Nor the cymbal you threw.
       if (id === "cymbal-trap") cancelCymbal(clock.you() ?? -1);
       // Nor the Forbidden Frequency disc: gone from the air.

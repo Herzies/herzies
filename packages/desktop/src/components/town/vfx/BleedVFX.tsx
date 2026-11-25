@@ -34,12 +34,14 @@ const FADE_MS = 400;
 /** The aura: a band round the body with a corrupted waveform running
  * round it, blocks of it jumping sideways, a cyan ghost split off it;
  * louder and wilder with more stacks (uIntensity, 1/3 to 1), flaring as a
- * stack lands. */
+ * stack lands. A Silencio's (uHush 1) is its hush instead: a soft, slow
+ * indigo line, near flat, sinking as it fades at the edges. */
 const AURA_FRAG = /* glsl */ `
   uniform float uTime;
   uniform float uIntensity;
   uniform float uAlpha;
   uniform float uFlare;
+  uniform float uHush;
   varying vec2 vUv;
   float hash(float n) { return fract(sin(n) * 43758.5453); }
   void main() {
@@ -57,7 +59,13 @@ const AURA_FRAG = /* glsl */ `
       + vec3(1.0, 0.3, 0.8) * uFlare;
     float a = ((line + ghost * 0.6) * (0.5 + 0.5 * uIntensity) + uFlare * 0.2)
       * edge * uAlpha;
-    gl_FragColor = vec4(col, a);
+    // The hush: a barely-there tone sinking round the body.
+    float hw = 0.62 - fract(t * 0.35) * 0.3 + 0.025 * sin(vUv.x * 12.566 + t * 1.7);
+    float hline = smoothstep(0.045, 0.0, abs(vUv.y - hw));
+    float hfade = smoothstep(0.32, 0.45, hw) * smoothstep(0.66, 0.6, hw);
+    vec3 hcol = vec3(0.5, 0.42, 0.95) * hline + vec3(0.75, 0.65, 1.0) * uFlare;
+    float ha = (hline * 0.55 * hfade + uFlare * 0.15) * edge * uAlpha;
+    gl_FragColor = vec4(mix(col, hcol, uHush), mix(a, ha, uHush));
   }
 `;
 
@@ -114,9 +122,10 @@ function findTarget(b: Bleed, map: TownMap): boolean {
  * glitching, flying out along the throw until it lands (or reaches as far
  * as a disc goes); and on whatever bleeds, a corrupted soundwave round its
  * body and specks of static rising off it, wilder with each stack, until
- * the bleed runs out (its stacks show by the health bar: BleedDrop).
- * Pooled: a mesh per aura and disc, one points cloud; nothing is made
- * while fighting.
+ * the bleed runs out (its stacks show by the health bar: BleedDrop). A
+ * Silencio's bleed has its own quieter look: a soft line sinking round the
+ * body, pale motes settling. Pooled: a mesh per aura and disc, one points
+ * cloud; nothing is made while fighting.
  */
 export function BleedVFX({ map }: { map: TownMap }) {
   const fx = useMemo(() => {
@@ -132,6 +141,7 @@ export function BleedVFX({ map }: { map: TownMap }) {
             uIntensity: { value: 0 },
             uAlpha: { value: 1 },
             uFlare: { value: 0 },
+            uHush: { value: 0 },
           },
           vertexShader: /* glsl */ `
             varying vec2 vUv;
@@ -157,18 +167,14 @@ export function BleedVFX({ map }: { map: TownMap }) {
     const speckCount = MAX * SPECKS * FORBIDDEN_FREQUENCY.maxStacks;
     const speckPos = new Float32Array(speckCount * 3);
     const speckCol = new Float32Array(speckCount * 3);
-    for (let i = 0; i < speckCount; i++) {
-      // Mostly violet, now and then a cyan or a hot pink one.
-      const r = hash(i * 7.31);
-      const c =
-        r < 0.6 ? [0.65, 0.25, 1] : r < 0.8 ? [0.2, 0.9, 1] : [1, 0.3, 0.8];
-      speckCol.set(c, i * 3);
-    }
     const speckGeo = new THREE.BufferGeometry();
     const speckAttr = new THREE.BufferAttribute(speckPos, 3);
     speckAttr.setUsage(THREE.DynamicDrawUsage);
     speckGeo.setAttribute("position", speckAttr);
-    speckGeo.setAttribute("color", new THREE.BufferAttribute(speckCol, 3));
+    // Coloured as they're drawn: a Forbidden Frequency's or a Silencio's.
+    const speckColAttr = new THREE.BufferAttribute(speckCol, 3);
+    speckColAttr.setUsage(THREE.DynamicDrawUsage);
+    speckGeo.setAttribute("color", speckColAttr);
     speckGeo.setDrawRange(0, 0);
     const speckMat = new THREE.PointsMaterial({
       size: 0.075,
@@ -206,6 +212,7 @@ export function BleedVFX({ map }: { map: TownMap }) {
       specks,
       speckCount,
       speckAttr,
+      speckColAttr,
       speckGeo,
       speckMat,
       discs,
@@ -235,38 +242,54 @@ export function BleedVFX({ map }: { map: TownMap }) {
       const now = state.now;
       const alpha = Math.min(1, Math.max(0, (b.until - now) / FADE_MS));
       const flare = Math.max(0, 1 - (now - b.landedAt) / FLARE_MS);
+      const hush = b.skill === "silencio";
       const stacks = Math.min(FORBIDDEN_FREQUENCY.maxStacks, b.stacks);
       const intensity = stacks / FORBIDDEN_FREQUENCY.maxStacks;
 
       const aura = fx.auras[state.aura++];
       aura.visible = true;
       aura.position.set(spot.x, spot.ground + spot.height * 0.5, spot.z);
-      aura.scale.set(
-        spot.radius * (1 + 0.08 * flare),
-        spot.height * 0.7,
-        spot.radius * (1 + 0.08 * flare),
-      );
+      // A Silencio's sits a touch wider, so beside a Forbidden Frequency's
+      // on the same body both read.
+      const wide = (hush ? 1.12 : 1) * (1 + 0.08 * flare);
+      aura.scale.set(spot.radius * wide, spot.height * 0.7, spot.radius * wide);
       const u = (aura.material as THREE.ShaderMaterial).uniforms;
       u.uTime.value = now / 1000 + spot.x * 0.13;
       u.uIntensity.value = intensity;
       u.uAlpha.value = alpha;
       u.uFlare.value = flare;
+      u.uHush.value = hush ? 1 : 0;
 
       // Static rising off it: specks drifting up round the body, now and
-      // then jumping sideways, as a glitch does.
+      // then jumping sideways, as a glitch does. A Silencio's: a few pale
+      // motes settling slowly down, as dust does in a quiet room.
       const pos = fx.speckAttr.array as Float32Array;
-      const n = SPECKS * stacks;
+      const col = fx.speckColAttr.array as Float32Array;
+      const n = hush ? Math.ceil(SPECKS / 2) : SPECKS * stacks;
       const t = now / 1000;
       for (let j = 0; j < n && state.speck < fx.speckCount; j++) {
         const seed = j * 12.9898 + (b.landedAt % 997);
-        const rise = (hash(seed) + t * (0.45 + 0.3 * hash(seed + 1))) % 1;
-        const jump = hash(Math.floor(t * 12) + j * 3.7) > 0.85 ? 0.5 : 0;
-        const ang = hash(seed + 2) * Math.PI * 2 + t * 0.8 + jump;
+        const speed = hush
+          ? 0.12 + 0.08 * hash(seed + 1)
+          : 0.45 + 0.3 * hash(seed + 1);
+        const rise = (hash(seed) + t * speed) % 1;
+        const jump =
+          !hush && hash(Math.floor(t * 12) + j * 3.7) > 0.85 ? 0.5 : 0;
+        const ang =
+          hash(seed + 2) * Math.PI * 2 + t * (hush ? 0.2 : 0.8) + jump;
         const r = spot.radius * (0.85 + 0.35 * hash(seed + 3));
         const i = state.speck++ * 3;
         pos[i] = spot.x + Math.cos(ang) * r;
-        pos[i + 1] = spot.ground + spot.height * (0.1 + 0.95 * rise);
+        pos[i + 1] =
+          spot.ground +
+          spot.height * (hush ? 1.05 - 0.95 * rise : 0.1 + 0.95 * rise);
         pos[i + 2] = spot.z + Math.sin(ang) * r;
+        // Mostly violet, now and then a cyan or a hot pink one; a
+        // Silencio's, pale lavender.
+        const c = hush ? -1 : hash(seed + 4);
+        col[i] = c < 0 ? 0.55 : c < 0.6 ? 0.65 : c < 0.8 ? 0.2 : 1;
+        col[i + 1] = c < 0 ? 0.5 : c < 0.6 ? 0.25 : c < 0.8 ? 0.9 : 0.3;
+        col[i + 2] = c < 0 ? 0.85 : c < 0.6 ? 1 : c < 0.8 ? 1 : 0.8;
       }
     };
     return { state, visit };
@@ -307,7 +330,10 @@ export function BleedVFX({ map }: { map: TownMap }) {
     walkBleeds(walk.visit);
     for (let i = s.aura; i < fx.auras.length; i++) fx.auras[i].visible = false;
     fx.speckGeo.setDrawRange(0, s.speck);
-    if (s.speck > 0) fx.speckAttr.needsUpdate = true;
+    if (s.speck > 0) {
+      fx.speckAttr.needsUpdate = true;
+      fx.speckColAttr.needsUpdate = true;
+    }
   });
 
   return <primitive object={fx.group} />;

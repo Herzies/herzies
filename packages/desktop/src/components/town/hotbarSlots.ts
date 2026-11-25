@@ -51,8 +51,6 @@ export function loadoutOfSlot(value: string | null): LoadoutTarget | null {
 
 /** How the one class skill was saved before classes had two. */
 const LEGACY_SKILL_SLOT = "skill";
-/** How many skills a class may have (a Bard's third, Haste, at level 15). */
-export const MAX_CLASS_SKILLS = 3;
 
 const STORAGE_KEY = "herzies.town.hotbar";
 /** The first skill starts on the first slot, the second beside it. */

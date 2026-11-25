@@ -15,6 +15,7 @@ import {
   type SkillId,
   shuffleBounces,
   shuffleScale,
+  skillDurationMs,
   skillValue,
   timingAttackSpeed,
   timingCritChance,
@@ -68,13 +69,15 @@ import {
   sfxRage,
   sfxRimshotSlam,
   sfxRimshotWindup,
+  sfxSilencio,
+  sfxSilencioWindup,
   sfxStun,
   sfxSwing,
   sfxTaunt,
 } from "../sfx";
 import { getVitals, useVitals } from "../vitals";
 import { myWildsHp, wildsHeld, wildsOn } from "../wilds/store";
-import { bleedDummy, bleeds } from "./bleeds";
+import { type BleedSkill, bleedDummy, bleeds } from "./bleeds";
 import {
   pushBleedNumber,
   pushDamageNumber,
@@ -111,6 +114,7 @@ import {
   inSlamReach,
   landSlam,
   pendingSlam,
+  type SlamSkill,
 } from "./slams";
 import { slashField } from "./slashes";
 import { healing, stance, toggleStance, useStanceSender } from "./stance";
@@ -146,10 +150,15 @@ const SWING_QUEUE_MS = 1_000;
  * flourish): they wait out a swing under way rather than cut it short. */
 const OWN_MOTION: Partial<Record<SkillId, true>> = {
   rimshot: true,
+  silencio: true,
   "cymbal-trap": true,
   multispin: true,
   "forbidden-frequency": true,
 };
+/** The skills whose bleeds a practice dummy may take, each ticking. */
+const BLEED_SKILLS: readonly BleedSkill[] = ["forbidden-frequency", "silencio"];
+/** How each wind-up skill moves its caster (see HerzieModel's cast). */
+const WINDUP_STYLE = { rimshot: "slam", silencio: "hush" } as const;
 /** Practice: when each of your Multispin's records last touched each
  * dummy, by record (the server keeps the same in a fight). */
 const spinTouches = new WeakMap<DummyState, Float64Array>();
@@ -348,10 +357,11 @@ export function Combat({
     dummy: null as DummyState | null,
     /** The ally the heal bolt under way goes to (an entity id). */
     bolt: null as number | null,
-    /** A Rimshot winding up: its stun chance, when it was pressed, and its
-     * snare roll (cut if the wind-up is). */
-    rimshot: null as null | {
-      chance: number;
+    /** A Rimshot or a Silencio winding up: which, at what level, when it
+     * was pressed, and its wind-up sound (cut if the wind-up is). */
+    windup: null as null | {
+      skill: SlamSkill;
+      level: number;
       at: number;
       roll: { stop(): void };
     },
@@ -450,7 +460,7 @@ export function Combat({
   const slamLands = (herzie: HerzieModel, chance: number, now: number) => {
     const { chest, held } = v.current;
     herzie.root.getWorldPosition(chest);
-    const centre = { x: chest.x, z: chest.z };
+    const centre = { skill: "rimshot" as const, x: chest.x, z: chest.z };
     const hand = herzie.handWorldPosition(held);
     landSlam(bossFight.you ?? -1, [hand.x, hand.y, hand.z], now);
     let stunned = false;
@@ -485,6 +495,41 @@ export function Combat({
     herzie.hitstop(SLAM_HITSTOP_S);
     kick(stunned || struck ? 0.34 : 0.26);
     shake(stunned ? 0.32 : 0.22);
+  };
+
+  /**
+   * A Silencio's burst, as the lute sweeps out: the wave of silence and
+   * the rest of its show (SilencioVFX), its whoosh and a soft jolt. Out of
+   * a fight every dummy within reach starts bleeding (Silencio's own bleed,
+   * beside any Forbidden Frequency's); in a fight the server judges it all
+   * (the bleeds come as `bleed`, the shoves as the mobs' moves).
+   */
+  const silencioLands = (herzie: HerzieModel, level: number, now: number) => {
+    const { chest, held } = v.current;
+    herzie.root.getWorldPosition(chest);
+    const hand = herzie.handWorldPosition(held);
+    const me = bossFight.you ?? -1;
+    landSlam(me, [hand.x, hand.y, hand.z], now);
+    let caught = false;
+    const centre = { skill: "silencio" as const, x: chest.x, z: chest.z };
+    if (!bossFight.on)
+      for (const d of liveDummies) {
+        if (d.mob !== undefined || d.herzie !== undefined) continue;
+        const radius = DUMMY.radius * (d.size ?? 1);
+        if (!inSlamReach(centre, d.x, d.z, radius)) continue;
+        bleedDummy(
+          "silencio",
+          d.key,
+          skillValue("silencio", level),
+          SKILL_DEFS.silencio.durationMs ?? 0,
+          me,
+          now,
+        );
+        caught = true;
+      }
+    sfxSilencio();
+    kick(caught ? 0.14 : 0.1);
+    shake(0.16);
   };
 
   /** What the discs in flight do, whoever threw them. */
@@ -754,7 +799,7 @@ export function Combat({
             now +
             (mine.id === "cymbrella"
               ? skillValue("cymbrella", mine.level) * 1000
-              : (SKILL_DEFS[mine.id].durationMs ?? 0)),
+              : skillDurationMs(mine.id, mine.level)),
         });
       }
       // A Multispin's flourish: the records flung out to circle you (the
@@ -764,26 +809,38 @@ export function Combat({
         a.live = false;
         herzie.cast(pitch, { style: "throw" });
       }
-      if (mine.id === "rimshot") {
-        // The wind-up: planted, the stick going up, the snare rolling. It
-        // lands when the stick strikes the ground (below), on the server's
-        // clock as on ours: sent now, landed there at the wind-up's end.
-        const castMs = SKILL_DEFS.rimshot.castMs ?? 0;
-        a.rimshot = {
-          chance: skillValue("rimshot", mine.level),
+      if (mine.id === "rimshot" || mine.id === "silencio") {
+        // The wind-up: planted, the stick going up and the snare rolling
+        // (a Rimshot), or the lute drawn in on a held breath (a Silencio).
+        // It lands as the stick strikes the ground or the lute sweeps out
+        // (below), on the server's clock as on ours: sent now, landed there
+        // at the wind-up's end.
+        const castMs = SKILL_DEFS[mine.id].castMs ?? 0;
+        a.windup = {
+          skill: mine.id,
+          level: mine.level,
           at: now,
-          roll: sfxRimshotWindup(castMs / 1000),
+          roll: (mine.id === "rimshot" ? sfxRimshotWindup : sfxSilencioWindup)(
+            castMs / 1000,
+          ),
         };
         a.castAt = now;
         combat.rootedUntil = now + castMs;
-        herzie.cast(0, { style: "slam" });
-        beginSlam(bossFight.you ?? -1, chest.x, chest.z, now, (out) => {
-          const p = herzie.handWorldPosition(v.current.held);
-          out[0] = p.x;
-          out[1] = p.y;
-          out[2] = p.z;
-          return out;
-        });
+        herzie.cast(0, { style: WINDUP_STYLE[mine.id] });
+        beginSlam(
+          bossFight.you ?? -1,
+          mine.id,
+          chest.x,
+          chest.z,
+          now,
+          (out) => {
+            const p = herzie.handWorldPosition(v.current.held);
+            out[0] = p.x;
+            out[1] = p.y;
+            out[2] = p.z;
+            return out;
+          },
+        );
         if (judged) townNet().sendSkill(mine.id, seq, yaw, pitch);
       } else if (mine.id === "cymbal-trap") {
         // The throw: the cymbal off the off hand, along the aim. In a fight
@@ -875,8 +932,9 @@ export function Combat({
       else if (mine.id === "cymbrella") sfxDomeUp();
       else if (mine.id === "cymbal-trap") sfxCymbalThrow();
       else if (mine.id === "forbidden-frequency") sfxForbiddenThrow();
-      else if (mine.id !== "rimshot") sfxCast();
-      if (mine.id !== "rimshot") shake(mine.id === "cymbrella" ? 0.22 : 0.15);
+      else if (mine.id !== "rimshot" && mine.id !== "silencio") sfxCast();
+      if (mine.id !== "rimshot" && mine.id !== "silencio")
+        shake(mine.id === "cymbrella" ? 0.22 : 0.15);
     }
 
     // Practice: your cymbal lands on its dummy, a stick's strike's blow.
@@ -904,13 +962,15 @@ export function Combat({
     }
 
     // Practice: your Forbidden Frequency disc lands on its dummy, a stack
-    // of bleed more; and every dummy's bleed hits, its share of a wave each
-    // hit, quicker with each stack (bleedEveryMs), never a crit.
+    // of bleed more; and every dummy's bleeds (Forbidden Frequency's and
+    // Silencio's) hit, their share of a wave each hit, quicker with each
+    // stack (bleedEveryMs), never a crit.
     const bleed = a.bleed;
     if (bleed && now >= bleed.landsAt) {
       a.bleed = null;
       if (liveDummies.includes(bleed.dummy)) {
         bleedDummy(
+          "forbidden-frequency",
           bleed.dummy.key,
           bleed.value,
           SKILL_DEFS["forbidden-frequency"].durationMs ?? 0,
@@ -920,15 +980,16 @@ export function Combat({
         sfxBleedStack();
       }
     }
-    for (const b of bleeds.dummies.values()) {
-      if (b.target.kind !== "dummy" || now < b.nextTick) continue;
-      const key = b.target.key;
-      const d = liveDummies.find((x) => x.key === key);
-      if (!d || b.nextTick > b.until) continue;
-      b.nextTick += bleedEveryMs(b.stacks);
-      const point: Vec3 = [d.x, (d.y ?? 0) + DUMMY.chest + 0.3, d.z];
-      myHit(d, [0, 0, 0], point, b.value, now, true);
-    }
+    for (const skill of BLEED_SKILLS)
+      for (const b of bleeds[skill].dummies.values()) {
+        if (b.target.kind !== "dummy" || now < b.nextTick) continue;
+        const key = b.target.key;
+        const d = liveDummies.find((x) => x.key === key);
+        if (!d || b.nextTick > b.until) continue;
+        b.nextTick += bleedEveryMs(b.stacks);
+        const point: Vec3 = [d.x, (d.y ?? 0) + DUMMY.chest + 0.3, d.z];
+        myHit(d, [0, 0, 0], point, b.value, now, true);
+      }
 
     // Practice: your Multispin's records hit the dummies they touch, each
     // a share of a wave, a record a dummy at most once every rehitMs: as
@@ -1028,8 +1089,11 @@ export function Combat({
     if (herzie) {
       const queued = now - combat.queuedAt < CAST_BUFFER_MS;
       const free = discs ? nextHand(discField, herzie) : null;
-      // Nothing else starts while a Rimshot winds up and lands.
-      const slamming = herzie.casting && herzie.castMotion === "slam";
+      // Nothing else starts while a Rimshot or a Silencio winds up and
+      // lands.
+      const slamming =
+        herzie.casting &&
+        (herzie.castMotion === "slam" || herzie.castMotion === "hush");
       // Held for a duel's countdown, or stunned in one: nothing goes off.
       const ready =
         !slamming &&
@@ -1085,22 +1149,25 @@ export function Combat({
         }
         combat.casts = (combat.casts + 1) & 0xffff;
       }
-      // A Rimshot: the stick strikes the ground and it lands; or the server
-      // cut the wind-up short (knocked out), and it never does.
-      const r = a.rimshot;
-      if (r && herzie.released && herzie.castMotion === "slam") {
-        slamLands(herzie, r.chance, now);
-        a.rimshot = null;
+      // A Rimshot or a Silencio: the stick strikes the ground (the lute
+      // sweeps out) and it lands; or the server cut the wind-up short
+      // (knocked out, refused), and it never does.
+      const w = a.windup;
+      if (w && herzie.released && herzie.castMotion === WINDUP_STYLE[w.skill]) {
+        if (w.skill === "rimshot")
+          slamLands(herzie, skillValue("rimshot", w.level), now);
+        else silencioLands(herzie, w.level, now);
+        a.windup = null;
       } else if (
-        r &&
+        w &&
         (!pendingSlam(bossFight.you ?? -1) ||
-          now - r.at > (SKILL_DEFS.rimshot.castMs ?? 0) + 800)
+          now - w.at > (SKILL_DEFS[w.skill].castMs ?? 0) + 800)
       ) {
         herzie.cancelCast();
         combat.rootedUntil = Number.NEGATIVE_INFINITY;
-        r.roll.stop();
+        w.roll.stop();
         cancelSlam(bossFight.you ?? -1);
-        a.rimshot = null;
+        a.windup = null;
       }
       // The blow lands: whatever's in front of it, in reach, is hit.
       else if (

@@ -76,7 +76,7 @@ import { NAME_SHADOW, nearestIds, REMOTE_LABEL, remoteLabel } from "./nameFade";
 import type { RemotePlayer, TownConnection } from "./net/TownConnection";
 import { useTownNetVersion } from "./net/townNet";
 import { townSave, useTownRuntime } from "./runtime";
-import { sfxRimshotSlam } from "./sfx";
+import { sfxRimshotSlam, sfxSilencio } from "./sfx";
 import { titleName } from "./TitleLine";
 import { wildsBarOf, wildsDown, wildsFoe } from "./wilds/store";
 
@@ -411,13 +411,17 @@ function RemoteHerzie({
       herzie.emote(remote.pendingEmote);
       remote.pendingEmote = null;
     }
-    // Their Rimshot: the wind-up as the server's word comes, the slam when
-    // their stick strikes the ground (as ours: SlamVFX draws both), or cut
-    // short if the server says so.
+    // Their Rimshot or Silencio: the wind-up as the server's word comes,
+    // the landing when their stick strikes the ground or their lute sweeps
+    // out (as ours: SlamVFX and SilencioVFX draw them), or cut short if
+    // the server says so.
     const slam = pendingSlam(remote.id);
+    const winding =
+      herzie.casting &&
+      (herzie.castMotion === "slam" || herzie.castMotion === "hush");
     if (slam && slam.castAt > rimshotAt.current) {
       rimshotAt.current = slam.castAt;
-      herzie.cast(0, { style: "slam" });
+      herzie.cast(0, { style: slam.skill === "rimshot" ? "slam" : "hush" });
       slam.tip = (out) => {
         const p = herzie.handWorldPosition(hand);
         out[0] = p.x;
@@ -425,18 +429,24 @@ function RemoteHerzie({
         out[2] = p.z;
         return out;
       };
-    } else if (!slam && herzie.casting && herzie.castMotion === "slam") {
+    } else if (!slam && winding) {
       if (!slammed.current) herzie.cancelCast();
     }
-    if (herzie.released && herzie.castMotion === "slam" && slam) {
+    if (herzie.released && winding && slam) {
       const p = herzie.handWorldPosition(hand);
       landSlam(remote.id, [p.x, p.y, p.z], performance.now());
       slammed.current = true;
-      herzie.hitstop(0.12);
       // Felt by everyone near it.
       const d = Math.hypot(townSave.x - s.x, townSave.z - s.z);
-      sfxRimshotSlam();
-      shake(0.2 * Math.max(0, 1 - d / 14));
+      const near = Math.max(0, 1 - d / 14);
+      if (slam.skill === "rimshot") {
+        herzie.hitstop(0.12);
+        sfxRimshotSlam();
+        shake(0.2 * near);
+      } else {
+        sfxSilencio();
+        shake(0.12 * near);
+      }
     }
     if (!herzie.casting) slammed.current = false;
     // Their Cymbal Trap: thrown as the server's word comes, the cymbal off
@@ -566,7 +576,8 @@ function RemoteHerzie({
           "hit",
         );
       }
-    } else if (herzie.released) {
+    } else if (herzie.released && herzie.castMotion !== "hush") {
+      // (A Silencio's burst is its own thing: vfx/SilencioVFX.)
       herzie.handWorldPosition(hand);
       const from: Vec3 = [hand.x, hand.y, hand.z];
       const dir: Vec3 = [Math.sin(s.heading), 0, Math.cos(s.heading)];
@@ -700,8 +711,8 @@ function RemoteHerzie({
       <primitive object={herzie.root} />
       <group ref={tagAnchor}>
         <Html zIndexRange={[19, 0]}>
-          {/* Stacked up from the anchor: the bubble over the title, the
-              title over the name. */}
+          {/* Stacked up from the anchor: the bubble over the name, the
+              title under it. */}
           <div className="flex -translate-x-1/2 -translate-y-full flex-col items-center">
             <div
               ref={downMark}
@@ -719,15 +730,6 @@ function RemoteHerzie({
               ref={labelBox}
               className="flex origin-bottom flex-col items-center"
             >
-              {title ? (
-                <div
-                  ref={titleLine}
-                  className="pointer-events-none whitespace-nowrap text-[9px] font-medium leading-tight text-white"
-                  style={{ textShadow: NAME_SHADOW }}
-                >
-                  {title}
-                </div>
-              ) : null}
               <button
                 type="button"
                 ref={tag}
@@ -754,6 +756,15 @@ function RemoteHerzie({
                 {remote.gm ? <GmMark className="[text-shadow:none]" /> : null}
                 {remote.name}
               </button>
+              {title ? (
+                <div
+                  ref={titleLine}
+                  className="pointer-events-none whitespace-nowrap text-[9px] font-medium leading-tight text-white"
+                  style={{ textShadow: NAME_SHADOW }}
+                >
+                  {title}
+                </div>
+              ) : null}
               <div className="pointer-events-none flex items-center gap-px">
                 <div
                   ref={hpBox}

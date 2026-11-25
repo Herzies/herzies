@@ -197,7 +197,7 @@ export function CastBar({ className }: { className?: string }) {
       if (you !== null && !(mine && now < mine.until))
         for (const c of skills.channels.values())
           if (c.target === you && now < c.until) saving = c;
-      // Your Rimshot winding up comes before either.
+      // Your Rimshot or Silencio winding up comes before either.
       const slam = pendingSlam(you ?? -1);
       const wind =
         slam && now < slam.dueAt
@@ -209,8 +209,8 @@ export function CastBar({ className }: { className?: string }) {
       const ch = attune ?? wind ?? (mine && now < mine.until ? mine : saving);
       const kind = attune
         ? "crystal"
-        : wind
-          ? "slam"
+        : wind && slam
+          ? slam.skill
           : ch === mine && ch
             ? "mine"
             : ch
@@ -223,13 +223,15 @@ export function CastBar({ className }: { className?: string }) {
           label.current.textContent =
             kind === "crystal"
               ? "Attuning"
-              : kind === "slam"
+              : kind === "rimshot"
                 ? "Rimshot"
-                : kind === "mine"
-                  ? "Resurrect · hold still"
-                  : kind === "saving"
-                    ? "A Bard is bringing you back…"
-                    : "";
+                : kind === "silencio"
+                  ? "Silencio"
+                  : kind === "mine"
+                    ? "Resurrect · hold still"
+                    : kind === "saving"
+                      ? "A Bard is bringing you back…"
+                      : "";
           box.current.dataset.kind = kind;
         }
         if (ch) fill.current.style.width = `${progress(ch, now) * 100}%`;
@@ -253,12 +255,12 @@ export function CastBar({ className }: { className?: string }) {
     >
       <div
         ref={label}
-        className="leading-4 text-[#ffd84a] group-data-[kind=crystal]:text-[#7fe8ff] group-data-[kind=saving]:text-[#7ee2a8]"
+        className="leading-4 text-[#ffd84a] group-data-[kind=crystal]:text-[#7fe8ff] group-data-[kind=saving]:text-[#7ee2a8] group-data-[kind=silencio]:text-[#c9a8ff]"
       />
       <div className="mt-1 h-1.5 overflow-hidden rounded-sm bg-white/15">
         <div
           ref={fill}
-          className="h-full bg-[#ffd84a] group-data-[kind=crystal]:bg-[#7fe8ff] group-data-[kind=saving]:bg-[#7ee2a8]"
+          className="h-full bg-[#ffd84a] group-data-[kind=crystal]:bg-[#7fe8ff] group-data-[kind=saving]:bg-[#7ee2a8] group-data-[kind=silencio]:bg-[#c9a8ff]"
         />
       </div>
     </div>

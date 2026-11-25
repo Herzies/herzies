@@ -69,13 +69,14 @@ import {
   focusTiming,
   MULTISPIN,
   RIMSHOT,
+  SILENCIO,
   SKILL_DEFS,
   shuffleOn,
   skillValue,
 } from "@herzies/shared/skills";
 import { timingAttackSpeed, timingCritChance } from "@herzies/shared/stats";
 import type { TowerMob } from "@herzies/shared/town-net";
-import { Bleeds } from "./bleed";
+import { BLEED_SKILLS, type BleedSkill, Bleeds, bleedTag } from "./bleed";
 import { CastBudget, StunReturns } from "./budgets";
 import { DiscHands } from "./hands";
 import { type Mob, type MobJudge, MobPack, SEEN_LAG_MS } from "./mobs";
@@ -345,10 +346,18 @@ export type BossEvent =
   /** `uid`'s Cymbal Trap caught mob `mob`: it's held where it stands
    * until `until` (never the boss). */
   | { t: "trap"; uid: string; mob: number; until: number }
-  /** A Forbidden Frequency bleed on mob `mob` (the boss without one), its
-   * newest thrower `uid`: took hold or started over (`stacks` of it until
-   * `until`), or ended early (`stacks` 0: it fell). */
-  | { t: "bleed"; uid: string; mob?: number; stacks: number; until: number };
+  /** A bleed on mob `mob` (the boss without one), its newest thrower
+   * `uid`: took hold or started over (`stacks` of it until `until`), or
+   * ended early (`stacks` 0: it fell). Forbidden Frequency's, or
+   * Silencio's when `skill` says so. */
+  | {
+      t: "bleed";
+      uid: string;
+      mob?: number;
+      skill?: "silencio";
+      stacks: number;
+      until: number;
+    };
 
 /** Where a seeded sequence starts: mulberry32. */
 export function rng(seed: number): () => number {
@@ -466,11 +475,14 @@ export class BossEngine {
    * returns). */
   private stunnedUntil = 0;
   private stunReturns = new StunReturns(RIMSHOT.drWindowMs);
-  /** Forbidden Frequency's discs and bleeds, on "boss" or a minion's id
-   * (a minute each). */
-  private bleeds = new Bleeds(
-    SKILL_DEFS["forbidden-frequency"].durationMs ?? 0,
-  );
+  /** Bleeds on "boss" or a minion's id: Forbidden Frequency's discs and
+   * bleeds (a minute each), and Silencio's (one stack each). */
+  private bleeds: Record<BleedSkill, Bleeds> = {
+    "forbidden-frequency": new Bleeds(
+      SKILL_DEFS["forbidden-frequency"].durationMs ?? 0,
+    ),
+    silencio: new Bleeds(SKILL_DEFS.silencio.durationMs ?? 0, 1),
+  };
   /** Its own shapes a stun took off the floor, to say so next update. */
   private cancelled: number[] = [];
   private nextScatterAt = 0;
@@ -913,7 +925,7 @@ export class BossEngine {
     if (this.killed || this.sleeping) return false;
     const hit = this.nearest(from, aimDirection(yaw, pitch), now, DISC_RANGE);
     if (!hit) return false;
-    this.bleeds.throw({
+    this.bleeds["forbidden-frequency"].throw({
       at: now + discLandsAfterMs(hit.dist),
       by: uid,
       key: hit.mob ? String(hit.mob.id) : "boss",
@@ -923,54 +935,95 @@ export class BossEngine {
     return true;
   }
 
-  /** Forbidden Frequency discs that arrived take hold on what still
-   * stands, and bleeds tick: stacks × its share of a wave from its newest
-   * thrower (no crit, its damage buffs now), landing at once. */
-  private stepBleeds(now: number, events: BossEvent[]) {
-    for (const d of this.bleeds.landed(now)) {
-      if (d.key === "boss" ? this.killed : !this.mobs?.byId(Number(d.key)))
-        continue;
-      const b = this.bleeds.stack(d, now);
-      events.push({
-        t: "bleed",
-        uid: b.by,
-        ...(d.key !== "boss" ? { mob: Number(d.key) } : {}),
-        stacks: b.stacks,
-        until: b.until,
-      });
+  /**
+   * Silencio bursts at `at` (where its Bard stood to wind it up; see
+   * SILENCIO): every minion whose body is within SILENCIO.radius is shoved
+   * out before its wave (MobPack.wave) and bleeds, and so does the boss if
+   * its body is, though it stands its ground. The bleeds take hold this
+   * update (stepBleeds). How many it caught.
+   */
+  silencio(
+    uid: string,
+    at: { x: number; z: number },
+    stats: HitStats,
+    level: number,
+    now: number,
+  ): number {
+    if (this.killed || this.sleeping) return 0;
+    const bleed = (key: string) =>
+      this.bleeds.silencio.throw({ at: now, by: uid, key, level, stats });
+    let caught = 0;
+    for (const m of this.mobs?.within(at, SILENCIO.radius, now - SEEN_LAG_MS) ??
+      []) {
+      bleed(String(m.id));
+      caught++;
     }
-    for (const { key, bleed: b } of this.bleeds.ticks(now)) {
-      const stats = { ...b.stats, critChance: 0 };
-      const mult =
-        skillValue("forbidden-frequency", b.level) * this.damageMult(b.by, now);
-      if (key !== "boss") {
-        const mob = this.mobs?.byId(Number(key));
-        if (mob)
-          this.mobs?.queue(b.by, mob, now, stats, mult, "forbidden-frequency");
-        continue;
+    this.mobs?.wave(at, now);
+    const boss = this.seenAt(now);
+    if (
+      Math.hypot(boss.x - at.x, boss.z - at.z) <=
+      SILENCIO.radius + TUNING.boss.radius
+    ) {
+      bleed("boss");
+      caught++;
+    }
+    return caught;
+  }
+
+  /** Bleeds that arrived (Forbidden Frequency's discs, Silencio's at once)
+   * take hold on what still stands, and bleeds tick: stacks × its skill's
+   * share of a wave from its newest thrower (no crit, its damage buffs
+   * now), landing at once and tagged with its skill. */
+  private stepBleeds(now: number, events: BossEvent[]) {
+    for (const skill of BLEED_SKILLS) {
+      const bleeds = this.bleeds[skill];
+      for (const d of bleeds.landed(now)) {
+        if (d.key === "boss" ? this.killed : !this.mobs?.byId(Number(d.key)))
+          continue;
+        const b = bleeds.stack(d, now);
+        events.push({
+          t: "bleed",
+          uid: b.by,
+          ...(d.key !== "boss" ? { mob: Number(d.key) } : {}),
+          ...bleedTag(skill),
+          stacks: b.stacks,
+          until: b.until,
+        });
       }
-      const { amount } = hitDamage(stats, this.rand);
-      this.pending.push({
-        at: now,
-        uid: b.by,
-        damage: Math.max(1, Math.round(amount * mult)),
-        crit: false,
-        skill: "forbidden-frequency",
-      });
+      for (const { key, bleed: b } of bleeds.ticks(now)) {
+        const stats = { ...b.stats, critChance: 0 };
+        const mult = skillValue(skill, b.level) * this.damageMult(b.by, now);
+        if (key !== "boss") {
+          const mob = this.mobs?.byId(Number(key));
+          if (mob) this.mobs?.queue(b.by, mob, now, stats, mult, skill);
+          continue;
+        }
+        const { amount } = hitDamage(stats, this.rand);
+        this.pending.push({
+          at: now,
+          uid: b.by,
+          damage: Math.max(1, Math.round(amount * mult)),
+          crit: false,
+          skill,
+        });
+      }
     }
   }
 
-  /** The bleed on `key` ends early (it fell): said with stacks 0. */
+  /** The bleeds on `key` end early (it fell): each said with stacks 0. */
   private endBleed(key: string, now: number, events: BossEvent[]) {
-    const b = this.bleeds.end(key);
-    if (b)
-      events.push({
-        t: "bleed",
-        uid: b.by,
-        ...(key !== "boss" ? { mob: Number(key) } : {}),
-        stacks: 0,
-        until: now,
-      });
+    for (const skill of BLEED_SKILLS) {
+      const b = this.bleeds[skill].end(key);
+      if (b)
+        events.push({
+          t: "bleed",
+          uid: b.by,
+          ...(key !== "boss" ? { mob: Number(key) } : {}),
+          ...bleedTag(skill),
+          stacks: 0,
+          until: now,
+        });
+    }
   }
 
   /** Out of every dome: pushed by one growing, never standing in one. A
@@ -1217,7 +1270,10 @@ export class BossEngine {
       // Its minions crumble with it, and every bleed with them.
       for (const m of this.mobs?.dismiss() ?? [])
         events.push({ t: "mobDown", mob: m.id, by: "", x: m.x, z: m.z });
-      for (const key of this.bleeds.keys()) this.endBleed(key, now, events);
+      const bleeding = new Set(
+        BLEED_SKILLS.flatMap((skill) => this.bleeds[skill].keys()),
+      );
+      for (const key of bleeding) this.endBleed(key, now, events);
       return events;
     }
     this.domes = this.domes.filter((d) => d.until > now);

@@ -2503,18 +2503,28 @@ function buildPlumedBeretSpheres(spheres: Sphere[]): Sphere[] {
   // The beret: a wide, soft disc puffed up on top, leaning so its +x edge
   // hangs lower, and pushed a little that way so it overhangs.
   const capHalf = hr * 0.05;
-  push(
-    [hx + hr * 0.14, bandY - bandHalf - hr * 0.08, hz + hr * 0.04],
-    hr * 1.02,
-    velvet,
-    {
-      shape: {
-        kind: "cylinder",
-        axis: [capHalf * 0.35, -capHalf, 0],
-        dome: hr * 0.32,
-      },
-    },
-  );
+  const capAt: V3 = [
+    hx + hr * 0.14,
+    bandY - bandHalf - hr * 0.08,
+    hz + hr * 0.04,
+  ];
+  const capAxis: V3 = [capHalf * 0.35, -capHalf, 0];
+  push(capAt, hr * 1.02, velvet, {
+    shape: { kind: "cylinder", axis: capAxis, dome: hr * 0.32 },
+  });
+  // Its body, the velvet between the band and the disc: without it the
+  // head shows under the side the beret tips up. A cylinder leaning as the
+  // disc does, up from the band's middle to the disc's: its foot's raised
+  // edge sits at the band's middle (so it starts inside the band, and its
+  // lowered one inside the head), its top inside the disc. Narrow enough
+  // that, leaning, it stays inside the band, which shows as a ledge.
+  const lean = norm(capAxis);
+  const bodyR = bandR * 0.9;
+  const foot = (-bodyR * lean[0]) / -lean[1];
+  const top = dot(sub(capAt, [hx, bandY, hz]), lean);
+  push(add([hx, bandY, hz], scale(lean, (foot + top) / 2)), bodyR, velvet, {
+    shape: { kind: "cylinder", axis: scale(lean, (top - foot) / 2) },
+  });
   // The little stalk on top.
   push(
     [hx + hr * 0.08, bandY - bandHalf - hr * 0.44, hz + hr * 0.04],
@@ -5257,8 +5267,17 @@ const CAST_SIDE = -1;
  * stick's strike, or a bare-handed jab ("punch", see PUNCH). A "bump"
  * moves no hand: the whole herzie lunges into what's in front of it (see
  * BUMP). A "slam" brings its stick down on the ground from overhead, on a
- * timeline of its own (see SLAM): a Percussionist's Rimshot. */
-export type CastStyle = "cast" | "throw" | "strike" | "punch" | "bump" | "slam";
+ * timeline of its own (see SLAM): a Percussionist's Rimshot. A "hush"
+ * draws its lute in close and sweeps it out wide, both arms flung open on
+ * the burst, on its own timeline too (see HUSH): a Bard's Silencio. */
+export type CastStyle =
+  | "cast"
+  | "throw"
+  | "strike"
+  | "punch"
+  | "bump"
+  | "slam"
+  | "hush";
 
 /**
  * A disc thrown backhand, like a frisbee, on CAST's timeline (so it leaves
@@ -5295,7 +5314,15 @@ export function castHand(
           ? punchHandOutward(phase, pitch)
           : style === "slam"
             ? slamHandOutward(phase)
-            : castHandOutward(phase, pitch);
+            : style === "hush"
+              ? hushArm(
+                  phase,
+                  HUSH.close,
+                  HUSH.closeReach,
+                  HUSH.wide,
+                  HUSH.wideReach,
+                )
+              : castHandOutward(phase, pitch);
   hand.dir[0] *= LIMB_SIDE[arm] ?? CAST_SIDE;
   return hand;
 }
@@ -5665,6 +5692,110 @@ export function slamBody(phase: number): { lift: number; squash: number } {
   return { lift: 0, squash: 0.2 * k * Math.cos(u * 9) };
 }
 
+/**
+ * A hush (Silencio), as fractions of its own timeline (HUSH_SECONDS; it
+ * bursts at `release`): the lute drawn in close to the chest, the other
+ * hand cupped over it, the herzie hunched over it as if holding a breath
+ * (`drawn`, held to `gather`), then both arms swept out wide and the body
+ * opened up, fast, the lute flung out to its side on the burst
+ * (`release`), held open a beat (`held`) and home.
+ */
+export const HUSH = {
+  drawn: 0.22,
+  gather: 0.42,
+  /** The burst: 0.5 s into a 0.85 s hush. */
+  release: 0.5 / 0.85,
+  held: 0.78,
+  /** Where the lute's hand is, about the shoulder (creature space, an arm
+   * on the +x side): in close before the chest, then out wide to its
+   * side; how far it reaches at each (arm lengths). */
+  close: [-0.1, 0.25, -0.95] as V3,
+  wide: [0.9, -0.3, -0.3] as V3,
+  closeReach: 0.85,
+  wideReach: 1.7,
+  /** The other hand: cupped in over the lute, then flung open as wide. */
+  cupped: [-0.25, 0.1, -0.95] as V3,
+  opened: [0.85, -0.4, -0.2] as V3,
+  openReach: 1.3,
+  /** The body: hunched over the lute, then thrown open on the burst
+   * (fractions of the body scale). */
+  hunch: 0.08,
+  open: 0.07,
+} as const;
+
+/** A hush's arm (for an arm on the +x side) going from rest in to `close`
+ * at `closeReach` and out to `wide` at `wideReach`, `phase` through it. */
+function hushArm(
+  phase: number,
+  close: V3,
+  closeReach: number,
+  wide: V3,
+  wideReach: number,
+): { dir: V3; reach: number } {
+  const rest: V3 = [1, 0, 0];
+  const c = norm(close);
+  const w = norm(wide);
+  const mix = (a: V3, b: V3, t: number): V3 =>
+    norm(add(scale(a, 1 - t), scale(b, t)));
+  if (phase < HUSH.drawn) {
+    const t = easeOut(phase / HUSH.drawn);
+    return { dir: mix(rest, c, t), reach: 1 + (closeReach - 1) * t };
+  }
+  if (phase < HUSH.gather) {
+    // Held in, drawing a touch closer as the breath is held.
+    const u = (phase - HUSH.drawn) / (HUSH.gather - HUSH.drawn);
+    return { dir: c, reach: closeReach - 0.08 * ease(0, 1, u) };
+  }
+  if (phase < HUSH.release) {
+    const t = easeIn((phase - HUSH.gather) / (HUSH.release - HUSH.gather));
+    return {
+      dir: mix(c, w, t),
+      reach: closeReach - 0.08 + (wideReach - closeReach + 0.08) * t,
+    };
+  }
+  if (phase < HUSH.held) {
+    // A small give off the burst, then steady.
+    const t = (phase - HUSH.release) / (HUSH.held - HUSH.release);
+    return {
+      dir: w,
+      reach: wideReach - Math.sin(Math.min(1, t * 2) * Math.PI) * 0.12,
+    };
+  }
+  const t = ease(HUSH.held, 1, phase);
+  return { dir: mix(w, rest, t), reach: wideReach + (1 - wideReach) * t };
+}
+
+/** How far the whole body leans at `phase` through a hush, forward
+ * positive (fractions of the body scale): hunched over the lute, thrown
+ * open (back) on the burst, easing upright after. */
+export function hushLean(phase: number): number {
+  if (phase < HUSH.gather) return HUSH.hunch * ease(0, HUSH.drawn, phase);
+  if (phase < HUSH.release) {
+    const t = easeIn((phase - HUSH.gather) / (HUSH.release - HUSH.gather));
+    return HUSH.hunch - (HUSH.hunch + HUSH.open) * t;
+  }
+  if (phase < HUSH.held) return -HUSH.open;
+  return -HUSH.open * (1 - ease(HUSH.held, 1, phase));
+}
+
+/** The whole body through a hush, as slamBody: a small crouch as it draws
+ * the lute in, stretching up off it into the burst, and settling with a
+ * little wobble. */
+export function hushBody(phase: number): { lift: number; squash: number } {
+  if (phase < HUSH.gather)
+    return { lift: 0, squash: 0.08 * ease(0.02, HUSH.drawn, phase) };
+  if (phase < HUSH.release) {
+    const u = (phase - HUSH.gather) / (HUSH.release - HUSH.gather);
+    return {
+      lift: 0.06 * Math.sin(u * Math.PI * 0.5),
+      squash: 0.08 - 0.18 * easeIn(u),
+    };
+  }
+  const u = (phase - HUSH.release) / (1 - HUSH.release);
+  const k = Math.exp(-u * 5);
+  return { lift: 0.06 * k, squash: -0.1 * k * Math.cos(u * 8) };
+}
+
 /** A body bump, on CAST's timeline: it rears back on the wind-up, hops
  * forward to hit at CAST.release, and settles back where it stood
  * (fractions of the body scale). */
@@ -5746,6 +5877,9 @@ export function castWeight(phase: number, style?: CastStyle): number {
   // A slam stays planted through its impact before letting go.
   if (style === "slam")
     return ease(0, 0.05, phase) * (1 - ease(0.86, 1, phase));
+  // A hush holds its arms open past its burst, then lets go.
+  if (style === "hush")
+    return ease(0, 0.05, phase) * (1 - ease(0.84, 1, phase));
   return ease(0, 0.06, phase) * (1 - ease(0.75, 1, phase));
 }
 
@@ -5772,32 +5906,38 @@ function castDeltas(
     );
   }
   // Back on the draw, into the thrust, settling after (deeper for a
-  // punch: the body goes with the fist; a slam's has its own timing).
+  // punch: the body goes with the fist; a slam's and a hush's have their
+  // own timing).
   const into = style === "punch" ? PUNCH.lean : CAST.lean;
   const lean =
     style === "slam"
       ? slamLean(phase)
-      : phase < CAST.release
-        ? -CAST.rock * ease(0, CAST.drawn, phase) +
-          (CAST.rock + into) *
-            easeIn(
-              Math.max(0, phase - CAST.drawn) / (CAST.release - CAST.drawn),
-            )
-        : into * (1 - ease(CAST.release, 1, phase));
+      : style === "hush"
+        ? hushLean(phase)
+        : phase < CAST.release
+          ? -CAST.rock * ease(0, CAST.drawn, phase) +
+            (CAST.rock + into) *
+              easeIn(
+                Math.max(0, phase - CAST.drawn) / (CAST.release - CAST.drawn),
+              )
+          : into * (1 - ease(CAST.release, 1, phase));
   const shoulder = rig.shoulders[arm];
   const hand = castHand(phase, pitch, arm, style);
   // A slam's other arm goes up too, for balance, and flings out on the
-  // blow.
-  const other = style === "slam" ? otherArm(arm) : null;
+  // blow; a hush's cups the lute, then flings open with it.
+  const other = style === "slam" || style === "hush" ? otherArm(arm) : null;
   const otherShoulder = other ? rig.shoulders[other] : undefined;
   return spheres.map((sp): V3 => {
     if (isSceneFixed(sp.part) || isLeg(sp.part)) return [0, 0, 0];
     const leaning: V3 = [0, 0, -lean * s];
     if (other && sp.part === other && otherShoulder) {
       const length = Math.hypot(...sub(sp.center, otherShoulder));
-      const d = slamFreeArm(phase);
-      d[0] *= LIMB_SIDE[other] ?? -CAST_SIDE;
-      const at = add(otherShoulder, scale(d, length));
+      const free =
+        style === "hush"
+          ? hushArm(phase, HUSH.cupped, 1, HUSH.opened, HUSH.openReach)
+          : { dir: slamFreeArm(phase), reach: 1 };
+      free.dir[0] *= LIMB_SIDE[other] ?? -CAST_SIDE;
+      const at = add(otherShoulder, scale(free.dir, length * free.reach));
       return add(sub(at, sp.center), leaning);
     }
     if (sp.part !== arm || !shoulder) return leaning;
@@ -7372,10 +7512,12 @@ export function creaturePoseOffsets(
     // A cast takes the casting arm over; the lean adds to whatever else.
     const c = cast?.[i];
     if (c) {
-      // The casting arm (and a slam's other one) is the cast's alone.
+      // The casting arm (and a slam's or a hush's other one) is the
+      // cast's alone.
       const owned =
         (s.part === castArm && pose.castStyle !== "bump") ||
-        (pose.castStyle === "slam" && s.part === otherArm(castArm));
+        ((pose.castStyle === "slam" || pose.castStyle === "hush") &&
+          s.part === otherArm(castArm));
       const own = owned ? cw : 0;
       x = x * (1 - own) + c[0] * cw;
       y = y * (1 - own) + c[1] * cw;

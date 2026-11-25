@@ -175,6 +175,8 @@ function run() {
     // Rage first thing in the fight (and whenever it's ready again).
     if (cls === "bard" && useSkill("rage", yaw, pitch)) return;
     if (cls === "bard" && useSkill("haste", yaw, pitch)) return;
+    // Close enough for its wave: the foe bleeds.
+    if (cls === "bard" && dist <= 4 && useSkill("silencio", yaw, pitch)) return;
     // Up close, records round it.
     if (cls === "record_slinger" && dist <= 3 && useSkill("multispin", yaw, pitch)) return;
     // Keeps its bleed going whenever the disc reaches.

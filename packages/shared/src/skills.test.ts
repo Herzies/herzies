@@ -19,6 +19,7 @@ import {
   SKILL_MAX_LEVEL,
   shuffleBounces,
   shuffleScale,
+  skillDurationMs,
   skillLevelForXp,
   skillLevelProgress,
   skillTotalXpForLevel,
@@ -198,5 +199,30 @@ describe("the Percussionist's kit", () => {
     expect(
       buffReductions([{ id: "cymbrella", value: 1, until: 1_000 }], 0),
     ).toEqual([]);
+  });
+});
+
+describe("the Bard's kit", () => {
+  it("every Bard buff lasts longer as its skill grows, and says so", () => {
+    for (const id of CLASS_DEFS.bard.skills) {
+      if (SKILL_DEFS[id].kind !== "buff") continue;
+      const lengths = Array.from({ length: SKILL_MAX_LEVEL }, (_, i) =>
+        skillDurationMs(id, i + 1),
+      );
+      for (let i = 1; i < lengths.length; i++)
+        expect(lengths[i]).toBeGreaterThanOrEqual(lengths[i - 1]);
+      expect(lengths[lengths.length - 1]).toBeGreaterThan(lengths[0]);
+      expect(describeSkill(id, SKILL_MAX_LEVEL)).toContain(
+        `for ${lengths[lengths.length - 1] / 1000} s`,
+      );
+    }
+    expect(skillDurationMs("haste", 1)).toBe(12_000);
+    expect(skillDurationMs("haste", SKILL_MAX_LEVEL)).toBe(18_000);
+  });
+
+  it("a skill whose length doesn't grow keeps it", () => {
+    expect(skillDurationMs("taunt", 1)).toBe(10_000);
+    expect(skillDurationMs("taunt", SKILL_MAX_LEVEL)).toBe(10_000);
+    expect(skillDurationMs("backspin", 5)).toBe(0);
   });
 });

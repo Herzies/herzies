@@ -8,6 +8,7 @@ import {
   SKILL_DEFS,
   SKILL_MAX_LEVEL,
   type SkillId,
+  skillDurationMs,
   skillLearnedAt,
   skillLevelProgress,
   skillTotalXpForLevel,
@@ -78,6 +79,7 @@ function unlockText(id: SkillId): string {
 /** A skill's description and its timings, smaller than its name. */
 function SkillBody({ id, level }: { id: SkillId; level: number }) {
   const def = SKILL_DEFS[id];
+  const duration = skillDurationMs(id, level);
   return (
     <>
       <div className="mt-0.5 text-[10px] leading-tight">
@@ -85,7 +87,7 @@ function SkillBody({ id, level }: { id: SkillId; level: number }) {
       </div>
       <div className="mt-0.5 text-[10px] leading-tight text-text-dim">
         {def.cooldownMs / 1000}s cooldown
-        {def.durationMs ? ` · lasts ${def.durationMs / 1000}s` : ""}
+        {duration ? ` · lasts ${duration / 1000}s` : ""}
       </div>
     </>
   );

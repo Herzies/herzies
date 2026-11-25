@@ -55,7 +55,7 @@ export function statsFor(
 
 export function skillsFor(role: Role): [string, number][] {
   if (role === "bard")
-    return [["soothing-drones", 5], ["resurrect", 5], ["haste", 5], ["rage", 5], ["focus", 5]];
+    return [["soothing-drones", 5], ["resurrect", 5], ["haste", 5], ["rage", 5], ["silencio", 5], ["focus", 5]];
   if (role === "percussionist")
     return [["cymbrella", 5], ["taunt", 5], ["rimshot", 5], ["cymbal-trap", 5]];
   if (role === "record_slinger")

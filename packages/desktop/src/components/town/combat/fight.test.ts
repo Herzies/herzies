@@ -8,7 +8,7 @@ const clock = { toLocal: (t: number) => t, you: () => 7 };
 describe("the client's fight state", () => {
   it("a Rimshot the server refused never lands", () => {
     resetBossFight();
-    beginSlam(7, 0, 0, performance.now(), (o) => o);
+    beginSlam(7, "rimshot", 0, 0, performance.now(), (o) => o);
     expect(pendingSlam(7)).toBeTruthy();
     handleBossMessage(
       { t: "skillDenied", skill: "rimshot", seq: 1, readyAt: 0 } as never,
@@ -17,13 +17,31 @@ describe("the client's fight state", () => {
     expect(pendingSlam(7)).toBeFalsy();
   });
 
+  it("a Silencio the server refused never lands", () => {
+    resetBossFight();
+    beginSlam(7, "silencio", 0, 0, performance.now(), (o) => o);
+    expect(pendingSlam(7)?.skill).toBe("silencio");
+    handleBossMessage(
+      { t: "skillDenied", skill: "silencio", seq: 1, readyAt: 0 } as never,
+      clock,
+    );
+    expect(pendingSlam(7)).toBeFalsy();
+  });
+
+  it("a Silencio cut short (its Bard stunned) never lands", () => {
+    resetBossFight();
+    beginSlam(4, "silencio", 0, 0, performance.now());
+    handleBossMessage({ t: "channel", by: 4, target: null } as never, clock);
+    expect(pendingSlam(4)).toBeFalsy();
+  });
+
   it("leaving an island drops a practice's buffs and slams", () => {
     setBuff(7, {
       id: "haste",
       value: 0.3,
       until: performance.now() + 9e5,
     } as never);
-    beginSlam(7, 0, 0, performance.now(), (o) => o);
+    beginSlam(7, "rimshot", 0, 0, performance.now(), (o) => o);
     resetBossFight();
     expect(skills.buffs.size).toBe(0);
     expect(pendingSlam(7)).toBeFalsy();

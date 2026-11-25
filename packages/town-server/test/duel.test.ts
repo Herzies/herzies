@@ -618,6 +618,33 @@ describe("the fight", () => {
     expect(domed.every((h) => h.damage === 0 && h.blocked)).toBe(true);
   });
 
+  it("a Silencio bursts after its wind-up: the opponent in reach bleeds, but isn't moved", () => {
+    const { rt, move } = dueling(["bard", "percussionist"], undefined, 25);
+    rt.step(FIGHT);
+    move("a", B.x - 2, 0, FIGHT);
+    const castMs = SKILL_DEFS.silencio.castMs ?? 0;
+    expect(rt.skill("a", "silencio", 0, 0, FIGHT + 50).result).toBe("used");
+    // Its hands are busy winding up, and nothing has burst yet.
+    expect(rt.cast("a", 0, 0, FIGHT + 60)).toBe("ignored");
+    expect(said(run(rt, FIGHT + 100, FIGHT + castMs), "bleed")).toEqual([]);
+    const burst = run(rt, FIGHT + 50 + castMs, FIGHT + 100 + castMs);
+    expect(said(burst, "bleed")).toEqual([
+      expect.objectContaining({ by: 1, target: 2, skill: "silencio", stacks: 1 }),
+    ]);
+    const ticks = said(run(rt, FIGHT + 150 + castMs, FIGHT + 2_500), "duelHit", "a");
+    expect(ticks.length).toBeGreaterThan(0);
+    expect(ticks.every((h) => h.damage > 0 && !h.crit && h.bleed)).toBe(true);
+    // A herzie moves itself: it's free to walk anywhere.
+    expect(rt.hold("b", B.x + 3, 0, FIGHT + 2_600)).toBeNull();
+  });
+
+  it("a Silencio out of reach bleeds nobody", () => {
+    const { rt } = dueling(["bard", "percussionist"], undefined, 25);
+    rt.step(FIGHT);
+    expect(rt.skill("a", "silencio", 0, 0, FIGHT + 50).result).toBe("used");
+    expect(said(run(rt, FIGHT + 100, FIGHT + 2_000), "bleed")).toEqual([]);
+  });
+
   it("a Forbidden Frequency disc into a dome takes no hold", () => {
     const { rt } = dueling(["record_slinger", "percussionist"]);
     rt.step(FIGHT);

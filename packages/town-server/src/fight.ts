@@ -59,6 +59,7 @@ import {
   SKILL_DEFS,
   type SkillId,
   shuffleBounces,
+  skillDurationMs,
   skillValue,
   skillXpPerUse,
 } from "@herzies/shared/skills";
@@ -88,6 +89,7 @@ import type {
   TownTicketPayload,
 } from "@herzies/shared/town-net";
 import { TOWN_TICKET_TTL_S } from "@herzies/shared/town-net";
+import { isBleedSkill } from "./bleed";
 import {
   BossEngine,
   type BossEvent,
@@ -439,11 +441,17 @@ export class FightRuntime {
   private channels = new Map<string, Channel>();
   /** The last step a Taunt's hold was paid up to (see creditTaunt). */
   private tauntAt: number | null = null;
-  /** Rimshots winding up: where each Percussionist stands (held there),
-   * when it lands, and at what level. */
+  /** Wind-ups (a Rimshot's, a Silencio's): which skill, where each caster
+   * stands (held there), when it lands, and at what level. */
   private slams = new Map<
     string,
-    { until: number; x: number; z: number; level: number }
+    {
+      skill: "rimshot" | "silencio";
+      until: number;
+      x: number;
+      z: number;
+      level: number;
+    }
   >();
   /** Multispins running, by their Record Slinger (see stepSpins). */
   private spins = new Map<string, Spin>();
@@ -923,7 +931,8 @@ export class FightRuntime {
       return "ignored";
     const pos = this.history.at(uid, now);
     if (!pos) return "ignored";
-    // Winding up a Rimshot: its hands are busy (the app swings none).
+    // Winding up a Rimshot or a Silencio: its hands are busy (the app
+    // swings none).
     if (this.slams.has(uid)) return "ignored";
     if (this.healers.has(uid) && p.attack === "wave")
       return this.healBolt(p, pos, yaw, pitch, now);
@@ -1143,7 +1152,7 @@ export class FightRuntime {
         BARD_BUFF_MAX[skillId],
         value * buffMult(p.stats.euphony),
       );
-      const until = now + (def.durationMs ?? 0);
+      const until = now + skillDurationMs(skillId, level);
       for (const o of this.players.values()) {
         if (!o.present || o.down || !this.fighting(o.uid)) continue;
         const at = this.history.at(o.uid, now);
@@ -1176,7 +1185,7 @@ export class FightRuntime {
       // Records round them for its length: they hit what they touch (see
       // stepSpins). The app draws them from the buff.
       const records = multispinRecords(level);
-      const until = now + (def.durationMs ?? 0);
+      const until = now + skillDurationMs(skillId, level);
       this.spins.set(uid, new Spin(now, until, records));
       out.push(
         this.buffMsg(
@@ -1213,10 +1222,11 @@ export class FightRuntime {
         Math.round(value * 1000),
         now,
       );
-    } else if (skillId === "rimshot") {
+    } else if (skillId === "rimshot" || skillId === "silencio") {
       // The wind-up: it lands where they stand, when it's done (see
       // stepSlams). The room saw it start with the skill's word.
       this.slams.set(uid, {
+        skill: skillId,
         until: now + (def.castMs ?? 0),
         x: pos.x,
         z: pos.z,
@@ -1230,13 +1240,13 @@ export class FightRuntime {
         {
           id: "shuffle",
           value: shuffleBounces(level),
-          until: now + (def.durationMs ?? 0),
+          until: now + skillDurationMs(skillId, level),
         },
         now,
       );
       out.push(this.buffMsg(p.id, buff));
     } else if (skillId === "taunt" && boss) {
-      const until = now + (def.durationMs ?? 0);
+      const until = now + skillDurationMs(skillId, level);
       const before = boss.setTaunt(uid, until, now);
       if (before) out.push(...this.untaunt(before));
       const buff = boss.buff(uid, { id: "taunt", value: 1, until }, now);
@@ -1596,8 +1606,8 @@ export class FightRuntime {
       });
     }
     if (this.open) {
-      // Rimshots land before the engine steps, so their hits land this
-      // update.
+      // Rimshots and Silencios land before the engine steps, so their hits
+      // (and bleeds) land this update.
       this.stepSlams(now, out);
       this.stepSpins(now, out);
       for (const ev of this.engine.update(now, alive)) this.apply(ev, out, now);
@@ -1786,10 +1796,11 @@ export class FightRuntime {
     }
   }
 
-  /** Rimshots whose wind-up is done land: a ground slam where each
-   * Percussionist stood (its damage pays it: hits tagged "rimshot"). One
-   * knocked out, or gone, before it lands loses it; the room is told as
-   * for a stopped channel. */
+  /** Wind-ups that are done land where each caster stood: a Rimshot's
+   * ground slam (its damage pays it: hits tagged "rimshot"), or a
+   * Silencio's wave (it pays once if it caught anyone; its bleed's ticks
+   * don't). One knocked out, or gone, before it lands loses it; the room
+   * is told as for a stopped channel. */
   private stepSlams(now: number, out: Outbound[]) {
     for (const [uid, s] of [...this.slams]) {
       const p = this.players.get(uid);
@@ -1804,6 +1815,17 @@ export class FightRuntime {
       }
       if (now < s.until) continue;
       this.slams.delete(uid);
+      if (s.skill === "silencio") {
+        const caught = this.engine.silencio(
+          uid,
+          { x: s.x, z: s.z },
+          this.hitStats(p, now),
+          s.level,
+          now,
+        );
+        if (caught > 0) this.earn(uid, "silencio");
+        continue;
+      }
       this.engine.rimshot(
         uid,
         { x: s.x, z: s.z },
@@ -2206,12 +2228,8 @@ export class FightRuntime {
         );
         if (ev.damage > 0) {
           // A skill's hit pays its use; a bleed's ticks don't (its use
-          // paid when it took hold).
-          if (
-            ev.skill &&
-            isSkillId(ev.skill) &&
-            ev.skill !== "forbidden-frequency"
-          )
+          // paid when it took hold, or when its Silencio caught anyone).
+          if (ev.skill && isSkillId(ev.skill) && !isBleedSkill(ev.skill))
             this.earn(ev.uid, ev.skill);
           // Whoever hasted, enraged or focused them: their use did
           // something.
@@ -2229,10 +2247,9 @@ export class FightRuntime {
             damage: ev.damage,
             crit: ev.crit,
             ...(ev.mob !== undefined ? { mob: ev.mob } : {}),
-            // Forbidden Frequency has no hit of its own: its hits bleed.
-            ...(ev.skill === "forbidden-frequency"
-              ? { bleed: true as const }
-              : {}),
+            // Forbidden Frequency and Silencio have no hit of their own:
+            // their hits bleed.
+            ...(isBleedSkill(ev.skill) ? { bleed: true as const } : {}),
           },
         });
         break;
@@ -2267,9 +2284,11 @@ export class FightRuntime {
         this.summon(now, out);
         break;
       case "bleed":
-        // A Forbidden Frequency bleed took hold, or started over (its use
-        // pays), or ended early (stacks 0): everyone sees it.
-        if (ev.stacks > 0) this.earn(ev.uid, "forbidden-frequency");
+        // A bleed took hold, or started over, or ended early (stacks 0):
+        // everyone sees it. Forbidden Frequency's taking hold pays its
+        // use (a Silencio's paid as it burst, see stepSlams).
+        if (ev.stacks > 0 && !ev.skill)
+          this.earn(ev.uid, "forbidden-frequency");
         out.push({
           to: "all",
           msg: {
@@ -2278,6 +2297,7 @@ export class FightRuntime {
             target: ev.mob ?? 0,
             ...(ev.mob !== undefined ? { mob: true as const } : {}),
             ...(ev.mob === undefined ? { boss: true as const } : {}),
+            ...(ev.skill ? { skill: ev.skill } : {}),
             stacks: ev.stacks,
             until: ev.until,
           },

@@ -875,3 +875,70 @@ describe("Forbidden Frequency", () => {
     );
   });
 });
+
+describe("Silencio", () => {
+  const castMs = SKILL_DEFS.silencio.castMs ?? 0;
+  /** A Bard beside the boss (in reach), or far from it. */
+  const bard = (z: number) => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("bard", 1, ticket("bard", [["silencio", 5]], 200), { x: 0, z }, T0 - 5_000);
+    f.onState("bard", 0, z, T0);
+    return f;
+  };
+  const near = TUNING.boss.z + TUNING.boss.radius + 2;
+
+  it("bursts once its wind-up is done: the boss bleeds, and each use that caught it pays once", () => {
+    const f = bard(near);
+    const every = SKILL_DEFS.silencio.cooldownMs + 100;
+    const per = skillXpPerUse("silencio");
+    const uses = Math.ceil(1 / per);
+    const said: ServerMessage[] = [];
+    let ticks = 0;
+    for (let i = 0; i < uses; i++) {
+      const t = T0 + i * every;
+      f.onState("bard", 0, near, t);
+      expect(f.skill("bard", "silencio", 0, 0, t).result).toBe("used");
+      // Nothing yet while it winds up.
+      expect(msgs(f.step(t + castMs - 50), "bleed")).toEqual([]);
+      for (let u = t + castMs; u < t + every; u += 50) {
+        const out = f.step(u);
+        said.push(...msgs(out, "bleed").map((o) => o.msg));
+        ticks += msgs(out, "hit").filter((o) => o.msg.t === "hit" && o.msg.bleed).length;
+      }
+    }
+    expect(said).toHaveLength(uses);
+    expect(said[0]).toMatchObject({ by: 1, target: 0, boss: true, skill: "silencio", stacks: 1 });
+    // Its ticks hit, and pay nothing more.
+    expect(ticks).toBeGreaterThan(uses);
+    const xp = f.report(T0 + uses * every, true)?.skills?.xp ?? [];
+    expect(xp.find((x) => x.skill === "silencio")?.xp).toBe(Math.floor(uses * per + 1e-9));
+  });
+
+  it("catching nobody pays nothing", () => {
+    const f = bard(TUNING.boss.z + TUNING.boss.radius + 12);
+    const every = SKILL_DEFS.silencio.cooldownMs + 100;
+    const uses = Math.ceil(1 / skillXpPerUse("silencio"));
+    for (let i = 0; i < uses; i++) {
+      const t = T0 + i * every;
+      expect(f.skill("bard", "silencio", 0, 0, t).result).toBe("used");
+      for (let u = t + 50; u < t + castMs + 500; u += 50)
+        expect(msgs(f.step(u), "bleed")).toEqual([]);
+    }
+    const xp = f.report(T0 + uses * every, true)?.skills?.xp ?? [];
+    expect(xp.find((x) => x.skill === "silencio")).toBeUndefined();
+  });
+
+  it("is lost if its Bard goes down winding it up", () => {
+    const f = bard(near);
+    expect(f.skill("bard", "silencio", 0, 0, T0).result).toBe("used");
+    const p = f.player("bard");
+    if (!p) throw new Error("no bard");
+    p.down = true;
+    const out = f.step(T0 + 100);
+    expect(msgs(out, "channel").map((o) => o.msg)).toEqual([
+      { t: "channel", by: 1, target: null, until: 0 },
+    ]);
+    for (let u = T0 + 150; u < T0 + 2_000; u += 50)
+      expect(msgs(f.step(u), "bleed")).toEqual([]);
+  });
+});

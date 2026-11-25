@@ -22,6 +22,7 @@ export const SKILL_ABBR: Record<SkillId, string> = {
   rage: "RG",
   focus: "FC",
   "forbidden-frequency": "FF",
+  silencio: "SI",
 };
 
 /** Each class's colour, for its skills' letters. */

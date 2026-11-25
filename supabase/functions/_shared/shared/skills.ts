@@ -35,6 +35,7 @@ export const SKILL_IDS = [
   "rage",
   "focus",
   "forbidden-frequency",
+  "silencio",
 ] as const;
 export type SkillId = (typeof SKILL_IDS)[number];
 
@@ -46,7 +47,8 @@ export interface SkillDef {
   id: SkillId;
   name: string;
   kind: SkillKind;
-  /** Short description; `{v}` is replaced with the level's value. */
+  /** Short description; `{v}` is replaced with the level's value, `{d}`
+   * with its length (skillDurationMs) in seconds. */
   describe: string;
   /** Effect value at level 1 and level 10; linear in between. A fraction:
    * 0.2 is 20% (of max HP healed, of damage reduced, of a normal hit),
@@ -56,8 +58,11 @@ export interface SkillDef {
    * not a share: what one and several of them are called. */
   count?: readonly [string, string];
   cooldownMs: number;
-  /** Buffs only: how long the buff lasts. */
+  /** Buffs only: how long the buff lasts (at level 1). */
   durationMs?: number;
+  /** How long it lasts at SKILL_MAX_LEVEL, when it grows with the skill:
+   * linear from `durationMs` at level 1 (skillDurationMs). */
+  maxDurationMs?: number;
   /** Heals: who is in reach, metres from the caster. A revive: how close
    * the downed herzie must be. */
   radius?: number;
@@ -141,12 +146,14 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     name: "Haste",
     kind: "buff",
     describe:
-      "A quickening tune: every herzie nearby (you too) attacks {v} faster for 12 s.",
+      "A quickening tune: every herzie nearby (you too) attacks {v} faster for {d}.",
     // Raid-wide attack speed, as Bloodlust/Heroism (30%) or a Bard's
     // songs: strong, so on a long cooldown, to be called at the right time.
+    // Like every Bard buff, it lasts longer as the skill grows.
     value: [0.25, 0.4],
     cooldownMs: 60_000,
     durationMs: 12_000,
+    maxDurationMs: 18_000,
     radius: 10,
     minLevel: 15,
   },
@@ -188,12 +195,13 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     name: "Rage",
     kind: "buff",
     describe:
-      "A rousing tune: every herzie nearby (you too) hits {v} harder for 15 s.",
+      "A rousing tune: every herzie nearby (you too) hits {v} harder for {d}.",
     // Raid-wide damage, strengthened by Euphony as Haste is (capped at
     // RAGE_MAX).
     value: [0.1, 0.2],
     cooldownMs: 40_000,
     durationMs: 15_000,
+    maxDurationMs: 22_000,
     radius: 10,
     minLevel: 20,
   },
@@ -202,7 +210,7 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     name: "Focus",
     kind: "buff",
     describe:
-      "A steadying tune: every herzie nearby (you too) gains +{v} for 15 s: faster attacks, more crits.",
+      "A steadying tune: every herzie nearby (you too) gains +{v} for {d}: faster attacks, more crits.",
     // Flat Timing on top of the herzie's own, strengthened by Euphony as
     // Haste is (capped at FOCUS_MAX). Timing's returns diminish
     // (timingShare in stats.ts), so it's worth most to those with little.
@@ -210,6 +218,7 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     count: ["Timing", "Timing"],
     cooldownMs: 60_000,
     durationMs: 15_000,
+    maxDurationMs: 22_000,
     radius: 10,
     minLevel: 30,
     requires: { skill: "rage", level: 8 },
@@ -259,6 +268,24 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     durationMs: 60_000,
     minLevel: 30,
   },
+  silencio: {
+    id: "silencio",
+    name: "Silencio",
+    kind: "attack",
+    describe:
+      "Hushes the air for 0.5 s (you can't move), then a wave of silence bursts out of you: every enemy within 5 m is flung out before it, a little further than a Cymbrella's dome, and bleeds {v} of a wave a second for 8 s. The boss is too big to fling and herzies hold their ground: they only bleed.",
+    // A bleed hit's share of a wave: see SILENCIO for the wave. The Bard's
+    // answer to a pack on its healers: room to breathe, and a bleed on
+    // everything it moved. Its wind-up holds the Bard still and swings
+    // nothing for half a second, so the bleed pays that back: 2.4 waves
+    // over its 8 s at level 1, 4 at the cap, on each enemy it caught.
+    value: [0.3, 0.5],
+    cooldownMs: 20_000,
+    durationMs: 8_000,
+    castMs: 500,
+    minLevel: 25,
+    requires: { skill: "rage", level: 3 },
+  },
 };
 
 /** Forbidden Frequency's bleed: how many stacks one target holds, and how
@@ -287,6 +314,22 @@ export function bleedEveryMs(stacks: number): number {
     Math.max(1, Math.min(FORBIDDEN_FREQUENCY.maxStacks, stacks))
   );
 }
+
+/** Silencio, a Bard's wave of silence. It bursts from where its caster
+ * stood when the wind-up (SKILL_DEFS.silencio.castMs) ends. Every enemy
+ * whose body is within `radius` then bleeds, a bleed of its own beside
+ * Forbidden Frequency's: one stack, hitting every FORBIDDEN_FREQUENCY.tickMs
+ * for skillValue of a wave like Forbidden Frequency's (no crit), for
+ * SKILL_DEFS' `durationMs` on anything; a new one starts the time over.
+ * Every mob there is flung out before the wave, which grows as a
+ * Cymbrella's dome does (domeRadiusAt, DOME.growMs) but to `radius`, a
+ * metre past the dome's edge, and is gone `standMs` after it bursts: then
+ * they may walk back in. It shelters nobody. The boss is too big to fling,
+ * and a herzie (a duel, the Wilds) moves itself: they only bleed. */
+export const SILENCIO = {
+  radius: 5,
+  standMs: 500,
+} as const;
 
 /** Cymbal Trap, a thrown cymbal: how far it flies, how fast (its hit lands
  * after the flight, like a disc's), its blow as a share of a strike's, and
@@ -429,8 +472,21 @@ export function clampSkillLevel(level: number): number {
 /** The skill's effect at `level`: linear from level 1 to SKILL_MAX_LEVEL. */
 export function skillValue(id: SkillId, level: number): number {
   const [lo, hi] = SKILL_DEFS[id].value;
-  const t = (clampSkillLevel(level) - 1) / (SKILL_MAX_LEVEL - 1);
-  return lo + (hi - lo) * t;
+  return lo + (hi - lo) * levelShare(level);
+}
+
+/** How far `level` is from level 1 to SKILL_MAX_LEVEL, 0..1. */
+function levelShare(level: number): number {
+  return (clampSkillLevel(level) - 1) / (SKILL_MAX_LEVEL - 1);
+}
+
+/** How long a use of the skill at `level` lasts, ms (0 for one that
+ * doesn't): its `durationMs`, growing to `maxDurationMs` at
+ * SKILL_MAX_LEVEL in whole seconds, for a skill whose length grows. */
+export function skillDurationMs(id: SkillId, level: number): number {
+  const { durationMs = 0, maxDurationMs = durationMs } = SKILL_DEFS[id];
+  const ms = durationMs + (maxDurationMs - durationMs) * levelShare(level);
+  return Math.round(ms / 1000) * 1000;
 }
 
 export function describeSkill(id: SkillId, level: number): string {
@@ -441,7 +497,9 @@ export function describeSkill(id: SkillId, level: number): string {
     ? `${n} ${n === 1 ? count[0] : count[1]}`
     : `${Math.round(v * 100)}%`;
   // A skill without a value (Taunt) has no {v} to fill.
-  return SKILL_DEFS[id].describe.replace("{v}", shown);
+  return SKILL_DEFS[id].describe
+    .replace("{v}", shown)
+    .replace("{d}", `${skillDurationMs(id, level) / 1000} s`);
 }
 
 // --- Skill XP ---------------------------------------------------------------

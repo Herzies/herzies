@@ -21,6 +21,7 @@
 import {
   type Body,
   bodyHitAt,
+  type Dome,
   discChain,
   discLandsAfterMs,
   type HitStats,
@@ -35,6 +36,7 @@ import {
   CYMBAL_TRAP,
   RIMSHOT,
   SHUFFLE_REACH,
+  SILENCIO,
   shuffleScale,
 } from "@herzies/shared/skills";
 import {
@@ -247,10 +249,25 @@ export class MobPack {
   struck: (uid: string, m: Mob, damage: number, at: number) => void = () => {};
   /** Shapes a stun took off the floor, to say so next update. */
   private cancelled: number[] = [];
+  /** Silencio waves bursting (SILENCIO): they shove mobs out as a dome
+   * does, but shelter nobody, so they're kept apart from `domes`. */
+  private waves: Dome[] = [];
 
   /** When the last update ran (server ms). */
   get now(): number {
     return this.lastAt;
+  }
+
+  /** A Silencio bursts at `at`, `now`: every mob there is shoved out
+   * before its wave as it grows (keepOut), until it's gone. */
+  wave(at: { x: number; z: number }, now: number): void {
+    this.waves.push({
+      x: at.x,
+      z: at.z,
+      from: now,
+      until: now + SILENCIO.standMs,
+      radius: SILENCIO.radius,
+    });
   }
 
   enragedAt(now: number): boolean {
@@ -695,7 +712,8 @@ export class MobPack {
       this.act(now, dt, players, judge, events);
       this.contact(now, players, judge, events);
     }
-    // A dome growing shoves them out before it.
+    // A dome or a Silencio's wave growing shoves them out before it.
+    this.waves = this.waves.filter((w) => w.until > now);
     for (const m of this.mobs) {
       if (m.hp <= 0) continue;
       const out = this.keepOut(m, m);
@@ -1152,13 +1170,15 @@ export class MobPack {
     m.z = p.z;
   }
 
-  /** `p`, or the nearest spot outside every dome for `m`, in the arena
-   * (staying out of the dome wins). */
+  /** `p`, or the nearest spot outside every dome and Silencio wave for
+   * `m`, in the arena (staying out of them wins). */
   private keepOut(
     m: Mob,
     p: { x: number; z: number },
   ): { x: number; z: number } {
-    const domes = this.domes();
+    const domes: readonly Dome[] = this.waves.length
+      ? [...this.domes(), ...this.waves]
+      : this.domes();
     if (!domes.length) return { x: p.x, z: p.z };
     return pushOutOfDomes(
       domes,

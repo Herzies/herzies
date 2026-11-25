@@ -201,8 +201,16 @@ export const DOME = {
   growMs: 400,
 } as const;
 
-/** A dome standing at (x, z) from `from` to `until` (server ms). */
-export type Dome = { x: number; z: number; from: number; until: number };
+/** A dome standing at (x, z) from `from` to `until` (server ms), growing
+ * to `radius` if not DOME's (a Silencio's wave, SILENCIO.radius: not a
+ * dome, but it shoves the same way). */
+export type Dome = {
+  x: number;
+  z: number;
+  from: number;
+  until: number;
+  radius?: number;
+};
 
 /** How far a dome reaches at `t`: easing out from its start to its full
  * size (quick at first, settling in), and 0 before or after it stands. */
@@ -210,7 +218,7 @@ export function domeRadiusAt(d: Dome, t: number): number {
   if (t < d.from || t >= d.until) return 0;
   const u = Math.min(1, (t - d.from) / DOME.growMs);
   const e = 1 - (1 - u) ** 3;
-  return DOME.startRadius + (DOME.radius - DOME.startRadius) * e;
+  return DOME.startRadius + ((d.radius ?? DOME.radius) - DOME.startRadius) * e;
 }
 
 /** The dome that shelters (x, z) at `t`, if any. */

@@ -1,16 +1,39 @@
 /**
- * Forbidden Frequency's bleeds (FORBIDDEN_FREQUENCY in shared skills.ts):
- * its discs in flight, the one bleed each target holds, and when it hits.
- * Every judge (the boss's cave, the Tower, duels, the Wilds) keeps one,
- * keyed by whatever it calls its targets and lasting as long as a bleed
- * lasts there, and works out each bleed hit itself (who may be hit, its
- * share of a wave, Def, domes). Pure.
+ * Bleeds: Forbidden Frequency's (FORBIDDEN_FREQUENCY in shared skills.ts)
+ * and Silencio's (SILENCIO), each its own: what's on its way (a Forbidden
+ * Frequency disc in flight; a Silencio's lands as it bursts, no flight),
+ * the one bleed of the kind each target holds, and when it hits. Every
+ * judge (the boss's cave, the Tower, duels, the Wilds) keeps one of each,
+ * keyed by whatever it calls its targets and lasting as long as that
+ * bleed lasts there, and works out each bleed hit itself (who may be hit,
+ * its share of a wave, Def, domes). Pure.
  */
 import type { HitStats } from "@herzies/shared/combat";
 import { bleedEveryMs, FORBIDDEN_FREQUENCY } from "@herzies/shared/skills";
 
-/** A Forbidden Frequency disc on its way: from `by` (at its skill `level`,
- * rolling its hits with `stats`), to `key`, landing `at`. */
+/** The skills that bleed: each keeps its own Bleeds, so one of each may
+ * run on a target. */
+export type BleedSkill = "forbidden-frequency" | "silencio";
+
+export const BLEED_SKILLS: readonly BleedSkill[] = [
+  "forbidden-frequency",
+  "silencio",
+];
+
+/** Whether a hit tagged `skill` is a bleed's tick. */
+export function isBleedSkill(skill: string | undefined): skill is BleedSkill {
+  return skill === "forbidden-frequency" || skill === "silencio";
+}
+
+/** What a bleed message says of its skill: Silencio's says so, Forbidden
+ * Frequency's says nothing (as it always has). */
+export function bleedTag(skill: BleedSkill): { skill?: "silencio" } {
+  return skill === "silencio" ? { skill } : {};
+}
+
+/** A bleed on its way: from `by` (at its skill `level`, rolling its hits
+ * with `stats`), to `key`, landing `at` (a Forbidden Frequency disc's; a
+ * Silencio's lands at once). */
 export type BleedDisc = {
   at: number;
   by: string;
@@ -37,8 +60,12 @@ export class Bleeds {
 
   /** `lastsMs`: how long a bleed runs from its newest stack (SKILL_DEFS'
    * durationMs on mobs and the boss, FORBIDDEN_FREQUENCY.herzieMs on
-   * herzies). */
-  constructor(private readonly lastsMs: number) {}
+   * herzies; a Silencio's durationMs on anything). `maxStacks`: how many
+   * stacks one target holds (a Silencio's, one). */
+  constructor(
+    private readonly lastsMs: number,
+    private readonly maxStacks: number = FORBIDDEN_FREQUENCY.maxStacks,
+  ) {}
 
   /** Discs in flight, or a bleed running: something to keep ticking for. */
   get busy(): boolean {
@@ -62,7 +89,7 @@ export class Bleeds {
   }
 
   /** `disc` took hold at `now`: its target's bleed gains a stack (up to
-   * FORBIDDEN_FREQUENCY.maxStacks) and starts its time over, credited to
+   * `maxStacks`) and starts its time over, credited to
    * this thrower at the stronger of the two levels. More stacks hit more
    * often (bleedEveryMs): the next hit comes no later than the quicker
    * beat from now. */
@@ -81,7 +108,7 @@ export class Bleeds {
       this.bleeds.set(disc.key, fresh);
       return fresh;
     }
-    b.stacks = Math.min(FORBIDDEN_FREQUENCY.maxStacks, b.stacks + 1);
+    b.stacks = Math.min(this.maxStacks, b.stacks + 1);
     b.until = until;
     b.by = disc.by;
     b.stats = disc.stats;

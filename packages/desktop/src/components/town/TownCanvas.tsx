@@ -110,6 +110,7 @@ import { DomeVFX } from "./vfx/DomeVFX";
 import { HasteVFX } from "./vfx/HasteVFX";
 import { HealVFX } from "./vfx/HealVFX";
 import { MultispinVFX } from "./vfx/MultispinVFX";
+import { SilencioVFX } from "./vfx/SilencioVFX";
 import { SkillVFX } from "./vfx/SkillVFX";
 import { SlamVFX } from "./vfx/SlamVFX";
 import { SlashVFX } from "./vfx/SlashVFX";
@@ -434,6 +435,7 @@ export default function TownCanvas(props: TownCanvasProps) {
         <DomeVFX map={map} />
         <StunVFX />
         <SlamVFX map={map} />
+        <SilencioVFX map={map} />
         <CymbalTrapVFX map={map} />
         <HasteVFX />
         <TuneVFX buff="rage" />

@@ -169,6 +169,7 @@ describe("choosing a class", () => {
     ["percussionist", "cymbal-trap", 20, "rimshot", 5],
     ["record_slinger", "multispin", 20, "shuffle", 8],
     ["bard", "focus", 30, "rage", 8],
+    ["bard", "silencio", 25, "rage", 3],
   ] as const)("a %s learns %s at level %i once its %s is level %i, in either order", async (cls, skill, level, needs, needsLevel) => {
     const has = async (userId: string) =>
       (await skills(userId)).map((s) => s.skill_id).includes(skill);
