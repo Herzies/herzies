@@ -241,12 +241,19 @@ export class MobPack {
   /** The Cymbrella domes standing (the host's): no mob enters one, and
    * no swing of theirs lands on anyone inside. */
   domes: () => readonly ShelterDome[] = () => [];
-  /** How much harder `uid`'s hit lands on `m` as it lands (the host's: a
-   * Tower climb's executioner boons). */
-  landBoost: (uid: string, m: Mob) => number = () => 1;
+  /** How much harder `uid`'s hit lands on `m` as it lands, `skill` the
+   * skill it's from if any (the host's: a Tower climb's executioner,
+   * opener and power chord boons). */
+  landBoost: (uid: string, m: Mob, skill?: string) => number = () => 1;
+  /** How much harder the mobs' attacks land on `uid` (the host's: a Tower
+   * climb's Glass Cannon). */
+  takenMult: (uid: string) => number = () => 1;
   /** Mob `m`'s attack landed `damage` on `uid` at `at` (the host's: a
    * Tower climb's thorns boons pay some of it back). */
   struck: (uid: string, m: Mob, damage: number, at: number) => void = () => {};
+  /** `uid`'s hit took mob `m` down at `now` (the host's: a Tower climb's
+   * Shockwave bursts from it). */
+  fell: (uid: string, m: Mob, now: number) => void = () => {};
   /** Shapes a stun took off the floor, to say so next update. */
   private cancelled: number[] = [];
   /** Silencio waves bursting (SILENCIO): they shove mobs out as a dome
@@ -738,7 +745,7 @@ export class MobPack {
       if (!m || m.hp <= 0) continue;
       const damage = Math.max(
         1,
-        Math.round(p.damage * this.landBoost(p.uid, m)),
+        Math.round(p.damage * this.landBoost(p.uid, m, p.skill)),
       );
       m.hp = Math.max(0, m.hp - damage);
       events.push({
@@ -764,6 +771,7 @@ export class MobPack {
         if (t.mob === m.id) events.push({ t: "resolve", id: t.id, hits: [] });
       this.telegraphs = this.telegraphs.filter((t) => t.mob !== m.id);
       events.push({ t: "mobDown", mob: m.id, by: p.uid, x: m.x, z: m.z });
+      this.fell(p.uid, m, now);
       // Once every mob is down, nothing more lands.
       if (!this.alive.length) this.pending = [];
     }
@@ -937,6 +945,7 @@ export class MobPack {
           p,
           bump,
           judge.buffs(p.uid),
+          { mult: this.takenMult(p.uid) },
         );
         judge.hitAt(p.uid, now);
         this.bumpedAt.set(key, now);
@@ -1230,6 +1239,7 @@ export class MobPack {
           p,
           tg,
           judge.buffs(p.uid),
+          { mult: this.takenMult(p.uid) },
         );
         struck.add(once);
         // Under a dome: none of it lands, and no breather starts.

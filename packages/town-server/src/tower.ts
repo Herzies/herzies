@@ -45,7 +45,9 @@ import {
 import {
   isChestFloor,
   TOWER_CHEST,
+  TOWER_SHOCKWAVE_RADIUS,
   type TowerBoonId,
+  towerBoonDrawback,
   towerMob,
 } from "@herzies/shared/tower";
 import type { TowerFloor, TowerMob } from "@herzies/shared/town-net";
@@ -67,6 +69,10 @@ import type { SpinBody } from "./spin";
 import { LOOT_REACH_SLACK } from "./wilds-loot";
 
 export { predict, SEEN_LAG_MS, type TowerArena } from "./mobs";
+
+/** How long a Shockwave's burst takes to reach the mobs round its fallen
+ * one (ms): a beat, so a chain of them reads as a chain. */
+const SHOCKWAVE_DELAY_MS = 120;
 
 /** The Tower's extra events, beside the boss's. */
 export type TowerEvent =
@@ -130,13 +136,35 @@ export class TowerEngine {
       arena,
     );
     this.pack.domes = () => this.domes;
-    // A climb's executioner boons: harder on a mob under a third of its
-    // health. Its thorns: a mob that hits the herzie takes a share back.
-    this.pack.landBoost = (uid, m) =>
-      m.hp < m.maxHp / 3 ? 1 + (this.boons.get(uid)?.executioner ?? 0) : 1;
+    // A climb's boons on its hits as they land: executioner harder on a
+    // mob under a third of its health, opener on one still untouched,
+    // power chord on a skill's (its bleeds too). Glass Cannon's cost on
+    // the mobs' hits. Its thorns: a mob that hits the herzie takes a share
+    // back. Its shockwave: a mob it takes down bursts on those round it.
+    this.pack.landBoost = (uid, m, skill) => {
+      const b = this.boons.get(uid);
+      if (!b) return 1;
+      return (
+        (m.hp < m.maxHp / 3 ? 1 + b.executioner : 1) *
+        (m.hp >= m.maxHp ? 1 + b.opener : 1) *
+        (skill ? 1 + b["power-chord"] : 1)
+      );
+    };
+    this.pack.takenMult = (uid) =>
+      1 +
+      towerBoonDrawback(
+        "glass-cannon",
+        this.boons.get(uid)?.["glass-cannon"] ?? 0,
+      );
     this.pack.struck = (uid, m, damage, at) => {
       const thorns = this.boons.get(uid)?.thorns ?? 0;
       if (thorns > 0 && m.hp > 0) this.pack.strike(uid, m, at, damage * thorns);
+    };
+    this.pack.fell = (uid, m, now) => {
+      const share = this.boons.get(uid)?.shockwave ?? 0;
+      if (share <= 0) return;
+      for (const o of this.pack.within(m, TOWER_SHOCKWAVE_RADIUS, now))
+        this.pack.strike(uid, o, now + SHOCKWAVE_DELAY_MS, m.maxHp * share);
     };
     this.rand = rng(opts.seed + 7_919);
     this.pack.spawnFloor(opts.now);
@@ -569,11 +597,14 @@ export class TowerEngine {
   }
 
   /** How much harder `uid` hits right now: an in-tune Record Slinger, a
-   * Rage (as in the boss's cave), and its climb's damage boons. */
+   * Rage (as in the boss's cave), and its climb's damage and Glass Cannon
+   * boons. */
   private damageMult(uid: string, now: number): number {
+    const b = this.boons.get(uid);
     return (
       buffMultiplier(this.buffs.get(uid) ?? [], "damage", now) *
-      (1 + (this.boons.get(uid)?.damage ?? 0))
+      (1 + (b?.damage ?? 0)) *
+      (1 + (b?.["glass-cannon"] ?? 0))
     );
   }
 

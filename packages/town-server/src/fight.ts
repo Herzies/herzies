@@ -65,11 +65,12 @@ import {
 } from "@herzies/shared/skills";
 import { buffMult, healMult } from "@herzies/shared/stats";
 import {
+  crossedStats,
   isTowerBoon,
-  TOWER_BOONS,
   type TowerBoon,
   type TowerBoonId,
   towerBoonOffers,
+  towerBoonPickFloor,
   towerBoonPicks,
   towerBoonSeed,
   towerBoonTotals,
@@ -162,7 +163,10 @@ export type FightPlayer = {
   /** The room's entity id for this socket. */
   id: number;
   hp: number;
+  /** Its max health here: its own (`baseMaxHp`, the ticket's), raised by
+   * a Tower climb's Vigor (vigorMaxHp). */
   maxHp: number;
+  baseMaxHp: number;
   down: boolean;
   stats: FightStats;
   present: boolean;
@@ -617,7 +621,7 @@ export class FightRuntime {
     const pick = this.climb.boons.length + this.climb.skips;
     return towerBoonOffers(
       towerBoonSeed(this.towerUid, this.eventId, this.climb.n ?? 1, pick),
-      (pick + 1) * TOWER_BOONS.every,
+      towerBoonPickFloor(pick + 1),
     );
   }
 
@@ -649,7 +653,25 @@ export class FightRuntime {
     }
     this.boonsUnsent = true;
     this.reportNow = true;
-    return [this.floorMsg(tower)];
+    return [this.floorMsg(tower), ...this.reVigor(uid)];
+  }
+
+  /** `uid`'s max health with its climb's Vigor on `base` (its own). */
+  private vigorMaxHp(uid: string, base: number): number {
+    return Math.round(base * (1 + (this.boonsOf(uid)?.vigor ?? 0)));
+  }
+
+  /** A Vigor just picked: `uid`'s max health grows, and its health by as
+   * much (a heal, told to the database as one). The room hears. */
+  private reVigor(uid: string): Outbound[] {
+    const p = this.players.get(uid);
+    if (!p) return [];
+    const max = this.vigorMaxHp(uid, p.baseMaxHp);
+    const gain = max - p.maxHp;
+    if (gain <= 0) return [];
+    p.maxHp = max;
+    const healed = this.restore(uid, gain);
+    return healed.length ? healed : [this.hpMsg(p)];
   }
 
   /** The climb's boons, added up, if `uid` is the Tower's herzie. */
@@ -768,7 +790,8 @@ export class FightRuntime {
       look: ticket.look,
       id,
       hp,
-      maxHp,
+      maxHp: this.vigorMaxHp(uid, maxHp),
+      baseMaxHp: maxHp,
       down: !!down,
       stats: statsOf(ticket.st),
       present: true,
@@ -1010,7 +1033,7 @@ export class FightRuntime {
       const heal = Math.min(
         o.maxHp - o.hp,
         HEAL_BOLT *
-          healMult(bard.stats.euphony) *
+          healMult(this.fightStats(bard).euphony) *
           this.healBoost(b.by, now) *
           o.maxHp,
       );
@@ -1100,7 +1123,8 @@ export class FightRuntime {
 
     if (skillId === "soothing-drones") {
       let restored = 0;
-      const mult = healMult(p.stats.euphony) * this.healBoost(uid, now);
+      const mult =
+        healMult(this.fightStats(p).euphony) * this.healBoost(uid, now);
       for (const o of this.players.values()) {
         if (!o.present || o.down || !this.fighting(o.uid)) continue;
         const at = this.history.at(o.uid, now);
@@ -1150,7 +1174,7 @@ export class FightRuntime {
       // strengthens it like any buff, to a ceiling.
       const strength = Math.min(
         BARD_BUFF_MAX[skillId],
-        value * buffMult(p.stats.euphony),
+        value * buffMult(this.fightStats(p).euphony),
       );
       const until = now + skillDurationMs(skillId, level);
       for (const o of this.players.values()) {
@@ -1302,11 +1326,23 @@ export class FightRuntime {
     return buffMultiplier(this.engine.buffsOf(uid, now), "heal", now);
   }
 
-  /** The stats `p`'s hits are rolled with now: its own, its crit chance
-   * raised by a Focus on it; in the Tower, its climb's crit boons add
-   * chance (points) and its ferocity boons a share of its crit bonus. */
+  /** `p`'s stats as it fights here: its own, with its climb's Crossover
+   * moving Euphony over to Sonic Power in the Tower (crossedStats). */
+  private fightStats(p: FightPlayer): FightStats {
+    const share = this.boonsOf(p.uid)?.crossover ?? 0;
+    return share > 0 ? crossedStats(p.stats, share) : p.stats;
+  }
+
+  /** The stats `p`'s hits are rolled with now: its own (fightStats), its
+   * crit chance raised by a Focus on it; in the Tower, its climb's crit
+   * boons add chance (points) and its ferocity boons a share of its crit
+   * bonus. */
   private hitStats(p: FightPlayer, now: number): FightStats {
-    const stats = focused(p.stats, this.engine.buffsOf(p.uid, now), now);
+    const stats = focused(
+      this.fightStats(p),
+      this.engine.buffsOf(p.uid, now),
+      now,
+    );
     const boons = this.boonsOf(p.uid);
     if (!boons) return stats;
     return {
@@ -1426,17 +1462,30 @@ export class FightRuntime {
    * database through `healed`, like a skill's heal. Nothing if they were
    * knocked out or left while it was being used up. */
   eat(uid: string, amount: number): Outbound[] {
+    if (!this.fighting(uid)) return [];
+    return this.restore(uid, amount);
+  }
+
+  /** `uid` gets back `amount` health, capped at its max; reported to the
+   * database through `healed`, like a skill's heal. Nothing if it's down,
+   * gone or already full. */
+  private restore(uid: string, amount: number): Outbound[] {
     const p = this.players.get(uid);
-    if (!p?.present || p.down || amount <= 0 || !this.fighting(uid)) return [];
+    if (!p?.present || p.down || amount <= 0) return [];
     const heal = Math.min(p.maxHp - p.hp, amount);
     if (heal <= 0) return [];
     p.hp += heal;
     this.touch(uid);
     this.healed.set(uid, (this.healed.get(uid) ?? 0) + heal);
     this.reportNow = true;
-    return [
-      { to: "all", msg: { t: "hp", id: p.id, hp: p.hp, maxHp: p.maxHp } },
-    ];
+    return [this.hpMsg(p)];
+  }
+
+  private hpMsg(p: FightPlayer): Outbound {
+    return {
+      to: "all",
+      msg: { t: "hp", id: p.id, hp: p.hp, maxHp: p.maxHp },
+    };
   }
 
   /** `uid` pressed `skill`: a new use, not paid yet. */
@@ -1900,7 +1949,7 @@ export class FightRuntime {
     const def = SKILL_DEFS.resurrect;
     const share =
       skillValue("resurrect", level) *
-      healMult(bard.stats.euphony) *
+      healMult(this.fightStats(bard).euphony) *
       this.healBoost(bard.uid, now);
     const hp = Math.max(
       1,
@@ -2165,7 +2214,7 @@ export class FightRuntime {
 
   private apply(ev: BossEvent | TowerEvent, out: Outbound[], now: number) {
     switch (ev.t) {
-      case "mobDown":
+      case "mobDown": {
         if (this.tower)
           this.towerKills.push({
             floor: this.tower.floor,
@@ -2176,7 +2225,12 @@ export class FightRuntime {
           to: "all",
           msg: { t: "mobDown", mob: ev.mob, x: round(ev.x), z: round(ev.z) },
         });
+        // A climb's Second Wind: each mob it takes down heals it.
+        const wind = this.boonsOf(ev.by)?.["second-wind"] ?? 0;
+        const by = this.players.get(ev.by);
+        if (wind > 0 && by) out.push(...this.restore(ev.by, wind * by.maxHp));
         break;
+      }
       case "cleared":
         this.towerCleared = Math.max(this.towerCleared, ev.floor);
         this.reportNow = true;

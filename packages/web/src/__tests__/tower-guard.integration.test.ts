@@ -309,74 +309,90 @@ describe("the Tower Guard", () => {
       expect((await progress(uid, now))?.climb_floor).toBe(3);
     });
 
-    it("takes only the boons a climb has earned (a pick every 3rd floor), and only known ones", async () => {
+    it("takes only the boons a climb has earned (a pick a floor at first), and only known ones", async () => {
       const now = await tower(-HOUR, HOUR);
       const uid = await player();
-      await grant(uid, now, 3, 1, ["damage:common", "def:common"]);
+      await grant(uid, now, 1, 1, ["damage:common", "def:common"]);
       expect((await progress(uid, now))?.boons).toEqual([]);
-      await grant(uid, now, 3, 1, ["fly:common"]);
+      await grant(uid, now, 1, 1, ["fly:common"]);
       expect((await progress(uid, now))?.boons).toEqual([]);
-      await grant(uid, now, 3, 1, ["def:shiny"]);
+      await grant(uid, now, 1, 1, ["def:shiny"]);
       expect((await progress(uid, now))?.boons).toEqual([]);
-      await grant(uid, now, 3, 1, ["def"]);
+      await grant(uid, now, 1, 1, ["def"]);
       expect((await progress(uid, now))?.boons).toEqual([]);
-      await grant(uid, now, 3, 1, ["def:mythic"]);
+      await grant(uid, now, 1, 1, ["def:mythic"]);
       expect((await progress(uid, now))?.boons).toEqual(["def:mythic"]);
-      await grant(uid, now, 6, 1, ["def:mythic", "thorns:rare"]);
+      await grant(uid, now, 2, 1, ["def:mythic", "vigor:rare"]);
       expect(await progress(uid, now)).toMatchObject({
-        climb_floor: 6,
-        boons: ["def:mythic", "thorns:rare"],
+        climb_floor: 2,
+        boons: ["def:mythic", "vigor:rare"],
       });
       // No climb said (a room from before climbs): the floor moves, the
       // boons don't.
-      await grant(uid, now, 7, null, ["def:mythic", "speed:rare"]);
+      await grant(uid, now, 3, null, ["def:mythic", "speed:rare"]);
       expect(await progress(uid, now)).toMatchObject({
-        climb_floor: 7,
-        boons: ["def:mythic", "thorns:rare"],
+        climb_floor: 3,
+        boons: ["def:mythic", "vigor:rare"],
       });
+    });
+
+    it("spaces the picks out higher up: every 2nd floor past 5, every 5th past 30", async () => {
+      const now = await tower(-HOUR, HOUR);
+      const uid = await player();
+      const many = (n: number) => Array.from({ length: n }, () => "crit:common");
+      // Six picks need floor 7, not 6.
+      await grant(uid, now, 6, 1, many(6));
+      expect((await progress(uid, now))?.boons).toEqual([]);
+      await grant(uid, now, 7, 1, many(6));
+      expect((await progress(uid, now))?.boons).toHaveLength(6);
+      // Sixteen need floor 35.
+      await grant(uid, now, 34, 1, many(16));
+      expect((await progress(uid, now))?.boons).toHaveLength(6);
+      await grant(uid, now, 35, 1, many(16));
+      expect((await progress(uid, now))?.boons).toHaveLength(16);
     });
 
     it("counts a skip as a pick spent, and never takes one back", async () => {
       const now = await tower(-HOUR, HOUR);
       const uid = await player();
-      await grant(uid, now, 3, 1, [], 1);
+      await grant(uid, now, 1, 1, [], 1);
       expect(await progress(uid, now)).toMatchObject({
         boons: [],
         boon_skips: 1,
       });
       // One pick earned, already skipped: no room for a boon.
-      await grant(uid, now, 3, 1, ["crit:rare"], 1);
+      await grant(uid, now, 1, 1, ["crit:rare"], 1);
       expect(await progress(uid, now)).toMatchObject({
         boons: [],
         boon_skips: 1,
       });
       // Nor for a skip given back to make room.
-      await grant(uid, now, 3, 1, ["crit:rare"], 0);
+      await grant(uid, now, 1, 1, ["crit:rare"], 0);
       expect(await progress(uid, now)).toMatchObject({
         boons: [],
         boon_skips: 1,
       });
-      await grant(uid, now, 3, 1, null, -1);
+      await grant(uid, now, 1, 1, null, -1);
       expect(await progress(uid, now)).toMatchObject({
         boons: [],
         boon_skips: 1,
       });
       // A second pick earned: a boon and the skip, together.
-      await grant(uid, now, 6, 1, ["crit:rare"], 1);
+      await grant(uid, now, 2, 1, ["crit:rare"], 1);
       expect(await progress(uid, now)).toMatchObject({
         boons: ["crit:rare"],
         boon_skips: 1,
       });
       // A third, skipped, with the boons left out: they stay.
-      await grant(uid, now, 9, 1, null, 2);
+      await grant(uid, now, 3, 1, null, 2);
       expect(await progress(uid, now)).toMatchObject({
-        climb_floor: 9,
+        climb_floor: 3,
         boons: ["crit:rare"],
         boon_skips: 2,
       });
       const g = await guard(uid);
       expect(g.climb).toEqual({
-        floor: 9,
+        floor: 3,
         boons: [{ id: "crit", rarity: "rare" }],
         skips: 2,
       });

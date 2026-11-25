@@ -16,7 +16,6 @@ import {
   MOB_SWING,
   mobsOnFloor,
   TOWER_CHEST,
-  TOWER_BOONS,
   type TowerBoon,
   towerBoonOffers,
   towerBoonSeed,
@@ -675,15 +674,13 @@ describe("Tower boons", () => {
     return { f, tw };
   };
 
-  const EVERY = TOWER_BOONS.every;
-
   it("offers the seeded three for each pick, and takes one or skips", () => {
-    // Two picks' worth of floors cleared before.
-    const { f, tw } = climb(2 * EVERY + 1);
+    // Two picks' worth of floors cleared before (one each, early on).
+    const { f, tw } = climb(3);
     const first = f.floorView(tw);
     expect(first).toMatchObject({ boons: [], picks: 2 });
     expect(first.offers).toEqual(
-      towerBoonOffers(towerBoonSeed("u", "tower-1", 2, 0), EVERY),
+      towerBoonOffers(towerBoonSeed("u", "tower-1", 2, 0), 1),
     );
     const taken = first.offers?.[1];
     const after = said(f.towerPick("u", 1), "floor")[0]?.msg as
@@ -692,7 +689,7 @@ describe("Tower boons", () => {
     expect(after).toMatchObject({ boons: [taken], picks: 1 });
     // The next pick's offers are its own.
     expect(after?.offers).toEqual(
-      towerBoonOffers(towerBoonSeed("u", "tower-1", 2, 1), 2 * EVERY),
+      towerBoonOffers(towerBoonSeed("u", "tower-1", 2, 1), 2),
     );
     // Skipping spends it.
     expect(said(f.towerPick("u", null), "floor")[0]?.msg).toMatchObject({
@@ -710,13 +707,13 @@ describe("Tower boons", () => {
   });
 
   it("refuses an offer that isn't there, and a pick not earned", () => {
-    expect(climb(EVERY + 1).f.towerPick("u", 3)).toEqual([]);
-    expect(climb(EVERY + 1, [], undefined, 1).f.towerPick("u", 0)).toEqual([]);
-    expect(climb(EVERY).f.towerPick("u", 0)).toEqual([]);
+    expect(climb(2).f.towerPick("u", 3)).toEqual([]);
+    expect(climb(2, [], undefined, 1).f.towerPick("u", 0)).toEqual([]);
+    expect(climb(1).f.towerPick("u", 0)).toEqual([]);
   });
 
-  it("a pick is earned every few floors, as the floor clears", () => {
-    const { f, tw } = climb(EVERY);
+  it("a pick is earned as the floor that earns it clears", () => {
+    const { f, tw } = climb(1);
     expect(f.floorView(tw).picks).toBe(0);
     let t = T0;
     while (!tw.isCleared && t < T0 + 120_000) {
@@ -832,6 +829,135 @@ describe("Tower boons", () => {
     expect(readyAfter([b("tempo", "mythic")])).toBe(
       Math.round(readyAfter([]) * 0.8),
     );
+  });
+
+  it("opener: harder only on a mob still at full health", () => {
+    const op = [b("opener", "rare")];
+    expect(Math.abs(hitFor(op) - hitFor([]) * 1.45)).toBeLessThanOrEqual(1);
+    expect(hitFor(op, true)).toBe(hitFor([], true));
+  });
+
+  it("glass cannon: hits harder, and the mobs hit it harder too", () => {
+    const glass = [b("glass-cannon", "rare")];
+    expect(Math.abs(hitFor(glass) - hitFor([]) * 1.2)).toBeLessThanOrEqual(1);
+    expect(stand(glass).lost).toBeGreaterThan(stand([]).lost);
+  });
+
+  it("power chord: a skill's hits land harder, a plain cast's don't", () => {
+    const chord = [b("power-chord", "mythic")];
+    expect(hitFor(chord)).toBe(hitFor([]));
+    const spin = (boons: TowerBoon[]) => {
+      const e = engine(1, 1);
+      e.setBoons("u", towerBoonTotals(boons));
+      const mob = e.wireMobs()[0];
+      const at = { x: mob.x - 3, z: mob.z };
+      const stats = { ...STATS, sonicPower: 500 };
+      expect(e.backspin("u", at, aimAt(at, mob), 0, stats, 1, T0)).toBe(3);
+      for (let t = T0 + 50; t <= T0 + 2_000; t += 50)
+        for (const ev of e.update(t, [])) if (ev.t === "hit") return ev.damage;
+      throw new Error("no hit");
+    };
+    expect(Math.abs(spin(chord) - spin([]) * 1.3)).toBeLessThanOrEqual(1);
+  });
+
+  /** Floor 1's first mob, all but dead, and its neighbour stood 1.5 m off
+   * it, both stunned where they are; then `uid` takes the first down.
+   * Every hit that followed, and the first's max health. */
+  const takeDown = (boons: TowerBoon[]) => {
+    const e = engine(1, 1);
+    e.setBoons("u", towerBoonTotals(boons));
+    type M = { id: number; x: number; z: number; hp: number; maxHp: number; stunUntil?: number };
+    const pack = (e as unknown as { pack: { byId(id: number): M } }).pack;
+    const [first, second] = e.wireMobs().map((m) => pack.byId(m.id));
+    first.hp = 1;
+    second.x = first.x + 1.5;
+    second.z = first.z;
+    first.stunUntil = second.stunUntil = T0 + 60_000;
+    e.update(T0, []);
+    const at = { x: first.x - 3, z: first.z };
+    expect(e.cast("u", at, aimAt(at, first), 0, STATS, T0 + 10)).toBe("hit");
+    return { hits: run(e, T0 + 50, T0 + 2_000, []), first, second };
+  };
+
+  it("shockwave: a mob taken down bursts on the mobs round it", () => {
+    const plain = takeDown([]);
+    expect(plain.hits).toContainEqual(
+      expect.objectContaining({ t: "mobDown", mob: plain.first.id }),
+    );
+    expect(plain.hits).not.toContainEqual(
+      expect.objectContaining({ t: "hit", mob: plain.second.id }),
+    );
+    const burst = takeDown([b("shockwave", "mythic")]);
+    expect(burst.hits).toContainEqual(
+      expect.objectContaining({
+        t: "hit",
+        mob: burst.second.id,
+        damage: Math.round(burst.first.maxHp * 0.4),
+      }),
+    );
+  });
+
+  it("second wind: each mob it takes down heals it", () => {
+    const after = (boons: TowerBoon[]) => {
+      const { f, tw } = climb(1, boons);
+      const p = f.player("u");
+      if (!p) throw new Error("no player");
+      p.hp = 50;
+      type M = { id: number; hp: number; stunUntil?: number };
+      const pack = (tw as unknown as { pack: { byId(id: number): M } }).pack;
+      const mob = tw.wireMobs()[0];
+      const m = pack.byId(mob.id);
+      m.hp = 1;
+      m.stunUntil = T0 + 60_000;
+      const at = { x: mob.x - 3, z: mob.z };
+      expect(tw.cast("u", at, aimAt(at, mob), 0, STATS, T0 + 10)).toBe("hit");
+      for (let t = T0 + 50; t <= T0 + 1_000; t += 50) f.step(t);
+      return { hp: p.hp, maxHp: p.maxHp };
+    };
+    const plain = after([]);
+    const healed = after([b("second-wind", "mythic")]);
+    expect(healed.hp).toBeCloseTo(plain.hp + healed.maxHp * 0.08);
+  });
+
+  it("vigor: more max health in the Tower, its own kept apart", () => {
+    const { f } = climb(1, [b("vigor", "legendary")]);
+    const p = f.player("u");
+    if (!p) throw new Error("no player");
+    expect(p.maxHp).toBe(Math.round(p.baseMaxHp * 1.18));
+  });
+
+  it("crossover: its Euphony turns to Sonic Power, so its heals are smaller", () => {
+    const healed = (boons: TowerBoon[]) => {
+      const claim = {
+        event: "tower-1",
+        until: (T0 + 3_600_000) / 1000,
+        floor: 1,
+        boons,
+        climb: 2,
+      };
+      const f = FightRuntime.tower(claim, "u", 20, ARENA, T0, 3);
+      f.join(
+        "u",
+        1,
+        ticket({
+          lv: 20,
+          st: [0, 0, 0, 0, 0, 0, 100, 0],
+          sk: [["soothing-drones", 1]],
+        }),
+        ARENA.entry,
+        T0,
+      );
+      const p = f.player("u");
+      if (!p) throw new Error("no player");
+      p.hp = 10;
+      expect(f.skill("u", "soothing-drones", 0, 0, T0 + 100).result).toBe(
+        "used",
+      );
+      return p.hp - 10;
+    };
+    const plain = healed([]);
+    expect(plain).toBeGreaterThan(0);
+    expect(healed([b("crossover", "mythic")])).toBeLessThan(plain);
   });
 });
 

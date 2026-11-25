@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { pickWeightedDrop } from "./items.js";
 import {
   attackTokens,
+  crossedStats,
+  describeTowerBoon,
   floorKinds,
   gapColour,
   isChestFloor,
@@ -14,6 +16,9 @@ import {
   TOWER_DROPS_DAILY_CAP,
   TOWER_RARE_LEAN,
   towerBoonOffers,
+  towerBoonPickFloor,
+  towerBoonPicks,
+  towerBoonTotals,
   towerChestRolls,
   towerLootLean,
   towerMob,
@@ -163,5 +168,49 @@ describe("tower boon offers", () => {
     };
     expect(rareShare(5)).toBeLessThan(0.2);
     expect(rareShare(60)).toBeGreaterThan(0.6);
+  });
+});
+
+describe("tower boon picks", () => {
+  it("one a floor at first, then every 2nd, 3rd and 5th floor", () => {
+    const picks = (c: number) => towerBoonPicks(c);
+    expect([0, 1, 5, 6, 7, 15, 17, 18, 30, 34, 35, 60, 100].map(picks)).toEqual(
+      [0, 1, 5, 5, 6, 10, 10, 11, 15, 15, 16, 21, 29],
+    );
+  });
+
+  it("each pick's floor is the one that earns it", () => {
+    for (let n = 1; n <= 40; n++) {
+      const floor = towerBoonPickFloor(n);
+      expect(towerBoonPicks(floor)).toBe(n);
+      expect(towerBoonPicks(floor - 1)).toBe(n - 1);
+    }
+  });
+});
+
+describe("tower boons", () => {
+  it("a trade-off says its cost: Glass Cannon's damage taken is half its bonus", () => {
+    expect(describeTowerBoon({ id: "glass-cannon", rarity: "mythic" })).toBe(
+      "Hits 40% harder, but mobs hit you 20% harder.",
+    );
+  });
+
+  it("Crossover moves Euphony to Sonic Power point for point, never more than there is", () => {
+    const stats = { sonicPower: 10, euphony: 80, def: 5 };
+    expect(crossedStats(stats, 0.25)).toEqual({
+      sonicPower: 30,
+      euphony: 60,
+      def: 5,
+    });
+    const all = [1, 2, 3].map(
+      () => ({ id: "crossover", rarity: "mythic" }) as const,
+    );
+    const share = towerBoonTotals(all).crossover;
+    expect(share).toBe(1);
+    expect(crossedStats(stats, share)).toMatchObject({
+      sonicPower: 90,
+      euphony: 0,
+    });
+    expect(crossedStats(stats, 0)).toBe(stats);
   });
 });

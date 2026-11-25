@@ -325,10 +325,11 @@ export const isChestFloor = (floor: number) =>
 
 /**
  * Tower boons (players see them as "buffs"; boon here, so as not to be
- * mistaken for a skill's Buff in skills.ts): every `every`th floor cleared
- * in a climb earns a pick, for the rest of the month's Tower (its event),
- * in the Tower only. A pick offers three different boons at random, each
- * at a rarity rolled on its own that leans rarer the higher the floor
+ * mistaken for a skill's Buff in skills.ts): floors cleared in a climb earn
+ * picks, often at first and less often the higher it goes
+ * (TOWER_BOON_TIERS), for the rest of the month's Tower (its event), in the
+ * Tower only. A pick offers three different boons at random, each at a
+ * rarity rolled on its own that leans rarer the higher the floor
  * (towerBoonOffers); the herzie takes one, or skips the lot. Picks stack:
  * two rare damage boons are +24%. The Tower Guard can start a climb over
  * (tower_reset): back to floor 1 with no boons, the month's best floor
@@ -336,8 +337,8 @@ export const isChestFloor = (floor: number) =>
  *
  * The offers are the Town server's to roll and the app's to show; seeded
  * by the herzie, the Tower, the climb and the pick, so a reconnect brings
- * back the same three. Mirrored in SQL: tower_grant's cap on picks
- * (00163_tower_buffs_every_3.sql).
+ * back the same three. Mirrored in SQL: tower_boon_picks, tower_grant's cap
+ * on picks (00166_tower_buffs_tiered.sql).
  */
 export const TOWER_BOON_IDS = [
   "speed",
@@ -348,6 +349,13 @@ export const TOWER_BOON_IDS = [
   "tempo",
   "thorns",
   "executioner",
+  "second-wind",
+  "crossover",
+  "shockwave",
+  "glass-cannon",
+  "power-chord",
+  "vigor",
+  "opener",
 ] as const;
 export type TowerBoonId = (typeof TOWER_BOON_IDS)[number];
 
@@ -363,12 +371,23 @@ export const TOWER_BOON_RARITIES = [
   "mythic",
 ] as const satisfies readonly Rarity[];
 
+/** When a climb earns its picks: one every `every` floors cleared, up to
+ * floor `upTo`, then the next tier's. A pick on each of the first five
+ * floors, every 2nd to 15, every 3rd to 30, every 5th after: a climb
+ * finds its build early, and the deep floors are earned by it. Each tier
+ * ends on a floor that earns a pick. */
+export const TOWER_BOON_TIERS = [
+  { upTo: 5, every: 1 },
+  { upTo: 15, every: 2 },
+  { upTo: 30, every: 3 },
+  { upTo: Number.POSITIVE_INFINITY, every: 5 },
+] as const;
+
 export const TOWER_BOONS = {
-  every: 3,
   /** How many boons a pick offers. */
   offers: 3,
-  /** Each rarity's weight on the first pick's floor (`every`); `lean`
-   * raises the rarer ones from there (see towerBoonWeights). */
+  /** Each rarity's weight on the first pick's floor; `lean` raises the
+   * rarer ones from there (see towerBoonWeights). */
   weights: { common: 60, uncommon: 25, rare: 10, legendary: 4, mythic: 1 },
   /** Each floor up adds this much to a factor that multiplies a rarity's
    * weight once per step above common: by floor 30 a pick is more likely
@@ -379,14 +398,18 @@ export const TOWER_BOONS = {
   unknown
 >;
 
-/** Each boon: its name, what it does (`{v}` its value), and its value at
- * each rarity, plainest first. Shares unless said: 0.1 = 10%. */
+/** Each boon: its name, what it does (`{v}` its value; `{d}` its
+ * `drawback`'s, a trade-off's cost), and its value at each rarity, plainest
+ * first. Shares unless said: 0.1 = 10%. */
 export const TOWER_BOON_DEFS: Record<
   TowerBoonId,
   {
     name: string;
     describe: string;
     values: readonly [number, number, number, number, number];
+    /** A trade-off's cost, as a share of its value: Glass Cannon's damage
+     * taken (see towerBoonDrawback). */
+    drawback?: number;
   }
 > = {
   speed: {
@@ -429,13 +452,63 @@ export const TOWER_BOON_DEFS: Record<
     describe: "Hits {v} harder on a mob under a third of its health.",
     values: [0.1, 0.15, 0.25, 0.4, 0.6],
   },
+  "second-wind": {
+    name: "Second Wind",
+    describe: "Each mob you take down heals you {v} of your max health.",
+    values: [0.02, 0.03, 0.04, 0.06, 0.08],
+  },
+  crossover: {
+    name: "Crossover",
+    describe:
+      "{v} of your Euphony becomes Sonic Power: you hit harder, but heal and buff less.",
+    values: [0.2, 0.3, 0.4, 0.5, 0.6],
+  },
+  shockwave: {
+    name: "Shockwave",
+    describe:
+      "A mob you take down bursts, hitting every mob within 4 m for {v} of its max health.",
+    values: [0.1, 0.15, 0.2, 0.3, 0.4],
+  },
+  "glass-cannon": {
+    name: "Glass Cannon",
+    describe: "Hits {v} harder, but mobs hit you {d} harder.",
+    values: [0.1, 0.15, 0.2, 0.3, 0.4],
+    drawback: 0.5,
+  },
+  "power-chord": {
+    name: "Power Chord",
+    describe: "Skills hit {v} harder (their bleeds too).",
+    values: [0.08, 0.12, 0.18, 0.24, 0.3],
+  },
+  vigor: {
+    name: "Vigor",
+    describe: "{v} more max health in the Tower.",
+    values: [0.05, 0.08, 0.12, 0.18, 0.25],
+  },
+  opener: {
+    name: "Opener",
+    describe: "Hits {v} harder on a mob still at full health.",
+    values: [0.2, 0.3, 0.45, 0.6, 0.8],
+  },
 };
 
+/** Shockwave: how far round a fallen mob its burst reaches (metres, to
+ * the other mobs' centres; its description says 4 m). */
+export const TOWER_SHOCKWAVE_RADIUS = 4;
+
 /** The most a climb's boons may add up to, where unbounded stacking would
- * break something: cooldowns never less than half, crit chance points. */
+ * break something: cooldowns never less than half, crit chance points, no
+ * more Euphony moved than there is, a Glass Cannon's cost at most +50%
+ * damage taken, and a heal per kill, a burst and max health that can't
+ * run away. */
 export const TOWER_BOON_CAPS: Partial<Record<TowerBoonId, number>> = {
   tempo: 0.5,
   crit: 50,
+  crossover: 1,
+  "glass-cannon": 1,
+  "second-wind": 0.2,
+  shockwave: 1,
+  vigor: 1,
 };
 
 export function isTowerBoonId(value: unknown): value is TowerBoonId {
@@ -461,17 +534,62 @@ export function towerBoonValue(boon: TowerBoon): number {
   ];
 }
 
+/** A trade-off's cost at `total` of its boon (0 for a boon without one):
+ * Glass Cannon's +damage taken. */
+export function towerBoonDrawback(id: TowerBoonId, total: number): number {
+  return total * (TOWER_BOON_DEFS[id].drawback ?? 0);
+}
+
 /** A boon's line for the app: its description with its value in ("Hits
  * 12% harder."). */
 export function describeTowerBoon(boon: TowerBoon): string {
   const v = towerBoonValue(boon);
-  const shown = boon.id === "crit" ? `+${v}` : `${Math.round(v * 100)}%`;
-  return TOWER_BOON_DEFS[boon.id].describe.replace("{v}", shown);
+  const pct = (n: number) => `${Math.round(n * 100)}%`;
+  return TOWER_BOON_DEFS[boon.id].describe
+    .replace("{v}", boon.id === "crit" ? `+${v}` : pct(v))
+    .replace("{d}", pct(towerBoonDrawback(boon.id, v)));
 }
 
-/** How many boon picks a climb has earned by clearing `cleared` floors. */
+/** Stats with a climb's Crossover in: `share` of the Euphony moved over to
+ * Sonic Power, point for point (capped at all of it). */
+export function crossedStats<T extends { sonicPower: number; euphony: number }>(
+  stats: T,
+  share: number,
+): T {
+  const moved = stats.euphony * Math.min(1, Math.max(0, share));
+  if (moved <= 0) return stats;
+  return {
+    ...stats,
+    sonicPower: stats.sonicPower + moved,
+    euphony: stats.euphony - moved,
+  };
+}
+
+/** How many boon picks a climb has earned by clearing `cleared` floors
+ * (TOWER_BOON_TIERS). */
 export function towerBoonPicks(cleared: number): number {
-  return Math.floor(Math.max(0, cleared) / TOWER_BOONS.every);
+  const c = Math.max(0, Math.floor(cleared));
+  let picks = 0;
+  let from = 0;
+  for (const t of TOWER_BOON_TIERS) {
+    if (c <= from) break;
+    picks += Math.floor((Math.min(c, t.upTo) - from) / t.every);
+    from = t.upTo;
+  }
+  return picks;
+}
+
+/** The floor whose clearing earns a climb's `n`th pick (1 the first). */
+export function towerBoonPickFloor(n: number): number {
+  let left = Math.max(1, Math.floor(n));
+  let from = 0;
+  for (const t of TOWER_BOON_TIERS) {
+    const here = (t.upTo - from) / t.every;
+    if (left <= here) return from + left * t.every;
+    left -= here;
+    from = t.upTo;
+  }
+  return from;
 }
 
 /** What a climb's boons add up to per boon, capped (TOWER_BOON_CAPS). */
@@ -490,7 +608,8 @@ export function towerBoonTotals(
 
 /** Each rarity's weight for a pick earned on `floor`. */
 export function towerBoonWeights(floor: number): Record<Rarity, number> {
-  const f = 1 + TOWER_BOONS.lean * Math.max(0, floor - TOWER_BOONS.every);
+  const first = towerBoonPickFloor(1);
+  const f = 1 + TOWER_BOONS.lean * Math.max(0, floor - first);
   const w = {} as Record<Rarity, number>;
   TOWER_BOON_RARITIES.forEach((r, tier) => {
     w[r] = TOWER_BOONS.weights[r] * f ** tier;
