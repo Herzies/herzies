@@ -1474,9 +1474,7 @@ function EventsViewImpl({
           </div>
         ) : null}
 
-        {/* mt-auto sinks the tabs and their list to the bottom, so a short
-          list leaves its slack above the tabs instead of under the list. */}
-        <div className="mt-auto flex shrink-0 gap-1 border-b border-white/15 pt-2 text-ui">
+        <div className="mt-2 flex shrink-0 gap-1 border-b border-white/15 pt-2 text-ui">
           <TabButton
             active={huntTab === "clues"}
             onClick={() => setHuntTab("clues")}
