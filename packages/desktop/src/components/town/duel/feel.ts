@@ -1,6 +1,7 @@
 import { logActivity } from "../../../lib/activity";
 import { notify } from "../../../lib/notices";
 import {
+  pushBleedNumber,
   pushBlockedLabel,
   pushDamageNumber,
   pushHealNumber,
@@ -8,6 +9,7 @@ import {
 } from "../combat/DamageNumbers";
 import { entityAt } from "../combat/skills";
 import { combat, kick, shake } from "../combat/state";
+import type { Vec3 } from "../combat/waves";
 import { waveField } from "../combat/waves";
 import { townSave } from "../runtime";
 import {
@@ -128,13 +130,12 @@ function onEvent(e: DuelEvent) {
       }
       if (at) {
         const jitter = () => (Math.random() - 0.5) * 0.6;
-        pushDamageNumber(
-          [at[0] + jitter(), at[1], at[2] + jitter()],
-          e.damage,
-          e.crit,
-          `duel${e.target}`,
-        );
+        const p: Vec3 = [at[0] + jitter(), at[1], at[2] + jitter()];
+        if (e.bleed) pushBleedNumber(p, e.damage, `duel${e.target}`);
+        else pushDamageNumber(p, e.damage, e.crit, `duel${e.target}`);
       }
+      // A bleed hit: the number alone.
+      if (e.bleed) return;
       combat.hitAt = now;
       combat.hitCrit = e.crit;
       if (combat.trauma < 0.3) shake(e.crit ? 0.22 : 0.08);

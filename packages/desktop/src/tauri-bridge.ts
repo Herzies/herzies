@@ -24,6 +24,7 @@ import type {
   StatPoints,
   StoreProduct,
   TitlesState,
+  TowerBoon,
   TownLook,
   TradeState,
   TradeUpdate,
@@ -202,6 +203,9 @@ export type TowerGuard = {
   } | null;
   last: { event: string; name: string; floor: number } | null;
   reward: { eligible: boolean; itemId: string | null; event: string | null };
+  /** Your climb this month: the floor you're on and the boons picked on the
+   * way (null: no climb yet). */
+  climb: { floor: number; boons: TowerBoon[] } | null;
 };
 
 /** A quest's definition, as a giver offers it (shared quests.ts). */
@@ -437,6 +441,10 @@ export const herzies = {
   /** Takes the month's best climber's reward from the Tower Guard. */
   claimTowerReward: () =>
     invoke<{ itemId: string; inventory: Inventory }>("claim_tower_reward"),
+  /** Starts your climb over: back to floor 1, boons gone, the month's best
+   * floor kept. A refusal resolves as `{ ok: false, reason }`. */
+  resetTowerClimb: () =>
+    invoke<{ ok: true } | { ok: false; reason: string }>("reset_tower_climb"),
   /** Your quests and what each quest giver offers today. */
   fetchQuests: () => invoke<QuestBoard>("fetch_quests"),
   /** Takes today's quest from a giver (an NPC key). */

@@ -20,9 +20,9 @@ const GEAR = {
   percussionist: { main_hand: "worn-stick", off_hand: "old-cymbal" },
 };
 const SKILLS = {
-  bard: [["soothing-drones", 5], ["haste", 5]],
-  record_slinger: [["backspin", 5], ["shuffle", 5]],
-  percussionist: [["cymbrella", 5], ["rimshot", 5]],
+  bard: [["soothing-drones", 5], ["haste", 5], ["rage", 5], ["focus", 5]],
+  record_slinger: [["backspin", 5], ["shuffle", 5], ["multispin", 5], ["forbidden-frequency", 5]],
+  percussionist: [["cymbrella", 5], ["rimshot", 5], ["cymbal-trap", 5]],
 };
 
 function points(cls, level) {

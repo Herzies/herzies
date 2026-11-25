@@ -4,8 +4,8 @@ import { createAdminClient } from "@/lib/supabase-admin";
 
 /**
  * What the Tower Guard shows you: this month's top three climbers and your
- * place, last month's winner, and whether he owes you a reward
- * (tower_guard_json, 00121).
+ * place, where your climb stands, last month's winner, and whether he owes
+ * you a reward (tower_guard_json, 00121 and 00161).
  */
 export async function GET(request: Request) {
   const auth = await authenticateRequest(request);

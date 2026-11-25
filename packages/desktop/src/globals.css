@@ -1042,3 +1042,67 @@
     display: none;
   }
 }
+
+/* A Tower boon's card (TowerBoons): a TiltCard with the item cards' foil,
+   and more going on the rarer it is. `--glow` is its rarity's colour.
+   Common: plain cardstock. Uncommon: a little foil. Rare: a steady glow.
+   Legendary: the glow breathes. Mythic: a rainbow edge turning round it
+   too. */
+.boon-card {
+  position: relative;
+  border-radius: 0.5rem;
+  /* Its own stacking context: the mythic edge (z-index -1) sits behind
+     the card, not behind the window. */
+  isolation: isolate;
+}
+.boon-card[data-rarity="rare"] {
+  box-shadow: 0 0 10px -2px var(--glow);
+}
+.boon-card[data-rarity="legendary"] {
+  animation: boon-breathe 2.4s ease-in-out infinite;
+}
+.boon-card[data-rarity="mythic"] {
+  animation: boon-breathe 1.8s ease-in-out infinite;
+}
+.boon-card[data-rarity="mythic"]::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 0.6rem;
+  background: conic-gradient(
+    from var(--boon-turn, 0deg),
+    #ff4fa3,
+    #ffd84a,
+    #4dffb0,
+    #4fc3ff,
+    #b46bff,
+    #ff4fa3
+  );
+  animation: boon-turn 3s linear infinite;
+  z-index: -1;
+}
+@property --boon-turn {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes boon-turn {
+  to {
+    --boon-turn: 360deg;
+  }
+}
+@keyframes boon-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 8px -2px var(--glow);
+  }
+  50% {
+    box-shadow: 0 0 20px 2px var(--glow);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .boon-card[data-rarity],
+  .boon-card[data-rarity]::before {
+    animation: none;
+  }
+}

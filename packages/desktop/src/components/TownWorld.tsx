@@ -581,7 +581,9 @@ export function TownWorld({
                       ? "Crafting Station"
                       : bench === "hunt"
                         ? "Talk to the Hunt Crystal"
-                        : "Stand up"}{" "}
+                        : bench === "chest"
+                          ? "Open the chest"
+                          : "Stand up"}{" "}
           <span className="text-text-dim">[E]</span>
         </button>
       ) : null}

@@ -5,7 +5,13 @@ import {
   WAVE_HAND_HEIGHT,
 } from "@herzies/shared/combat";
 import { DUEL } from "@herzies/shared/duel";
-import { RIMSHOT, SKILL_DEFS } from "@herzies/shared/skills";
+import {
+  MULTISPIN,
+  multispinRecords,
+  RIMSHOT,
+  SKILL_DEFS,
+  skillValue,
+} from "@herzies/shared/skills";
 import { TOWN_MAPS, type ServerMessage } from "@herzies/shared/town-net";
 import { WILDS_SAFE_CAMP } from "@herzies/shared/wilds";
 import {
@@ -90,6 +96,19 @@ function run(rt: WildsPvpRuntime, from: number, until: number): WildsEffects {
     e.downs.push(...s.downs);
   }
   return e;
+}
+
+/** Step 50 ms at a time until a Cymbal Trap's hold is said: it, when, and
+ * everything said till then. */
+function trapLands(rt: WildsPvpRuntime, from: number, until: number) {
+  const e: WildsEffects = { out: [], place: [], downs: [] };
+  for (let t = from; t <= until; t += 50) {
+    const s = rt.step(t);
+    e.out.push(...s.out);
+    const [msg] = said(s, "trap");
+    if (msg) return { msg, at: t, e };
+  }
+  throw new Error("no trap");
 }
 
 /** A cast's yaw and pitch from `from` at a herzie standing at `to`. */
@@ -477,6 +496,88 @@ describe("the Wilds' free-for-all", () => {
     const ms = second[0].until - (again + castMs);
     expect(ms).toBeGreaterThan(0);
     expect(ms).toBeLessThanOrEqual((RIMSHOT.stunMs * WILDS_PVP.stunScale) / 2);
+  });
+
+  it("holds the first a Cymbal Trap meets where it stood; it may still cast", () => {
+    const w = wilds();
+    w.join("tank", A, "percussionist");
+    w.join("b", B);
+    const { yaw, pitch } = aim(A, B);
+    expect(w.rt.skill("tank", "cymbal-trap", yaw, pitch, OPEN).result).toBe("used");
+    const { msg, at, e } = trapLands(w.rt, OPEN, OPEN + 1_000);
+    const base = Math.round(skillValue("cymbal-trap", 5) * 1000);
+    expect(msg).toEqual({ t: "trap", by: 1, target: 2, until: at + base });
+    expect(said(e, "pvpHit", "tank")[0].damage).toBeGreaterThan(0);
+    expect(w.rt.hold("b", B.x + 3, 0, at + 600)).toMatchObject(B);
+    expect(castAt(w.rt, "b", B, A, at + 600).result).toBe("hit");
+    expect(w.rt.skill("b", "haste", 0, 0, at + 650).result).toBe("used");
+    expect(w.rt.hold("b", B.x + 3, 0, msg.until)).toBeNull();
+  });
+
+  it("a second Cymbal Trap on the held only hurts; one soon after holds half as long", () => {
+    const w = wilds();
+    const from = {
+      t1: A,
+      t2: { x: A.x, z: 4 },
+      t3: { x: A.x, z: -4 },
+    };
+    for (const [uid, at] of Object.entries(from)) w.join(uid, at, "percussionist");
+    w.join("b", B);
+    const toss = (by: keyof typeof from, now: number) => {
+      const { yaw, pitch } = aim(from[by], B);
+      return w.rt.skill(by, "cymbal-trap", yaw, pitch, now).result;
+    };
+    const base = Math.round(skillValue("cymbal-trap", 5) * 1000);
+    expect(toss("t1", OPEN)).toBe("used");
+    const first = trapLands(w.rt, OPEN, OPEN + 1_000);
+    expect(first.msg).toMatchObject({ by: 1, target: 4, until: first.at + base });
+    // Already held: the blow lands, the hold is as it was.
+    expect(toss("t2", first.at + 50)).toBe("used");
+    const during = run(w.rt, first.at + 50, first.at + 1_000);
+    expect(said(during, "trap")).toEqual([]);
+    expect(said(during, "pvpHit", "t2")[0].damage).toBeGreaterThan(0);
+    // Let go, and caught again inside CYMBAL_TRAP.drWindowMs: half as long.
+    const later = first.msg.until + 100;
+    expect(w.rt.hold("b", B.x + 3, 0, later)).toBeNull();
+    expect(toss("t3", later)).toBe("used");
+    const second = trapLands(w.rt, later, later + 1_000);
+    expect(second.msg).toMatchObject({ by: 3, target: 4 });
+    expect(second.msg.until - second.at).toBe(base / 2);
+  });
+
+  it("a Cymbal Trap a dome takes holds nobody", () => {
+    const w = wilds();
+    w.join("a", A, "percussionist");
+    w.join("tank", B, "percussionist");
+    expect(w.rt.skill("tank", "cymbrella", 0, 0, OPEN).result).toBe("used");
+    const { yaw, pitch } = aim(A, B);
+    expect(w.rt.skill("a", "cymbal-trap", yaw, pitch, OPEN + 100).result).toBe("used");
+    const e = run(w.rt, OPEN + 100, OPEN + 1_500);
+    expect(said(e, "pvpHit", "a")[0]).toMatchObject({ target: 2, damage: 0, blocked: true });
+    expect(said(e, "trap")).toEqual([]);
+    expect(w.rt.hold("tank", B.x + 3, 0, OPEN + 1_000)).toBeNull();
+  });
+
+  it("spins Multispin records that hit whoever's beside, never the protected", () => {
+    const w = wilds();
+    // B a record's orbit off, halfway between two records at the start.
+    const beside = {
+      x: B.x - MULTISPIN.radius * Math.cos(Math.PI / 5),
+      z: B.z - MULTISPIN.radius * Math.sin(Math.PI / 5),
+    };
+    w.join("dj", beside, "record_slinger");
+    w.join("b", B);
+    expect(w.rt.skill("dj", "multispin", 0, 0, OPEN).result).toBe("used");
+    const turn = run(w.rt, OPEN + 50, OPEN + MULTISPIN.turnMs);
+    const hits = said(turn, "pvpHit", "dj");
+    expect(hits).toHaveLength(multispinRecords(5));
+    expect(hits.every((h) => h.target === 2 && h.damage > 0)).toBe(true);
+    // A newcomer on the same spot is still protected: only b is hit.
+    w.join("c", B, "bard", 20, OPEN + MULTISPIN.turnMs);
+    const next = run(w.rt, OPEN + MULTISPIN.turnMs + 50, OPEN + 2 * MULTISPIN.turnMs);
+    expect(said(next, "pvpHit", "dj").map((h) => h.target)).toEqual(
+      Array(multispinRecords(5)).fill(2),
+    );
   });
 
   it("carries a reconnecting herzie on, unprotected and as hurt", () => {

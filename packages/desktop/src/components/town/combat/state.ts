@@ -31,6 +31,9 @@ export const combat = {
   /** Held where it stands until then (performance.now() ms): a Rimshot's
    * wind-up roots its Percussionist. */
   rootedUntil: Number.NEGATIVE_INFINITY,
+  /** The Tower's boon window is up (TowerBoons): the herzie stands still
+   * (it may turn) and holds its fire until it's shut. */
+  picking: false,
   /** The crosshair's spread, 0 tight to 1 wide: kicks on each cast. */
   spread: 0,
   /** Whether the crosshair is over a dummy. */

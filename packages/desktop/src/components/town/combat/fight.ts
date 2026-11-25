@@ -23,10 +23,14 @@ import { logActivity } from "../../../lib/activity";
 import { notify } from "../../../lib/notices";
 import { townSave } from "../runtime";
 import {
+  sfxBleedStack,
   sfxChannel,
+  sfxCymbalClang,
+  sfxCymbalThrow,
   sfxDomeBlock,
   sfxDomeUp,
   sfxDown,
+  sfxForbiddenThrow,
   sfxHurt,
   sfxImpact,
   sfxPortal,
@@ -37,7 +41,9 @@ import {
   sfxWarn,
 } from "../sfx";
 import { setHpNow, setRegenFrozen } from "../vitals";
+import { discLanded, setBleed } from "./bleeds";
 import {
+  pushBleedNumber,
   pushDamageNumber,
   pushHealNumber,
   pushHurtNumber,
@@ -61,6 +67,8 @@ import { beginSlam, cancelSlam } from "./slams";
 import { resetHealers, setHealer } from "./stance";
 import { combat, shake } from "./state";
 import { stuns } from "./stuns";
+import { cancelCymbal, catchCymbal, throwCymbal } from "./traps";
+import type { Vec3 } from "./waves";
 import { waveField } from "./waves";
 
 /**
@@ -627,13 +635,18 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
     }
     case "hit": {
       const mob = m.mob !== undefined ? towerMobs.get(m.mob) : undefined;
+      // A bleed hit: its own number, quiet (no marker, shake or sound).
+      const pop = m.bleed
+        ? (at: Vec3, _crit: boolean, key: string) =>
+            pushBleedNumber(at, m.damage, key)
+        : (at: Vec3, crit: boolean, key: string) =>
+            pushDamageNumber(at, m.damage, crit, key);
       if (mob) {
         mob.hitAt = now;
         const at = mobAt(mob, now - drawDelayMs());
         const jitter = () => (Math.random() - 0.5) * 0.6;
-        pushDamageNumber(
+        pop(
           [at.x + jitter(), MOB.top + 0.3, at.z + jitter()],
-          m.damage,
           m.crit,
           `mob${m.mob}`,
         );
@@ -641,13 +654,9 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
         combat.bossHitAt = now;
         const jitter = (Math.random() - 0.5) * 1.6;
         const at = bossNow();
-        pushDamageNumber(
-          [at.x + jitter, BOSS_NUMBER_Y, at.z],
-          m.damage,
-          m.crit,
-          "boss",
-        );
+        pop([at.x + jitter, BOSS_NUMBER_Y, at.z], m.crit, "boss");
       }
+      if (m.bleed) return;
       combat.hitAt = now;
       combat.hitCrit = m.crit;
       // A blow you already felt land (its thud, its hold, its shake): the
@@ -859,6 +868,13 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       // A teammate's Rimshot winding up (their herzie plays it: see
       // RemotePlayers).
       else if (m.skill === "rimshot") beginSlam(m.by, m.x, m.z, now);
+      // A Cymbal Trap thrown (their herzie throws it: see RemotePlayers).
+      else if (m.skill === "cymbal-trap") {
+        throwCymbal(m.by, m.x, m.z, m.yaw, now);
+        sfxCymbalThrow();
+      }
+      // A Forbidden Frequency's disc (drawn by BleedVFX from the cast).
+      else if (m.skill === "forbidden-frequency") sfxForbiddenThrow();
       noteSkillCast({
         by: m.by,
         skill: m.skill,
@@ -868,6 +884,37 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
         yaw: m.yaw,
         at: now,
       });
+      return;
+    }
+    case "trap":
+      // A Cymbal Trap's cymbal caught something (yours too): it circles
+      // it until the hold ends. Being held yourself is the duel's or the
+      // Wilds' to say (their stores); this is the show.
+      catchCymbal(
+        m.by,
+        m.mob
+          ? { kind: "mob", id: m.target }
+          : { kind: "herzie", id: m.target },
+        clock.toLocal(m.until),
+        now,
+      );
+      sfxCymbalClang();
+      return;
+    case "bleed": {
+      // A Forbidden Frequency's bleed on something (yours too), its
+      // stacks and how long; 0 stacks: over. Its ticks come as hits.
+      const landed = setBleed(
+        m.boss
+          ? { kind: "boss" }
+          : m.mob
+            ? { kind: "mob", id: m.target }
+            : { kind: "herzie", id: m.target },
+        m.stacks,
+        clock.toLocal(m.until),
+        m.by,
+        now,
+      );
+      if (landed) sfxBleedStack();
       return;
     }
     case "buff":
@@ -890,7 +937,10 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
         id === "cymbrella" ||
         id === "taunt" ||
         id === "haste" ||
-        id === "shuffle"
+        id === "shuffle" ||
+        id === "multispin" ||
+        id === "rage" ||
+        id === "focus"
       )
         clearBuff(clock.you() ?? -1, id);
       // Nor the dome you put up: nobody may run into one that isn't there.
@@ -898,6 +948,10 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       // Nor the Rimshot you wound up: it never lands (Combat sees the slam
       // gone and stops the swing, the root and the drum roll).
       if (id === "rimshot") cancelSlam(clock.you() ?? -1);
+      // Nor the cymbal you threw.
+      if (id === "cymbal-trap") cancelCymbal(clock.you() ?? -1);
+      // Nor the Forbidden Frequency disc: gone from the air.
+      if (id === "forbidden-frequency") discLanded.set(clock.you() ?? -1, now);
       if (m.reason) notify(REFUSALS[m.reason], { kind: "info" });
       emitSkills();
       return;

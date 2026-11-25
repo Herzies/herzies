@@ -64,14 +64,22 @@ import {
   type BuffId,
   buffMultiplier,
   buffReductions,
+  CYMBAL_TRAP,
+  cymbalLandsAfterMs,
+  focusTiming,
+  MULTISPIN,
   RIMSHOT,
+  SKILL_DEFS,
   shuffleOn,
+  skillValue,
 } from "@herzies/shared/skills";
-import { timingAttackSpeed } from "@herzies/shared/stats";
+import { timingAttackSpeed, timingCritChance } from "@herzies/shared/stats";
 import type { TowerMob } from "@herzies/shared/town-net";
+import { Bleeds } from "./bleed";
 import { CastBudget, StunReturns } from "./budgets";
 import { DiscHands } from "./hands";
 import { type Mob, type MobJudge, MobPack, SEEN_LAG_MS } from "./mobs";
+import type { SpinBody } from "./spin";
 
 // ---------------------------------------------------------------------------
 // Tuning: every balance number lives here.
@@ -333,7 +341,14 @@ export type BossEvent =
   /** One of its minions fell (or crumbled with it: `by` empty). */
   | { t: "mobDown"; mob: number; by: string; x: number; z: number }
   /** A herzie walked into mob `mob` and got hurt. */
-  | { t: "contact"; mob: number; hit: BossHit };
+  | { t: "contact"; mob: number; hit: BossHit }
+  /** `uid`'s Cymbal Trap caught mob `mob`: it's held where it stands
+   * until `until` (never the boss). */
+  | { t: "trap"; uid: string; mob: number; until: number }
+  /** A Forbidden Frequency bleed on mob `mob` (the boss without one), its
+   * newest thrower `uid`: took hold or started over (`stacks` of it until
+   * `until`), or ended early (`stacks` 0: it fell). */
+  | { t: "bleed"; uid: string; mob?: number; stacks: number; until: number };
 
 /** Where a seeded sequence starts: mulberry32. */
 export function rng(seed: number): () => number {
@@ -450,7 +465,12 @@ export class BossEngine {
   /** Stunned until (server ms), and its recent stuns (for the diminishing
    * returns). */
   private stunnedUntil = 0;
-  private stunReturns = new StunReturns();
+  private stunReturns = new StunReturns(RIMSHOT.drWindowMs);
+  /** Forbidden Frequency's discs and bleeds, on "boss" or a minion's id
+   * (a minute each). */
+  private bleeds = new Bleeds(
+    SKILL_DEFS["forbidden-frequency"].durationMs ?? 0,
+  );
   /** Its own shapes a stun took off the floor, to say so next update. */
   private cancelled: number[] = [];
   private nextScatterAt = 0;
@@ -805,6 +825,154 @@ export class BossEngine {
     return { hit, stunned };
   }
 
+  /**
+   * Cymbal Trap: a cymbal thrown along the aim, to the first it meets
+   * within CYMBAL_TRAP.range (the boss, or a minion before it), landing
+   * after its flight for `CYMBAL_TRAP.damage` of a strike. A minion it
+   * lands on is held there for `holdMs` (MobPack.root); the boss is too
+   * big to hold: it takes the blow only. Returns whether it'll land.
+   */
+  cymbalTrap(
+    uid: string,
+    from: { x: number; z: number },
+    yaw: number,
+    pitch: number,
+    stats: HitStats,
+    holdMs: number,
+    now: number,
+  ): boolean {
+    if (this.killed || this.sleeping) return false;
+    const hit = this.nearest(
+      from,
+      aimDirection(yaw, pitch),
+      now,
+      CYMBAL_TRAP.range,
+    );
+    if (!hit) return false;
+    const at = now + cymbalLandsAfterMs(hit.dist);
+    const mult = CYMBAL_TRAP.damage * STRIKE_DAMAGE * this.damageMult(uid, now);
+    if (hit.mob) {
+      this.mobs?.queue(uid, hit.mob, at, stats, mult, "cymbal-trap", holdMs);
+      return true;
+    }
+    const { amount, crit } = hitDamage(stats, this.rand);
+    this.pending.push({
+      at,
+      uid,
+      damage: Math.max(1, Math.round(amount * mult)),
+      crit,
+      skill: "cymbal-trap",
+    });
+    return true;
+  }
+
+  /** What a Multispin's records may touch now: the boss's body and every
+   * minion's, where their caster saw them. Keys: "boss", or a minion's
+   * id. */
+  spinBodies(now: number): SpinBody[] {
+    if (this.killed || this.sleeping) return [];
+    const boss = this.seenAt(now);
+    return [
+      { key: "boss", x: boss.x, z: boss.z, r: TUNING.boss.radius },
+      ...(this.mobs?.bodies(now - SEEN_LAG_MS) ?? []),
+    ];
+  }
+
+  /** A Multispin's record touched `key` (see spinBodies): a hit of
+   * MULTISPIN.damage of a wave, now. */
+  spinHit(uid: string, key: string, stats: HitStats, now: number): void {
+    if (this.killed || this.sleeping) return;
+    const mult = MULTISPIN.damage * this.damageMult(uid, now);
+    if (key !== "boss") {
+      const mob = this.mobs?.byId(Number(key));
+      if (mob) this.mobs?.queue(uid, mob, now, stats, mult, "multispin");
+      return;
+    }
+    const { amount, crit } = hitDamage(stats, this.rand);
+    this.pending.push({
+      at: now,
+      uid,
+      damage: Math.max(1, Math.round(amount * mult)),
+      crit,
+      skill: "multispin",
+    });
+  }
+
+  /** Forbidden Frequency: a disc along the aim (a disc's reach and
+   * flight) to the boss or a minion before it; where it lands, a bleed
+   * takes hold (see stepBleeds). Returns whether it's on its way. */
+  forbiddenFrequency(
+    uid: string,
+    from: { x: number; z: number },
+    yaw: number,
+    pitch: number,
+    stats: HitStats,
+    level: number,
+    now: number,
+  ): boolean {
+    if (this.killed || this.sleeping) return false;
+    const hit = this.nearest(from, aimDirection(yaw, pitch), now, DISC_RANGE);
+    if (!hit) return false;
+    this.bleeds.throw({
+      at: now + discLandsAfterMs(hit.dist),
+      by: uid,
+      key: hit.mob ? String(hit.mob.id) : "boss",
+      level,
+      stats,
+    });
+    return true;
+  }
+
+  /** Forbidden Frequency discs that arrived take hold on what still
+   * stands, and bleeds tick: stacks × its share of a wave from its newest
+   * thrower (no crit, its damage buffs now), landing at once. */
+  private stepBleeds(now: number, events: BossEvent[]) {
+    for (const d of this.bleeds.landed(now)) {
+      if (d.key === "boss" ? this.killed : !this.mobs?.byId(Number(d.key)))
+        continue;
+      const b = this.bleeds.stack(d, now);
+      events.push({
+        t: "bleed",
+        uid: b.by,
+        ...(d.key !== "boss" ? { mob: Number(d.key) } : {}),
+        stacks: b.stacks,
+        until: b.until,
+      });
+    }
+    for (const { key, bleed: b } of this.bleeds.ticks(now)) {
+      const stats = { ...b.stats, critChance: 0 };
+      const mult =
+        skillValue("forbidden-frequency", b.level) * this.damageMult(b.by, now);
+      if (key !== "boss") {
+        const mob = this.mobs?.byId(Number(key));
+        if (mob)
+          this.mobs?.queue(b.by, mob, now, stats, mult, "forbidden-frequency");
+        continue;
+      }
+      const { amount } = hitDamage(stats, this.rand);
+      this.pending.push({
+        at: now,
+        uid: b.by,
+        damage: Math.max(1, Math.round(amount * mult)),
+        crit: false,
+        skill: "forbidden-frequency",
+      });
+    }
+  }
+
+  /** The bleed on `key` ends early (it fell): said with stacks 0. */
+  private endBleed(key: string, now: number, events: BossEvent[]) {
+    const b = this.bleeds.end(key);
+    if (b)
+      events.push({
+        t: "bleed",
+        uid: b.by,
+        ...(key !== "boss" ? { mob: Number(key) } : {}),
+        stacks: 0,
+        until: now,
+      });
+  }
+
   /** Out of every dome: pushed by one growing, never standing in one. A
    * charge that meets one stops at its edge. */
   private keepOut(now: number) {
@@ -1041,19 +1209,26 @@ export class BossEngine {
       this.lastMoveAt = now;
       return events;
     }
+    // Bleeds tick before waves land, so their hits land this update.
+    this.stepBleeds(now, events);
     this.landWaves(now, events);
     if (this.killed) {
       this.telegraphs = [];
-      // Its minions crumble with it.
+      // Its minions crumble with it, and every bleed with them.
       for (const m of this.mobs?.dismiss() ?? [])
         events.push({ t: "mobDown", mob: m.id, by: "", x: m.x, z: m.z });
+      for (const key of this.bleeds.keys()) this.endBleed(key, now, events);
       return events;
     }
     this.domes = this.domes.filter((d) => d.until > now);
     for (const id of this.cancelled)
       events.push({ t: "resolve", id, hits: [] });
     this.cancelled = [];
-    if (this.mobs) events.push(...this.mobs.update(now, players, this.judge));
+    if (this.mobs)
+      for (const ev of this.mobs.update(now, players, this.judge)) {
+        events.push(ev);
+        if (ev.t === "mobDown") this.endBleed(String(ev.mob), now, events);
+      }
     this.checkTaunt(now, players, events);
     this.resolveDue(now, players, events);
     this.pickFocus(now, players);
@@ -1845,13 +2020,39 @@ export function castSpeed(buffs: readonly Buff[], now: number): number {
 }
 
 /** How much quicker than its base pace a herzie attacks at `now`: its
- * Haste (see castSpeed) and its Timing. */
+ * Haste (see castSpeed) and its Timing, a Focus's on top of its own
+ * (honoured the same grace either side). */
 export function quickness(
   buffs: readonly Buff[],
   now: number,
   timing = 0,
 ): number {
-  return castSpeed(buffs, now) * (1 + timingAttackSpeed(timing));
+  const g = TUNING.hasteGraceMs;
+  const focus = Math.max(
+    focusTiming(buffs, now),
+    focusTiming(buffs, now - g),
+    focusTiming(buffs, now + g),
+  );
+  return castSpeed(buffs, now) * (1 + timingAttackSpeed(timing + focus));
+}
+
+/** `stats` as a herzie under `buffs` rolls a hit with them at `now`: a
+ * Focus's Timing raises its crit chance as its own Timing would
+ * (timingCritChance; its own is in critChance already). Its quicker
+ * attacks are quickness's. */
+export function focused<T extends HitStats>(
+  stats: T,
+  buffs: readonly Buff[],
+  now: number,
+): T {
+  const focus = focusTiming(buffs, now);
+  if (!focus) return stats;
+  const own = stats.timing ?? 0;
+  return {
+    ...stats,
+    critChance:
+      stats.critChance + timingCritChance(own + focus) - timingCritChance(own),
+  };
 }
 
 /** Whether a telegraph covers a point. A buster covers its target, not a

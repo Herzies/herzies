@@ -37,7 +37,7 @@ import { shoveFromBoss } from "./combat/fight";
 import { combat, useCombat } from "./combat/state";
 import { applyDowned, youDown } from "./downed";
 import { fighterPace, poseFighter } from "./duel/fx";
-import { duel, duelHeld } from "./duel/store";
+import { duel, duelHeld, duelRooted } from "./duel/store";
 import { emotePlayed, emoteRequest } from "./emotes";
 import { HeadBubble } from "./HeadBubble";
 import { keepAtHome } from "./HomeLayer";
@@ -58,7 +58,7 @@ import { AFK_MS, townNet } from "./net/townNet";
 import { warp, warpAmount } from "./portal";
 import { arriving, townLive, townSave, useTownRuntime } from "./runtime";
 import { titleName } from "./TitleLine";
-import { wildsHeld } from "./wilds/store";
+import { wildsHeld, wildsRooted } from "./wilds/store";
 
 /** The player's herzie as it last was: a new Player (another island's
  * physics, stepping on or off a sky ship) carries on from it when the step
@@ -519,9 +519,16 @@ export function Player({
         : rt.cameraAzimuth - fleet.poses[deck].yaw;
     walkAz.current = walkAzimuth(walkAz.current, cameraAz, input);
     m.heading = herzie.heading;
-    // A duel's countdown, or stunned in one (or in the Wilds): held on the
-    // spot, still free to turn (and aim).
-    if (duelHeld() || wildsHeld()) {
+    // A duel's countdown, stunned in one (or in the Wilds), caught by a
+    // Cymbal Trap, or picking a Tower boon: held on the spot, still free
+    // to turn (and aim).
+    if (
+      duelHeld() ||
+      wildsHeld() ||
+      duelRooted() ||
+      wildsRooted() ||
+      combat.picking
+    ) {
       stepMover(m, heldStill(input), walkAz.current, dt, speedScale);
       m.vx = m.vz = 0;
       herzie.heading = m.heading;
@@ -679,8 +686,11 @@ export function Player({
         !townLive.seat &&
         !townLive.frozen &&
         performance.now() >= combat.rootedUntil &&
+        !combat.picking &&
         !duelHeld() &&
-        !wildsHeld()
+        !wildsHeld() &&
+        !duelRooted() &&
+        !wildsRooted()
       )
         herzie.jump();
     }

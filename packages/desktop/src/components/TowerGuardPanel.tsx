@@ -22,6 +22,7 @@ import ItemInspectOverlay, {
   inspectOrigin,
 } from "./ItemInspectOverlay";
 import { List } from "./List";
+import { boonParts } from "./town/towerBoonText";
 
 /** What he says to anyone: nobody lasts up there, least of all you. */
 export const TOWER_GUARD_LINES = [
@@ -90,6 +91,32 @@ export function TowerGuardPanel({
       setClaiming(false);
     }
   };
+
+  // Two steps, as other irreversible buttons here: the first only asks.
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const resetClimb = async () => {
+    setError(null);
+    setResetting(true);
+    try {
+      const res = await herzies.resetTowerClimb();
+      if (res.ok) {
+        setConfirmReset(false);
+        onLog?.(`The ${TOWER_GUARD_NAME} sent you back to floor 1`);
+        onClaimed();
+      } else {
+        setError(res.reason);
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  // The climb's boons, each summed, in the shared order.
+  const climb = guard?.climb ?? null;
+  const boonLine = climb ? boonParts(climb.boons).join(" · ") : "";
 
   const current = guard?.current ?? null;
   const top = current?.top ?? [];
@@ -182,6 +209,53 @@ export function TowerGuardPanel({
           </List>
         )}
       </div>
+
+      {climb ? (
+        <div className="flex flex-col gap-1 text-ui">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-text">Climb: floor {climb.floor}</span>
+            {!confirmReset ? (
+              <button
+                type="button"
+                className="btn"
+                disabled={resetting}
+                onClick={() => setConfirmReset(true)}
+              >
+                Start the climb over
+              </button>
+            ) : null}
+          </div>
+          {boonLine ? (
+            <div className="text-[10px] text-text-dim">{boonLine}</div>
+          ) : null}
+          {confirmReset ? (
+            <div className="flex flex-col gap-1">
+              <div className="text-[10px] text-text-dim">
+                Back to floor 1, your buffs are gone; your best floor this month
+                stays on the leaderboard
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={resetting}
+                  onClick={() => setConfirmReset(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn text-red"
+                  disabled={resetting}
+                  onClick={resetClimb}
+                >
+                  {resetting ? "Starting over..." : "Start over"}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* At the bottom: last month's winner, then the reward. */}
       {guard?.last || rewardItem ? (

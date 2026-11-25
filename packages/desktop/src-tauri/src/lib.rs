@@ -940,6 +940,13 @@ async fn claim_tower_reward(
     Ok(data)
 }
 
+/// The Tower Guard starts your climb over; nothing in the bank changes.
+#[tauri::command]
+async fn reset_tower_climb() -> Result<serde_json::Value, String> {
+    let client = api::http();
+    api::api_reset_tower_climb(&client).await
+}
+
 #[tauri::command]
 async fn fetch_quests() -> Result<serde_json::Value, String> {
     let client = api::http();
@@ -3225,6 +3232,7 @@ pub fn run() {
             buy_from_boboku,
             fetch_tower_guard,
             claim_tower_reward,
+            reset_tower_climb,
             fetch_quests,
             accept_quest,
             claim_quest,

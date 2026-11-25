@@ -17,6 +17,11 @@ export const SKILL_ABBR: Record<SkillId, string> = {
   haste: "HS",
   shuffle: "SH",
   rimshot: "RS",
+  "cymbal-trap": "CT",
+  multispin: "MS",
+  rage: "RG",
+  focus: "FC",
+  "forbidden-frequency": "FF",
 };
 
 /** Each class's colour, for its skills' letters. */

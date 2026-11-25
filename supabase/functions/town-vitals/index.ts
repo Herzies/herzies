@@ -45,9 +45,11 @@ import {
 } from "../_shared/shared/items.ts";
 import {
   isChestFloor,
+  isTowerBoon,
   TOWER_DROP_CHANCE,
   TOWER_DROPS_DAILY_CAP,
   TOWER_XP_DAILY_CAP,
+  towerBoonKey,
   towerChestRolls,
   towerLootLean,
   towerXpPerKill,
@@ -309,7 +311,9 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     /** The fight is over: the cave's end screen, for these herzies. */
     results?: { event: string; uids: string[] };
     /** The Tower: a herzie's kills since the last batch, the best floor
-     * cleared in it, and a Warden's floor's chest opened. */
+     * cleared in it, a Warden's floor's chest opened, and the climb it
+     * belongs to (the ticket's) with its boons and picks skipped so far
+     * (TOWER_BOONS). */
     tower?: {
       event: string;
       batch: string;
@@ -317,6 +321,9 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
       kills: { floor: number; x: number; z: number }[];
       cleared?: number;
       chest?: { floor: number; x: number; z: number };
+      climb?: number;
+      boons?: unknown[];
+      skips?: number;
     };
     /** action "eat": who ate what. */
     uid?: string;
@@ -597,10 +604,10 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     // listening rolls one, leaning rarer the higher the floor), under the
     // day's caps, once per batch; then a chest opened, once per floor per
     // Tower (00155), its items leaning rarer still and outside the cap.
-    let tower: {
+    let tower = null as {
       drops: { id: string; item: string }[];
       chest?: { id: string; item: string }[];
-    } | null = null;
+    } | null;
     let towerFailed = false;
     const tw = msg.tower;
     if (
@@ -614,6 +621,20 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
       const chestFloor = isChestFloor(Number(tw.chest?.floor))
         ? Number(tw.chest?.floor)
         : 0;
+      // The climb's floor, boons and skips move only for the climb still
+      // running (00161): a batch from before a reset leaves them be. Boons
+      // that aren't all known, or skips that aren't a count, are left out
+      // (the old ones stay; 00162 holds them to the picks earned).
+      const climb = Number.isInteger(tw.climb) && (tw.climb as number) >= 1
+        ? tw.climb as number
+        : null;
+      const boons = Array.isArray(tw.boons) && tw.boons.length <= 100 &&
+          tw.boons.every(isTowerBoon)
+        ? tw.boons.map(towerBoonKey)
+        : null;
+      const skips = Number.isInteger(tw.skips) && (tw.skips as number) >= 0
+        ? tw.skips as number
+        : null;
       try {
         const xp = kills.reduce((n, k) => n + towerXpPerKill(k.floor), 0);
         const leans = kills
@@ -629,6 +650,9 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
           p_item_ids: items,
           p_xp_cap: TOWER_XP_DAILY_CAP,
           p_drop_cap: TOWER_DROPS_DAILY_CAP,
+          p_climb: climb,
+          p_boons: boons,
+          p_skips: skips,
         })) as typeof tower;
         if (chestFloor > 0 && tower) {
           // No Nostalgic Tokens, as a boss's loot.

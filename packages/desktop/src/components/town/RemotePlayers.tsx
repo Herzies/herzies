@@ -33,6 +33,7 @@ import { ambient, seasonNow } from "./ambient";
 import { SEAT_Y } from "./Benches";
 import { BUBBLE_RANGE, type ChatBubble, type ChatBubbles } from "./chatBubbles";
 import { clothDetailAt } from "./clothDetail";
+import { bleedStacks } from "./combat/bleeds";
 import { liveDummies } from "./combat/Dummies";
 import {
   DISC_ARM,
@@ -47,11 +48,13 @@ import {
   entityAt,
   setEntityAt,
   shuffleOf,
+  skills,
 } from "./combat/skills";
 import { landSlam, pendingSlam } from "./combat/slams";
 import { slashField } from "./combat/slashes";
 import { stance } from "./combat/stance";
 import { shake } from "./combat/state";
+import { cymbalOut, trapBy } from "./combat/traps";
 import { assistTarget, type Vec3, waveField } from "./combat/waves";
 import { applyDowned, entityDown } from "./downed";
 import { fighterPace, poseFighter } from "./duel/fx";
@@ -300,6 +303,12 @@ function RemoteHerzie({
    * the one under way has landed (its wind-up's off the list then). */
   const rimshotAt = useRef(performance.now());
   const slammed = useRef(false);
+  /** When their last Cymbal Trap was thrown and Multispin flung, and
+   * whether the cast under way is one of those (its release lets go of a
+   * cymbal or records, which their VFX draw: not a blow, nor a disc). */
+  const trapAt = useRef(performance.now());
+  const flourishAt = useRef(performance.now());
+  const throwing = useRef(false);
   /** Their jump bit last frame; null until the first state, so a herzie
    * doesn't hop just for showing up. */
   const jumpBit = useRef<number | null>(null);
@@ -316,6 +325,9 @@ function RemoteHerzie({
   const hpBox = useRef<HTMLDivElement>(null);
   const hpFill = useRef<HTMLDivElement>(null);
   const hpShown = useRef(-1);
+  const bleedBox = useRef<HTMLSpanElement>(null);
+  const bleedCount = useRef<HTMLSpanElement>(null);
+  const bleedShown = useRef(0);
   const downMark = useRef<HTMLDivElement>(null);
   const downed = useRef(0);
   const hand = useMemo(() => new Vector3(), []);
@@ -427,6 +439,32 @@ function RemoteHerzie({
       shake(0.2 * Math.max(0, 1 - d / 14));
     }
     if (!herzie.casting) slammed.current = false;
+    // Their Cymbal Trap: thrown as the server's word comes, the cymbal off
+    // their off hand (CymbalTrapVFX draws it from there).
+    const trap = trapBy(remote.id);
+    if (trap && trap.at > trapAt.current && !trap.out) {
+      trapAt.current = trap.at;
+      herzie.cast(0, { arm: "arm-r", style: "throw" });
+      throwing.current = true;
+      trap.hand = (out) => {
+        const p = herzie.heldWorldPosition("held-r", hand);
+        out[0] = p.x;
+        out[1] = p.y;
+        out[2] = p.z;
+        return out;
+      };
+    }
+    // Their Multispin (the records flung out: MultispinVFX draws them) or
+    // Forbidden Frequency (its disc: BleedVFX draws it).
+    for (const c of skills.casts) {
+      if (c.by !== remote.id || c.at <= flourishAt.current) continue;
+      if (c.skill !== "multispin" && c.skill !== "forbidden-frequency")
+        continue;
+      flourishAt.current = c.at;
+      herzie.cast(0, { style: "throw" });
+      throwing.current = true;
+    }
+    if (!herzie.casting) throwing.current = false;
     // They cast: the same thrust, and a wave from the hand the way they
     // face (only the cast count travels, not where they aimed).
     // Once the body is drawn where it was when it cast.
@@ -475,7 +513,10 @@ function RemoteHerzie({
       dt * fighterPace(remote.id, now),
       onIce(map, s.x, s.z, seasonNow.look.ice) ? s.speed / ICE_SPEED : s.speed,
     );
-    if (herzie.released && throwsDiscs) {
+    if (herzie.released && throwing.current) {
+      // Their cymbal or records leaving the hand: the VFX's, not a blow.
+      throwing.current = false;
+    } else if (herzie.released && throwsDiscs) {
       // Never waiting on our idea of their catch: a disc of theirs still
       // out from that hand is let go (see DiscField.throw).
       const h = nextHand.current;
@@ -560,9 +601,12 @@ function RemoteHerzie({
     poseFighter(herzie, remote.id, now, dt);
     if (downMark.current)
       setStyle(downMark.current, "display", ko ? "" : "none");
-    // A thrown disc isn't in the hand.
+    // A thrown disc (or Cymbal Trap's cymbal) isn't in the hand.
     herzie.setHeldHidden("held-l", discField.isOut(herzie, "held-l"));
-    herzie.setHeldHidden("held-r", discField.isOut(herzie, "held-r"));
+    herzie.setHeldHidden(
+      "held-r",
+      discField.isOut(herzie, "held-r") || cymbalOut(remote.id, now),
+    );
     tagAnchor.current?.position.set(
       s.x,
       ground + herzie.height + 0.3 + (seated ? SEAT_Y : 0),
@@ -604,6 +648,16 @@ function RemoteHerzie({
           hpFill.current.style.background = pct < 50 ? "#f87171" : "#34d399";
           // Low isn't told by colour alone: the bar blinks too.
           hpBox.current.dataset.low = pct < 25 ? "1" : "";
+        }
+      }
+      // Bleeding (Forbidden Frequency): a drop by the bar, its stacks past
+      // one. Written only when they change.
+      if (bleedBox.current && bleedCount.current) {
+        const stacks = h ? bleedStacks("herzie", remote.id, now) : 0;
+        if (stacks !== bleedShown.current) {
+          bleedShown.current = stacks;
+          setStyle(bleedBox.current, "display", stacks > 0 ? "" : "none");
+          bleedCount.current.textContent = stacks > 1 ? String(stacks) : "";
         }
       }
     }
@@ -700,12 +754,33 @@ function RemoteHerzie({
                 {remote.gm ? <GmMark className="[text-shadow:none]" /> : null}
                 {remote.name}
               </button>
-              <div
-                ref={hpBox}
-                className="pointer-events-none mt-px h-[3px] w-10 overflow-hidden rounded-sm bg-black/60 data-[big=1]:mt-0.5 data-[big=1]:h-[5px] data-[big=1]:w-16 data-[low=1]:animate-pulse data-[low=1]:outline data-[low=1]:outline-1 data-[low=1]:outline-red-400/70 motion-reduce:animate-none"
-                style={{ display: "none" }}
-              >
-                <div ref={hpFill} className="h-full" />
+              <div className="pointer-events-none flex items-center gap-px">
+                <div
+                  ref={hpBox}
+                  className="pointer-events-none mt-px h-[3px] w-10 overflow-hidden rounded-sm bg-black/60 data-[big=1]:mt-0.5 data-[big=1]:h-[5px] data-[big=1]:w-16 data-[low=1]:animate-pulse data-[low=1]:outline data-[low=1]:outline-1 data-[low=1]:outline-red-400/70 motion-reduce:animate-none"
+                  style={{ display: "none" }}
+                >
+                  <div ref={hpFill} className="h-full" />
+                </div>
+                <span
+                  ref={bleedBox}
+                  className="flex items-center text-[8px] font-bold leading-none text-[#e86a6a] [text-shadow:0_1px_0_#000]"
+                  style={{ display: "none" }}
+                  title="Bleeding"
+                >
+                  <svg
+                    viewBox="0 0 10 13"
+                    className="h-2 w-1.5"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M5 0.5C6 3 9.5 6 9.5 8.6A4.5 4.5 0 0 1 0.5 8.6C0.5 6 4 3 5 0.5Z"
+                      fill="#8b0f18"
+                      stroke="rgba(0,0,0,0.75)"
+                    />
+                  </svg>
+                  <span ref={bleedCount} />
+                </span>
               </div>
             </div>
           </div>

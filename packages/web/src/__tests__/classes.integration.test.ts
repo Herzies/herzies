@@ -165,6 +165,61 @@ describe("choosing a class", () => {
     expect(djSkills).not.toContain("rimshot");
   });
 
+  it.each([
+    ["percussionist", "cymbal-trap", 20, "rimshot", 5],
+    ["record_slinger", "multispin", 20, "shuffle", 8],
+    ["bard", "focus", 30, "rage", 8],
+  ] as const)("a %s learns %s at level %i once its %s is level %i, in either order", async (cls, skill, level, needs, needsLevel) => {
+    const has = async (userId: string) =>
+      (await skills(userId)).map((s) => s.skill_id).includes(skill);
+    const setLevel = (userId: string, l: number) =>
+      admin()
+        .from("herzie_skills")
+        .update({ level: l })
+        .eq("user_id", userId)
+        .eq("skill_id", needs);
+    // The herzie level first, then the skill's.
+    const a = await player({ stage: 3, level: level + 2 });
+    await rpc("choose_class", { p_user_id: a, p_class: cls });
+    expect(await has(a)).toBe(false);
+    await setLevel(a, needsLevel - 1);
+    expect(await has(a)).toBe(false);
+    await setLevel(a, needsLevel);
+    expect(await has(a)).toBe(true);
+    // The skill's level first, then the herzie's.
+    const b = await player({ stage: 3, level: level - 1 });
+    await rpc("choose_class", { p_user_id: b, p_class: cls });
+    await setLevel(b, needsLevel);
+    expect(await has(b)).toBe(false);
+    await admin().from("herzies").update({ level }).eq("user_id", b);
+    expect(await has(b)).toBe(true);
+  });
+
+  it("a Bard learns Rage at level 20", async () => {
+    const young = await player({ stage: 3, level: 19 });
+    await rpc("choose_class", { p_user_id: young, p_class: "bard" });
+    expect((await skills(young)).map((s) => s.skill_id)).not.toContain("rage");
+    await admin().from("herzies").update({ level: 20 }).eq("user_id", young);
+    expect((await skills(young)).map((s) => s.skill_id)).toContain("rage");
+  });
+
+  it("a Record Slinger learns Forbidden Frequency at level 30: on choosing, or on reaching it", async () => {
+    const young = await player({ stage: 3, level: 29 });
+    await rpc("choose_class", { p_user_id: young, p_class: "record_slinger" });
+    const ids = async (u: string) => (await skills(u)).map((s) => s.skill_id);
+    expect(await ids(young)).not.toContain("forbidden-frequency");
+    await admin().from("herzies").update({ level: 30 }).eq("user_id", young);
+    expect(await ids(young)).toContain("forbidden-frequency");
+
+    const grown = await player({ stage: 3, level: 31 });
+    await rpc("choose_class", { p_user_id: grown, p_class: "record_slinger" });
+    expect(await ids(grown)).toContain("forbidden-frequency");
+
+    const bard = await player({ stage: 3, level: 31 });
+    await rpc("choose_class", { p_user_id: bard, p_class: "bard" });
+    expect(await ids(bard)).not.toContain("forbidden-frequency");
+  });
+
   it("refuses an unknown class", async () => {
     const userId = await player({ stage: 2, level: 12 });
     expect(

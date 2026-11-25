@@ -16,6 +16,7 @@ import {
   wildsFoe,
   wildsHeld,
   wildsOn,
+  wildsRooted,
 } from "./store";
 
 /** The server's clock runs this far behind this machine's. */
@@ -131,6 +132,22 @@ describe("the Wilds on the client", () => {
     expect(wildsHeld()).toBe(true);
     now = 5_500;
     expect(wildsHeld()).toBe(false);
+  });
+
+  it("holds your feet while a cymbal traps you, and nothing else", () => {
+    welcome();
+    recv({ t: "pvp", id: 1, hp: 90, maxHp: 100 });
+    // Also the room's (its cymbal's show): not the free-for-all's alone.
+    expect(recv({ t: "trap", by: 2, target: 1, until: 500 })).toBe(false);
+    now = 5_400;
+    expect(wildsRooted()).toBe(true);
+    // Not a stun: you may still attack and use skills.
+    expect(wildsHeld()).toBe(false);
+    now = 5_500;
+    expect(wildsRooted()).toBe(false);
+    // A mob held that shares your id isn't you.
+    recv({ t: "trap", by: 2, target: 1, mob: true, until: 2_000 });
+    expect(wildsRooted()).toBe(false);
   });
 
   it("is never in combat outside the Wilds", () => {

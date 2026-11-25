@@ -5,7 +5,6 @@ import {
   liveHp,
   type ServerMessage,
 } from "@herzies/shared";
-import { useSyncExternalStore } from "react";
 import { notify } from "../../lib/notices";
 import { herzies } from "../../tauri-bridge";
 import { pushHealNumber } from "./combat/DamageNumbers";
@@ -38,7 +37,7 @@ const REFUSALS: Record<EatRefusal, string> = {
 };
 
 /** When the last eat started (performance.now() ms), for the cooldown and
- * the hotbar's flash. */
+ * the hotbar's shade. */
 let lastAt = Number.NEGATIVE_INFINITY;
 /** Waiting on the room's `ate`, by seq. */
 const waiting = new Map<
@@ -46,21 +45,11 @@ const waiting = new Map<
   (m: Extract<ServerMessage, { t: "ate" }>) => void
 >();
 let seq = 0;
-const listeners = new Set<() => void>();
 
-function emit() {
-  for (const l of listeners) l();
-}
-
-/** When the last eat started, re-rendering when it changes. */
-export function useLastEat(): number {
-  return useSyncExternalStore(
-    (cb) => {
-      listeners.add(cb);
-      return () => listeners.delete(cb);
-    },
-    () => lastAt,
-  );
+/** How long until the next consumable may be eaten (ms, 0 when it can):
+ * the hotbar's cooldown shade over a consumable's slot. */
+export function eatCooldownLeft(now: number): number {
+  return Math.max(0, lastAt + CONSUMABLE_COOLDOWN_MS - now);
 }
 
 /** The room's answer to an `eat`: townNet hands it here. */
@@ -109,7 +98,6 @@ export async function eat(
       return refuse("not-here");
     }
     lastAt = now;
-    emit();
     const m = await answer;
     if (!m?.ok) return refuse(m?.reason ?? "failed");
     ateLine(itemId, m.heal ?? 0);
@@ -122,7 +110,6 @@ export async function eat(
   if (v?.down) return refuse("down");
   if (v && liveHp(v, Date.now()) >= v.maxHp) return refuse("full");
   lastAt = now;
-  emit();
   try {
     const res = await herzies.eatItem(itemId);
     setVitals(res.vitals);

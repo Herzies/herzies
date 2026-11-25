@@ -3,6 +3,7 @@ import {
   CAST_INTERVAL_MS,
   DISC_DAMAGE,
   STRIKE_DAMAGE,
+  WAVE_HAND_HEIGHT,
 } from "@herzies/shared/combat";
 import { TOWN_WALK_SPEED } from "@herzies/shared/town-net";
 import { BOSS_ENRAGE, BOSS_WANDER } from "@herzies/shared/boss-fight";
@@ -437,6 +438,21 @@ describe("casts", () => {
     const at = e.position;
     const far = { x: at.x, z: at.z + TUNING.boss.radius + RIMSHOT.radius + 0.5 };
     expect(e.rimshot("tank", far, STATS, 1, T0)).toEqual({ hit: 0, stunned: 0 });
+  });
+
+  it("a Cymbal Trap on the boss is the blow only: it's too big to hold", () => {
+    const e = engine(1e6, 1e6);
+    const at = e.position;
+    const dist = TUNING.boss.radius + 6;
+    const from = { x: at.x, z: at.z + dist };
+    const pitch = Math.atan2(TUNING.boss.chest - WAVE_HAND_HEIGHT, dist);
+    expect(e.cymbalTrap("tank", from, Math.PI, pitch, STATS, 3_000, T0)).toBe(true);
+    const ev = run(e, T0 + 50, T0 + 1_000, [still("tank", from.x, from.z)]);
+    expect(ev.filter((x) => x.t === "hit")).toEqual([
+      expect.objectContaining({ uid: "tank", skill: "cymbal-trap" }),
+    ]);
+    expect(ev.some((x) => x.t === "trap")).toBe(false);
+    expect(e.stunEnd).toBe(0);
   });
 
   it("the enrage's pulse goes through a dome", () => {

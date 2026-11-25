@@ -924,11 +924,14 @@ const ALWAYS_SHOWN = new Set<StatKey>([
   "luck",
 ]);
 
-/** A stat's value as it reads: "12", or "5%". */
+/** A stat's value as it reads: "12", "5%", or "188.1" (Def, from levels,
+ * Stamina and a Percussionist's multiplier, runs to tenths). To a tenth,
+ * so sums of tenths don't read 188.10000000000002. */
 export function formatStat(key: StatKey, value: number): string {
+  const v = Math.round(value * 10) / 10;
   // Crit damage is what a crit adds on top of a hit: "+50%".
-  if (key === "critDamage") return `+${value}%`;
-  return PERCENT_STATS.has(key) ? `${value}%` : String(value);
+  if (key === "critDamage") return `+${v}%`;
+  return PERCENT_STATS.has(key) ? `${v}%` : String(v);
 }
 
 /** What an item adds to a stat, as its card reads: "+12", "+5%". */

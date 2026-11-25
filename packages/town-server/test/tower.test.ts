@@ -1,6 +1,7 @@
 import { IN_TUNE } from "@herzies/shared/boss-fight";
 import { DOME, discChain } from "@herzies/shared/combat";
 import {
+  MULTISPIN,
   RIMSHOT,
   SHUFFLE_REACH,
   SKILL_DEFS,
@@ -10,11 +11,18 @@ import {
   CONTACT,
   FLOOR_OPENING_MS,
   levelGapMods,
+  MOB,
   MOB_KINDS,
   MOB_SWING,
   mobsOnFloor,
   TOWER_CHEST,
+  TOWER_BOONS,
+  type TowerBoon,
+  towerBoonOffers,
+  towerBoonSeed,
+  towerBoonTotals,
   towerMob,
+  WARDEN,
 } from "@herzies/shared/tower";
 import {
   type ServerMessage,
@@ -23,9 +31,10 @@ import {
 } from "@herzies/shared/town-net";
 import { armed } from "./arms";
 import { describe, expect, it } from "vitest";
-import type { BossPlayer } from "../src/boss";
+import { type BossPlayer, TUNING } from "../src/boss";
 import { FightRuntime, type Outbound } from "../src/fight";
 import { TowerEngine, type TowerEvent } from "../src/tower";
+import { LOOT_REACH_SLACK } from "../src/wilds-loot";
 
 const T0 = 7_000_000;
 const STATS = { sonicPower: 0, critChance: 0, critDamage: 0 };
@@ -60,6 +69,26 @@ function run(
 /** Aim from (x, z) straight at a mob. */
 function aimAt(from: { x: number; z: number }, to: { x: number; z: number }) {
   return Math.atan2(to.x - from.x, to.z - from.z);
+}
+
+type Trap = Extract<TowerEvent, { t: "trap" }>;
+
+/** Step 50 ms at a time until a Cymbal Trap holds a mob: the hold, when,
+ * and everything that happened till then. Null: none did. */
+function trapAt(
+  e: TowerEngine,
+  from: number,
+  until: number,
+  players: BossPlayer[],
+): { ev: Trap; at: number; events: TowerEvent[] } | null {
+  const events: TowerEvent[] = [];
+  for (let t = from; t <= until; t += 50) {
+    const step = e.update(t, players);
+    events.push(...step);
+    const ev = step.find((x): x is Trap => x.t === "trap");
+    if (ev) return { ev, at: t, events };
+  }
+  return null;
 }
 
 describe("TowerEngine", () => {
@@ -387,7 +416,9 @@ describe("the Percussionist in the Tower", () => {
     const inReach = e
       .wireMobs()
       .filter((m) => Math.hypot(m.x - from.x, m.z - from.z) <= RIMSHOT.radius);
-    const r = e.rimshot("u", from, STATS, 1, t);
+    // At 40% of a plain hit: five strikes then land as two did, leaving
+    // the stunned mob standing to be watched.
+    const r = e.rimshot("u", from, { ...STATS, sonicPower: -60 }, 1, t);
     expect(r.hit).toBeGreaterThanOrEqual(inReach.length);
     expect(r.stunned).toBe(r.hit);
     expect(e.wireMobs().find((m) => m.id === mob.id)?.st).toBe(t + RIMSHOT.stunMs);
@@ -475,6 +506,332 @@ describe("the Percussionist in the Tower", () => {
     const out = f.step(later + 100);
     expect(said(out, "channel")[0]?.msg).toMatchObject({ target: null });
     expect(hitsBy(later + cast + 200, later + 150)).toBe(0);
+  });
+
+  it("a Cymbal Trap holds the first mob along the aim: it takes no step, yet still swings", () => {
+    const e = engine(1, 1);
+    const herzie: { at: { x: number; z: number } } = { at: ARENA.entry };
+    const p = player(() => herzie.at, 100_000);
+    // The pack's awake and coming on.
+    let t = T0;
+    for (; t < T0 + FLOOR_OPENING_MS + 500; t += 50) e.update(t, [p]);
+    const mob = e.wireMobs()[0];
+    expect(e.cymbalTrap("u", { x: mob.x, z: mob.z - 3 }, 0, 0, STATS, 6_000, t)).toBe(true);
+    const caught = trapAt(e, t + 50, t + 1_000, [p]);
+    if (!caught) throw new Error("no trap");
+    const { ev, at, events } = caught;
+    expect(ev).toEqual({ t: "trap", uid: "u", mob: ev.mob, until: at + 6_000 });
+    expect(events).toContainEqual(
+      expect.objectContaining({ t: "hit", uid: "u", mob: ev.mob, skill: "cymbal-trap" }),
+    );
+    // It doesn't come on at the herzie; once the herzie walks up beside it,
+    // it turns and swings, but never moves.
+    const held = e.wireMobs().find((m) => m.id === ev.mob);
+    if (!held) throw new Error("no mob");
+    let swung = false;
+    for (t = at + 50; t < ev.until - 50; t += 50) {
+      if (t >= at + 2_000) herzie.at = { x: held.x + 1, z: held.z };
+      swung ||= e
+        .update(t, [p])
+        .some((x) => x.t === "telegraph" && x.telegraph.mob === ev.mob);
+      const now = e.wireMobs().find((m) => m.id === ev.mob);
+      expect(now?.x).toBeCloseTo(held.x, 1);
+      expect(now?.z).toBeCloseTo(held.z, 1);
+    }
+    expect(swung).toBe(true);
+  });
+
+  it("a Cymbal Trap's hold again soon after is half as long, and none lands while it's held", () => {
+    // High up, so three blows don't fell it.
+    const e = engine(40, 1);
+    const mob = e.wireMobs()[0];
+    const from = { x: mob.x, z: mob.z - 2 };
+    e.cymbalTrap("u", from, 0, 0, STATS, 2_000, T0);
+    const first = trapAt(e, T0, T0 + 500, []);
+    if (!first) throw new Error("no trap");
+    expect(first.ev.until).toBe(first.at + 2_000);
+    // Held already: the blow lands, the hold is as it was.
+    e.cymbalTrap("u", from, 0, 0, STATS, 2_000, first.at + 100);
+    const again = trapAt(e, first.at + 100, first.at + 600, []);
+    expect(again).toBeNull();
+    const later = first.ev.until + 100;
+    e.cymbalTrap("u", from, 0, 0, STATS, 2_000, later);
+    const second = trapAt(e, later, later + 500, []);
+    if (!second) throw new Error("no trap");
+    expect(second.ev.mob).toBe(first.ev.mob);
+    expect(second.ev.until).toBe(second.at + 1_000);
+  });
+
+  it("in a fight, a Cymbal Trap's hold is told to everyone", () => {
+    const towerClaim = { event: "tower-1", until: (T0 + 3_600_000) / 1000, floor: 6 };
+    const f = FightRuntime.tower(towerClaim, "u", 20, ARENA, T0, 3);
+    f.join("u", 1, ticket({ cls: "percussionist", lv: 20, sk: [["cymbal-trap", 10]] }), ARENA.entry, T0);
+    const tw = f.tower;
+    if (!tw) throw new Error("not a tower");
+    const mob = tw.wireMobs()[0];
+    const from = { x: mob.x, z: mob.z - 3 };
+    for (let t = T0; t <= T0 + 200; t += 50) f.onState("u", from.x, from.z, t);
+    const thrown = f.skill("u", "cymbal-trap", 0, 0, T0 + 200);
+    expect(thrown.result).toBe("used");
+    expect(said(thrown.out, "trap")).toEqual([]);
+    const out: Outbound[] = [];
+    for (let t = T0 + 250; t <= T0 + 1_000; t += 50) {
+      f.onState("u", from.x, from.z, t);
+      out.push(...f.step(t));
+    }
+    const traps = said(out, "trap");
+    expect(traps).toHaveLength(1);
+    expect(traps[0].to).toBe("all");
+    expect(traps[0].msg).toMatchObject({ t: "trap", by: 1, mob: true });
+    expect(said(out, "hit").length).toBeGreaterThan(0);
+  });
+});
+
+describe("the Record Slinger's Multispin in the Tower", () => {
+  it("hits the mob beside its Slinger, none out of its records' reach, and a fall stops it", () => {
+    const towerClaim = { event: "tower-1", until: (T0 + 3_600_000) / 1000, floor: 6 };
+    const f = FightRuntime.tower(towerClaim, "u", 20, ARENA, T0, 3);
+    f.join("u", 1, ticket({ cls: "record_slinger", lv: 20, sk: [["multispin", 5]] }), ARENA.entry, T0);
+    const tw = f.tower;
+    if (!tw) throw new Error("not a tower");
+    // The pack sleeps through the opening: nobody moves.
+    const mobs = tw.wireMobs();
+    const mob = mobs[0];
+    const at = { x: mob.x - MULTISPIN.radius, z: mob.z };
+    const reach = MULTISPIN.radius + MULTISPIN.recordRadius + MOB.radius * WARDEN.scale;
+    const apart = (m: { x: number; z: number }) => Math.hypot(m.x - at.x, m.z - at.z);
+    expect(mobs.some((m) => apart(m) > reach)).toBe(true);
+    for (let t = T0; t <= T0 + 200; t += 50) f.onState("u", at.x, at.z, t);
+    const cast = f.skill("u", "multispin", 0, 0, T0 + 200);
+    expect(cast.result).toBe("used");
+    expect(said(cast.out, "buff")[0]?.msg).toMatchObject({ buff: "multispin" });
+    const hit = new Set<number>();
+    for (let t = T0 + 250; t <= T0 + 200 + MULTISPIN.turnMs; t += 50) {
+      f.onState("u", at.x, at.z, t);
+      for (const o of said(f.step(t), "hit"))
+        if (o.msg.t === "hit" && o.msg.mob !== undefined) hit.add(o.msg.mob);
+    }
+    expect(hit.has(mob.id)).toBe(true);
+    for (const id of hit) {
+      const m = mobs.find((x) => x.id === id);
+      expect(m && apart(m)).toBeLessThanOrEqual(reach);
+    }
+    const me = f.player("u");
+    if (!me) throw new Error("no player");
+    me.down = true;
+    const out = f.step(T0 + 1_500);
+    expect(said(out, "buffOff")[0]?.msg).toMatchObject({ id: 1, buff: "multispin" });
+    expect(said(out, "hit")).toEqual([]);
+  });
+
+  it("hits a mob hugging its Slinger, inside the records' ring", () => {
+    const towerClaim = { event: "tower-1", until: (T0 + 3_600_000) / 1000, floor: 6 };
+    const f = FightRuntime.tower(towerClaim, "u", 20, ARENA, T0, 3);
+    f.join("u", 1, ticket({ cls: "record_slinger", lv: 20, sk: [["multispin", 5]] }), ARENA.entry, T0);
+    const tw = f.tower;
+    if (!tw) throw new Error("not a tower");
+    const mob = tw.wireMobs()[0];
+    // Right up against it: its centre well inside the ring.
+    const at = { x: mob.x - 0.3, z: mob.z };
+    for (let t = T0; t <= T0 + 200; t += 50) f.onState("u", at.x, at.z, t);
+    expect(f.skill("u", "multispin", 0, 0, T0 + 200).result).toBe("used");
+    const hit: number[] = [];
+    for (let t = T0 + 250; t <= T0 + 200 + MULTISPIN.turnMs; t += 50) {
+      f.onState("u", at.x, at.z, t);
+      for (const o of said(f.step(t), "hit"))
+        if (o.msg.t === "hit" && o.msg.mob === mob.id) hit.push(o.msg.mob);
+    }
+    // Each of its five records, about once a turn.
+    expect(hit.length).toBeGreaterThanOrEqual(5);
+  });
+});
+
+describe("Tower boons", () => {
+  const BIG = { sonicPower: 5_000, critChance: 0, critDamage: 0 };
+  const b = (id: TowerBoon["id"], rarity: TowerBoon["rarity"] = "common") => ({
+    id,
+    rarity,
+  });
+  /** A climb started on `floor`, with `boons` picked and `skips` skipped
+   * (climb 2). */
+  const climb = (
+    floor: number,
+    boons: TowerBoon[] = [],
+    st?: TownTicketPayload["st"],
+    skips = 0,
+  ) => {
+    const claim = {
+      event: "tower-1",
+      until: (T0 + 3_600_000) / 1000,
+      floor,
+      boons,
+      skips,
+      climb: 2,
+    };
+    const f = FightRuntime.tower(claim, "u", 20, ARENA, T0, 3);
+    f.join("u", 1, ticket({ lv: 20, ...(st ? { st } : {}) }), ARENA.entry, T0);
+    const tw = f.tower;
+    if (!tw) throw new Error("not a tower");
+    return { f, tw };
+  };
+
+  const EVERY = TOWER_BOONS.every;
+
+  it("offers the seeded three for each pick, and takes one or skips", () => {
+    // Two picks' worth of floors cleared before.
+    const { f, tw } = climb(2 * EVERY + 1);
+    const first = f.floorView(tw);
+    expect(first).toMatchObject({ boons: [], picks: 2 });
+    expect(first.offers).toEqual(
+      towerBoonOffers(towerBoonSeed("u", "tower-1", 2, 0), EVERY),
+    );
+    const taken = first.offers?.[1];
+    const after = said(f.towerPick("u", 1), "floor")[0]?.msg as
+      | Extract<ServerMessage, { t: "floor" }>
+      | undefined;
+    expect(after).toMatchObject({ boons: [taken], picks: 1 });
+    // The next pick's offers are its own.
+    expect(after?.offers).toEqual(
+      towerBoonOffers(towerBoonSeed("u", "tower-1", 2, 1), 2 * EVERY),
+    );
+    // Skipping spends it.
+    expect(said(f.towerPick("u", null), "floor")[0]?.msg).toMatchObject({
+      boons: [taken],
+      picks: 0,
+    });
+    expect(f.towerPick("u", 0)).toEqual([]);
+    // The database hears of it all, with the climb's number.
+    expect(f.report(T0 + 1, true)?.tower).toMatchObject({
+      uid: "u",
+      climb: 2,
+      boons: [taken],
+      skips: 1,
+    });
+  });
+
+  it("refuses an offer that isn't there, and a pick not earned", () => {
+    expect(climb(EVERY + 1).f.towerPick("u", 3)).toEqual([]);
+    expect(climb(EVERY + 1, [], undefined, 1).f.towerPick("u", 0)).toEqual([]);
+    expect(climb(EVERY).f.towerPick("u", 0)).toEqual([]);
+  });
+
+  it("a pick is earned every few floors, as the floor clears", () => {
+    const { f, tw } = climb(EVERY);
+    expect(f.floorView(tw).picks).toBe(0);
+    let t = T0;
+    while (!tw.isCleared && t < T0 + 120_000) {
+      const mob = tw.wireMobs()[0];
+      const at = { x: mob.x - 5, z: mob.z };
+      tw.cast("u", at, aimAt(at, mob), 0, BIG, t);
+      for (let i = 0; i < 10 && !tw.isCleared; i++) f.step((t += 50));
+    }
+    expect(f.floorView(tw).picks).toBe(1);
+  });
+
+  /** What `uid`'s first cast at the nearest mob hits for, with `boons`;
+   * `hurt` takes the mob down to a quarter of its health first. */
+  const hitFor = (boons: TowerBoon[], hurt = false) => {
+    const e = engine(1, 1);
+    e.setBoons("u", towerBoonTotals(boons));
+    const mob = e.wireMobs()[0];
+    if (hurt) {
+      const pack = (
+        e as unknown as {
+          pack: { byId(id: number): { hp: number; maxHp: number } };
+        }
+      ).pack;
+      const m = pack.byId(mob.id);
+      m.hp = m.maxHp / 4;
+    }
+    const at = { x: mob.x - 3, z: mob.z };
+    expect(
+      e.cast("u", at, aimAt(at, mob), 0, { ...STATS, sonicPower: 500 }, T0),
+    ).toBe("hit");
+    for (let t = T0 + 50; t <= T0 + 2_000; t += 50)
+      for (const ev of e.update(t, [])) if (ev.t === "hit") return ev.damage;
+    throw new Error("no hit");
+  };
+
+  it("damage: its hits land harder", () => {
+    const plain = hitFor([]);
+    const boosted = hitFor([b("damage", "rare"), b("damage", "rare")]);
+    expect(Math.abs(boosted - plain * 1.24)).toBeLessThanOrEqual(1);
+  });
+
+  it("executioner: harder only on a mob under a third of its health", () => {
+    const ex = [b("executioner", "rare")];
+    expect(hitFor(ex)).toBe(hitFor([]));
+    expect(
+      Math.abs(hitFor(ex, true) - hitFor([], true) * 1.25),
+    ).toBeLessThanOrEqual(1);
+  });
+
+  it("speed: its attacks come quicker", () => {
+    const every = (TUNING.castEveryMs / 1.1) * 1.02;
+    const refused = (boons: TowerBoon[]) => {
+      const e = engine(1, 1);
+      e.setBoons("u", towerBoonTotals(boons));
+      let n = 0;
+      for (let i = 0; i < 40; i++)
+        if (e.spendCast("u", T0 + 1_000 + i * every) === false) n++;
+      return n;
+    };
+    expect(refused([b("speed", "rare")])).toBe(0);
+    expect(refused([])).toBeGreaterThan(0);
+  });
+
+  /** Standing in the first floor's mobs for 20 s: the health it lost, and
+   * the damage the mobs took. */
+  const stand = (boons: TowerBoon[]) => {
+    const { f, tw } = climb(1, boons, [0, 0, 0, 0, 0, 60, 0, 0]);
+    const full = tw.wireMobs().reduce((s, m) => s + m.hp, 0);
+    for (let t = T0; t <= T0 + 20_000; t += 50) {
+      f.onState("u", ARENA.entry.x, ARENA.entry.z, t);
+      f.step(t);
+    }
+    const p = f.player("u");
+    if (!p) throw new Error("no player");
+    const left = tw.wireMobs().reduce((s, m) => s + m.hp, 0);
+    return { lost: p.maxHp - p.hp, dealt: full - left };
+  };
+
+  it("def: the mobs' hits take less of its health", () => {
+    const plain = stand([]).lost;
+    expect(plain).toBeGreaterThan(0);
+    expect(
+      stand([b("def", "legendary"), b("def", "legendary")]).lost,
+    ).toBeLessThan(plain);
+  });
+
+  it("thorns: a mob that hits it takes some back", () => {
+    expect(stand([]).dealt).toBe(0);
+    expect(stand([b("thorns", "mythic")]).dealt).toBeGreaterThan(0);
+  });
+
+  it("tempo: its skills come back sooner", () => {
+    const readyAfter = (boons: TowerBoon[]) => {
+      const claim = {
+        event: "tower-1",
+        until: (T0 + 3_600_000) / 1000,
+        floor: 1,
+        boons,
+        climb: 2,
+      };
+      const f = FightRuntime.tower(claim, "u", 20, ARENA, T0, 3);
+      f.join(
+        "u",
+        1,
+        ticket({ lv: 20, sk: [["soothing-drones", 1]] }),
+        ARENA.entry,
+        T0,
+      );
+      const r = f.skill("u", "soothing-drones", 0, 0, T0 + 100);
+      expect(r.result).toBe("used");
+      return r.readyAt - (T0 + 100);
+    };
+    expect(readyAfter([b("tempo", "mythic")])).toBe(
+      Math.round(readyAfter([]) * 0.8),
+    );
   });
 });
 
@@ -697,21 +1054,27 @@ describe("the Warden's chest", () => {
     }
   });
 
-  it("opens once to a herzie who walks up, after it's landed", () => {
+  it("opens to E by it, once, after it's landed; walking up opens nothing", () => {
     const e = engine(10, 99);
     const cleared = clearWith(e, T0, (t) => e.update(t, []));
-    const near = player(() => ({ x: TOWER_CHEST.reach - 0.2, z: 0 }));
-    const far = player(() => ({ x: TOWER_CHEST.reach + 0.5, z: 0 }));
-    const chests = (evs: TowerEvent[]) => evs.filter((x) => x.t === "chest");
-    // Landing: even on the star, it waits.
-    expect(chests(run(e, cleared, cleared + TOWER_CHEST.settleMs - 100, [near]))).toEqual([]);
+    const near = { x: TOWER_CHEST.reach - 0.2, z: 0 };
+    const far = { x: TOWER_CHEST.reach + LOOT_REACH_SLACK + 0.5, z: 0 };
     const after = cleared + TOWER_CHEST.settleMs;
-    expect(chests(run(e, after, after + 2_000, [far]))).toEqual([]);
+    // Stood on it, nothing opens by itself.
+    const evs = run(e, cleared, after + 2_000, [player(() => near)]);
+    expect(evs.filter((x) => x.t === "chest")).toEqual([]);
     expect(e.view().chest).toEqual(TOWER_CHEST.at);
-    expect(chests(run(e, after + 2_050, after + 6_000, [near]))).toEqual([
-      { t: "chest", floor: 10, x: TOWER_CHEST.at.x, z: TOWER_CHEST.at.z },
-    ]);
+    // Landing: even on the star, it waits; from too far, never.
+    expect(e.openChestAt(near, cleared + TOWER_CHEST.settleMs - 100)).toBeNull();
+    expect(e.openChestAt(far, after + 2_000)).toBeNull();
+    expect(e.openChestAt(near, after + 2_050)).toEqual({
+      t: "chest",
+      floor: 10,
+      x: TOWER_CHEST.at.x,
+      z: TOWER_CHEST.at.z,
+    });
     expect(e.view().chest).toBeUndefined();
+    expect(e.openChestAt(near, after + 2_100)).toBeNull();
     expect(e.openChest()).toBeNull();
     // On to 11: none there.
     expect(e.next(after + 6_100)).toBe(true);
@@ -737,7 +1100,7 @@ describe("the Warden's chest", () => {
     return { f, tw, out, step, goTo, t };
   }
 
-  it("in a fight: walked up to, it opens once and its loot comes out of it", () => {
+  it("in a fight: E by it opens it once, and its loot comes out of it", () => {
     const { f, out, step, goTo, t } = fight();
     const floors = () =>
       said(out, "floor").map((o) => (o.msg.t === "floor" ? o.msg : null));
@@ -750,6 +1113,9 @@ describe("the Warden's chest", () => {
     goTo(TOWER_CHEST.at);
     let now = t;
     while (now < t + TOWER_CHEST.settleMs + 500) step((now += 50));
+    // Standing by it opens nothing; E does.
+    expect(floors().at(-1)?.chest).toEqual(TOWER_CHEST.at);
+    out.push(...f.chestOpen("u", now));
     expect(floors().at(-1)?.chest).toBeUndefined();
     const report = f.report(now, true);
     const batch = report?.tower;

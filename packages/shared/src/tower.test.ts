@@ -9,9 +9,11 @@ import {
   isWardenFloor,
   levelGapMods,
   mobsOnFloor,
+  TOWER_BOON_RARITIES,
   TOWER_DROP_CHANCE,
   TOWER_DROPS_DAILY_CAP,
   TOWER_RARE_LEAN,
+  towerBoonOffers,
   towerChestRolls,
   towerLootLean,
   towerMob,
@@ -138,5 +140,28 @@ describe("tower loot", () => {
     expect(towerChestRolls(20)).toBe(3);
     expect(towerChestRolls(40)).toBe(4);
     expect(towerChestRolls(200)).toBe(4);
+  });
+});
+
+describe("tower boon offers", () => {
+  it("offers different boons, the same ones again for the same seed", () => {
+    const a = towerBoonOffers("u:e:1:0", 5);
+    expect(new Set(a.map((b) => b.id)).size).toBe(a.length);
+    expect(towerBoonOffers("u:e:1:0", 5)).toEqual(a);
+  });
+
+  it("leans rarer the higher the floor", () => {
+    const rareShare = (floor: number) => {
+      let rare = 0;
+      let all = 0;
+      for (let i = 0; i < 2000; i++)
+        for (const b of towerBoonOffers(`s${i}`, floor)) {
+          all++;
+          if (TOWER_BOON_RARITIES.indexOf(b.rarity) >= 2) rare++;
+        }
+      return rare / all;
+    };
+    expect(rareShare(5)).toBeLessThan(0.2);
+    expect(rareShare(60)).toBeGreaterThan(0.6);
   });
 });

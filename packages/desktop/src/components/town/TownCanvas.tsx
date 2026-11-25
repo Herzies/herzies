@@ -101,17 +101,21 @@ import {
 } from "./runtime";
 import type { Champion } from "./Statues";
 import { Supersample } from "./Supersample";
-import { TowerChest } from "./TowerChest";
+import { chestInReach, openChest, TowerChest } from "./TowerChest";
 import { Visitor, VisitorBody } from "./Visitor";
+import { BleedVFX } from "./vfx/BleedVFX";
+import { CymbalTrapVFX } from "./vfx/CymbalTrapVFX";
 import { DiscVFX } from "./vfx/DiscVFX";
 import { DomeVFX } from "./vfx/DomeVFX";
 import { HasteVFX } from "./vfx/HasteVFX";
 import { HealVFX } from "./vfx/HealVFX";
+import { MultispinVFX } from "./vfx/MultispinVFX";
 import { SkillVFX } from "./vfx/SkillVFX";
 import { SlamVFX } from "./vfx/SlamVFX";
 import { SlashVFX } from "./vfx/SlashVFX";
 import { SonicVFX } from "./vfx/SonicVFX";
 import { StunVFX } from "./vfx/StunVFX";
+import { TuneVFX } from "./vfx/TuneVFX";
 import { mapId, World } from "./World";
 import {
   CraftingStation,
@@ -197,10 +201,11 @@ export type TownCanvasProps = {
   homeDrops?: boolean;
 };
 
-/** What E would do where you stand, besides talking or a portal. On the
- * Wilds, `pickup`: take the card lying in reach (its drop id, and its name
- * to show). `herzie`: open the menu of another herzie close by (its entity
- * id, and its name to show). */
+/** What E would do where you stand, besides talking or a portal. In the
+ * Tower, `chest`: open the cleared floor's chest. On the Wilds, `pickup`:
+ * take the card lying in reach (its drop id, and its name to show).
+ * `herzie`: open the menu of another herzie close by (its entity id, and
+ * its name to show). */
 export type BenchPrompt =
   | "sit"
   | "stand"
@@ -209,6 +214,7 @@ export type BenchPrompt =
   | "upgrade"
   | "crafting"
   | "hunt"
+  | "chest"
   | { pickup: string; name: string }
   | { herzie: number; name: string };
 
@@ -428,7 +434,12 @@ export default function TownCanvas(props: TownCanvasProps) {
         <DomeVFX map={map} />
         <StunVFX />
         <SlamVFX map={map} />
+        <CymbalTrapVFX map={map} />
         <HasteVFX />
+        <TuneVFX buff="rage" />
+        <TuneVFX buff="focus" />
+        <MultispinVFX map={map} />
+        <BleedVFX map={map} />
         <HealVFX />
         <SlashVFX />
         <CombatOverlay />
@@ -506,6 +517,8 @@ function Systems({
   const hunt = useRef(false);
   /** The card on the Wilds E would pick up, if any. */
   const pickup = useRef<GroundCard | null>(null);
+  /** By the Tower's chest, shut and settled: E opens it. */
+  const chest = useRef(false);
   /** The other herzie E would open the menu of, if any (an entity id). */
   const herzie = useRef<number | null>(null);
   // A shut portal (a sealed cave, the Tower out of season, a floor not
@@ -542,9 +555,10 @@ function Systems({
   const strandedSince = useRef<number | null>(null);
 
   /** E (or a click on the prompt): talk to whoever's near; else step into
-   * the portal nearby; else stand up; else pick up the card in reach (the
-   * Wilds); else read the board nearby; else sit on the bench nearby; else
-   * open the menu of the herzie nearby (E again shuts it).
+   * the portal nearby; else stand up; else open the Tower's chest in
+   * reach; else pick up the card in reach (the Wilds); else read the board
+   * nearby; else sit on the bench nearby; else open the menu of the herzie
+   * nearby (E again shuts it).
    * Knocked out, talking's all it can do: it lies where it fell. */
   const interact = () => {
     const card = near.current?.card;
@@ -556,6 +570,7 @@ function Systems({
     } else if (youDown()) return;
     else if (portal.current) enter(portal.current);
     else if (townLive.seat) townLive.standUp = true;
+    else if (chest.current) openChest(performance.now());
     else if (pickup.current) {
       // The room judges it (a `wildsTaken`, or a refusal that says why).
       const { id } = pickup.current;
@@ -704,6 +719,15 @@ function Systems({
       onNearChange(closest);
     }
 
+    // The Tower's chest, shut, settled and in reach: the room judges it
+    // too (and answers with the floor without it).
+    chest.current =
+      map?.id === "tower" &&
+      !closest &&
+      !portal.current &&
+      !townLive.seat &&
+      chestInReach(townSave.x, townSave.z, performance.now());
+
     // A card on the Wilds in reach that you may take: never taken without
     // asking (see wilds/loot.ts), so walking past leaves it lying.
     pickup.current =
@@ -768,6 +792,7 @@ function Systems({
       !closest &&
       !portal.current &&
       !townLive.seat &&
+      !chest.current &&
       !pickup.current &&
       !crystal.current &&
       !board.current &&
@@ -797,25 +822,27 @@ function Systems({
       ? null
       : townLive.seat
         ? "stand"
-        : lying
-          ? "pickup"
-          : crystal.current
-            ? isAttuning()
-              ? null
-              : crystalHasSomething()
-                ? "attune"
-                : "upgrade"
-            : board.current
-              ? "read"
-              : crafting.current
-                ? "crafting"
-                : hunt.current
-                  ? "hunt"
-                  : seat.current
-                    ? "sit"
-                    : other !== null
-                      ? "herzie"
-                      : null;
+        : chest.current
+          ? "chest"
+          : lying
+            ? "pickup"
+            : crystal.current
+              ? isAttuning()
+                ? null
+                : crystalHasSomething()
+                  ? "attune"
+                  : "upgrade"
+              : board.current
+                ? "read"
+                : crafting.current
+                  ? "crafting"
+                  : hunt.current
+                    ? "hunt"
+                    : seat.current
+                      ? "sit"
+                      : other !== null
+                        ? "herzie"
+                        : null;
     const was = prompt.current;
     const same =
       next === "pickup"

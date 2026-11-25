@@ -298,6 +298,7 @@ function FoeCard({
         hp={h?.hp ?? 1}
         maxHp={h?.maxHp ?? 1}
         right={time}
+        bleeder={opp}
       />
       <div className="pointer-events-auto mt-1 text-[10px] leading-3 text-white/60">
         {yielding ? (

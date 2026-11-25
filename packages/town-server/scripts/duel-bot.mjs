@@ -23,7 +23,7 @@
  * the server.
  */
 import { DUEL } from "@herzies/shared/duel";
-import { SKILL_DEFS } from "@herzies/shared/skills";
+import { CYMBAL_TRAP, SKILL_DEFS } from "@herzies/shared/skills";
 import {
   decodeSnapshot,
   encodeCastFrame,
@@ -84,6 +84,8 @@ function run() {
   let level = baseLevel;
   let duel = null;
   let stunnedUntil = 0;
+  /** Caught by a Cymbal Trap until then: it turns and fights, but stands. */
+  let heldUntil = 0;
   let casts = 0;
   let castSeq = 0;
   let stateSeq = 0;
@@ -139,7 +141,7 @@ function run() {
     const dx = me.x - foe.x;
     const dz = me.z - foe.z;
     const d = Math.hypot(dx, dz) || 0.01;
-    if (now >= stunnedUntil) {
+    if (now >= stunnedUntil && now >= heldUntil) {
       // Circle at KEEP: the tangent sideways, plus a pull in or out.
       if (Math.random() < 0.01) strafe = -strafe;
       const tx = (-dz / d) * strafe;
@@ -170,9 +172,18 @@ function run() {
 
     // Skills first, when they make sense.
     if (cls === "bard" && myHp < 0.55 && useSkill("soothing-drones", yaw, pitch)) return;
+    // Rage first thing in the fight (and whenever it's ready again).
+    if (cls === "bard" && useSkill("rage", yaw, pitch)) return;
     if (cls === "bard" && useSkill("haste", yaw, pitch)) return;
+    // Up close, records round it.
+    if (cls === "record_slinger" && dist <= 3 && useSkill("multispin", yaw, pitch)) return;
+    // Keeps its bleed going whenever the disc reaches.
+    if (cls === "record_slinger" && dist < 14 && useSkill("forbidden-frequency", yaw, pitch)) return;
     if (cls === "record_slinger" && dist < 14 && Math.random() < 0.3 && useSkill("backspin", yaw, pitch)) return;
     if (cls === "record_slinger" && useSkill("shuffle", yaw, pitch)) return;
+    // Out of its stick's reach, it throws its cymbal: what it catches is
+    // held while it closes in.
+    if (cls === "percussionist" && dist >= 4 && dist <= CYMBAL_TRAP.range && useSkill("cymbal-trap", yaw, pitch)) return;
     if (cls === "percussionist" && dist < 3 && useSkill("rimshot", yaw, pitch)) return;
     if (cls === "percussionist" && myHp < 0.5 && useSkill("cymbrella", yaw, pitch)) return;
 
@@ -288,12 +299,16 @@ function run() {
       case "duelStun":
         if (m.id === you) stunnedUntil = Date.now() + Math.max(0, m.until - serverNow());
         break;
+      case "trap":
+        if (!m.mob && m.target === you) heldUntil = Date.now() + Math.max(0, m.until - serverNow());
+        break;
       case "duelEnd": {
         if (m.a !== you && m.b !== you) break;
         const won = m.winner === you;
         log(`duel ${m.id}: ${m.why}, ${m.winner === null ? "no winner" : won ? "bot won" : "bot lost"} after ${(m.ms / 1000).toFixed(1)} s`);
         duel = null;
         stunnedUntil = 0;
+        heldUntil = 0;
         readyAt.clear();
         if (won) {
           await sleep(1200);

@@ -1,7 +1,8 @@
 import { BOSS_PHASE_AT, IN_TUNE, MINION_THRESHOLDS } from "@herzies/shared";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 import { clock } from "./cave";
+import { useBleedStacks } from "./combat/bleeds";
 import {
   bossFight,
   mobsLeft,
@@ -11,6 +12,8 @@ import {
 } from "./combat/fight";
 import { type Banner, useBanner } from "./combat/moments";
 import { buffOn, useSkills } from "./combat/skills";
+import { BoonPick } from "./TowerBoons";
+import { boonParts } from "./towerBoonText";
 
 /** Publishes the boss card's bottom edge as `--boss-card-bottom` while it's
  * shown (unset otherwise): windows on the right of the big window hang
@@ -36,21 +39,26 @@ export const BOSS_CARD =
 /** A foe's health on its card: the red bar, a white chip of what was just
  * lost catching up a moment later (so each burst of damage reads), and
  * the numbers under it with `right` beside them. `marks`: drawn over the
- * bar (the boss's phases). */
+ * bar (the boss's phases). `bleeder`: whose bleed to show by the bar (a
+ * herzie's entity id, or null for the boss); a dark red drop while it
+ * bleeds, its stacks beside it past one. */
 export function FoeHealth({
   label,
   hp,
   maxHp,
   right,
   marks,
+  bleeder,
 }: {
   label: string;
   hp: number;
   maxHp: number;
   right?: ReactNode;
   marks?: ReactNode;
+  bleeder?: number | null;
 }) {
   const frac = maxHp > 0 ? Math.max(0, Math.min(1, hp / maxHp)) : 0;
+  const bleeding = useBleedStacks(bleeder);
   return (
     <div
       className="mt-0.5"
@@ -60,16 +68,19 @@ export function FoeHealth({
       aria-valuemax={maxHp}
       aria-valuenow={Math.round(hp)}
     >
-      <div className="relative h-2 overflow-hidden rounded-sm bg-black/60 ring-1 ring-white/25">
-        <div
-          className="absolute inset-y-0 left-0 bg-white/70 transition-[width] duration-500 ease-out motion-reduce:transition-none"
-          style={{ width: `${frac * 100}%`, transitionDelay: "350ms" }}
-        />
-        <div
-          className="relative h-full bg-red-500 transition-[width] duration-100"
-          style={{ width: `${frac * 100}%` }}
-        />
-        {marks}
+      <div className="flex items-center gap-1">
+        <div className="relative h-2 flex-1 overflow-hidden rounded-sm bg-black/60 ring-1 ring-white/25">
+          <div
+            className="absolute inset-y-0 left-0 bg-white/70 transition-[width] duration-500 ease-out motion-reduce:transition-none"
+            style={{ width: `${frac * 100}%`, transitionDelay: "350ms" }}
+          />
+          <div
+            className="relative h-full bg-red-500 transition-[width] duration-100"
+            style={{ width: `${frac * 100}%` }}
+          />
+          {marks}
+        </div>
+        {bleeding > 0 ? <BleedDrop stacks={bleeding} /> : null}
       </div>
       <div className="mt-0.5 flex text-[10px] leading-3 tabular-nums text-white/60">
         <span>
@@ -81,6 +92,35 @@ export function FoeHealth({
   );
 }
 
+/** A bleed's mark by a health bar: a dark red drop, and its stacks past
+ * one. */
+export function BleedDrop({ stacks }: { stacks: number }) {
+  return (
+    <span
+      className="flex shrink-0 items-center gap-px text-[9px] font-bold leading-none text-[#e86a6a]"
+      role="img"
+      aria-label={`Bleeding${stacks > 1 ? ` ×${stacks}` : ""}`}
+    >
+      <svg viewBox="0 0 10 13" className="h-3 w-2.5" aria-hidden="true">
+        <path
+          d="M5 0.5C6 3 9.5 6 9.5 8.6A4.5 4.5 0 0 1 0.5 8.6C0.5 6 4 3 5 0.5Z"
+          fill="#8b0f18"
+          stroke="rgba(0,0,0,0.75)"
+        />
+        <rect
+          x="2.4"
+          y="8.4"
+          width="1.6"
+          height="1.6"
+          fill="#ffaaaa"
+          opacity="0.7"
+        />
+      </svg>
+      {stacks > 1 ? stacks : null}
+    </span>
+  );
+}
+
 /**
  * What the boss room shows over the world. The boss has a card of its own,
  * top right: its name, and in the lobby how long until it wakes; in the
@@ -89,9 +129,11 @@ export function FoeHealth({
  * raid's big moments across the screen (RaidBanner); once it's over, what
  * happened and
  * how long until the room closes. A flash of red when you're hit. In the
- * Tower: the floor, at the top. (Your music's bonus sits under your own
- * now-playing box: MusicBonus. The door's and the room's little messages
- * are notices: lib/notices.ts.)
+ * Tower: the floor, at the top, with the climb's boons, and the window to
+ * pick one in while there's a pick to spend (TowerBoons: it opens as a
+ * floor earns one; shut, the card's "Buff ready" opens it again). (Your
+ * music's bonus sits under your own now-playing box: MusicBonus. The
+ * door's and the room's little messages are notices: lib/notices.ts.)
  */
 export function BossHud({ name }: { name: string }) {
   useBossFight();
@@ -108,14 +150,27 @@ export function BossHud({ name }: { name: string }) {
     return () => clearInterval(t);
   }, [counting]);
 
+  const picks = (on && tower?.picks) || 0;
+  const cleared = !!tower?.cleared;
+  const [picking, setPicking] = useState(false);
+  const hadPicks = useRef(0);
+  // Up as a cleared floor earns a pick; away once the next floor's on
+  // (the card's button has it till then).
+  useEffect(() => {
+    if (!cleared) setPicking(false);
+    else if (picks > hadPicks.current) setPicking(true);
+    hadPicks.current = picks;
+  }, [picks, cleared]);
+  const boonsNow = boonParts(tower?.boons ?? []);
+
   const closes = closing ? Math.max(0, closing.at - now) : 0;
   return (
     <>
       {on && tower ? (
         // Top right, a card like the player card (top left): the floor,
-        // then what's left of it. Windows on the right start under it.
+        // then what's left of it. Unlike the boss's card, windows on the
+        // right don't start under it: they cover it.
         <section
-          ref={observeBossCard}
           role="status"
           aria-label={`Floor ${tower.floor}`}
           className="pointer-events-none absolute top-[calc(var(--hud-top,0px)+0.75rem)] right-3 z-30 rounded-xl border border-white/12 bg-black/45 px-2 pt-1 pb-1.5 text-white backdrop-blur-md"
@@ -129,6 +184,25 @@ export function BossHud({ name }: { name: string }) {
             {tower.cleared ? "Cleared" : `${mobsLeft()} left`}
             <EnrageTag tower={tower} now={now} />
           </div>
+          {boonsNow.length ? (
+            <div
+              className="mt-0.5 text-[10px] leading-3.5 whitespace-nowrap text-[#ffd84a]/90 tabular-nums"
+              title="Your climb's buffs"
+            >
+              {boonsNow.map((line) => (
+                <div key={line}>{line}</div>
+              ))}
+            </div>
+          ) : null}
+          {picks > 0 && !picking ? (
+            <button
+              type="button"
+              onClick={() => setPicking(true)}
+              className="pointer-events-auto mt-1 block cursor-pointer rounded border border-[#ffd84a]/60 bg-black/40 px-1.5 py-0.5 text-[10px] font-bold whitespace-nowrap text-[#ffd84a] hover:bg-black/60"
+            >
+              Buff ready{picks > 1 ? ` (${picks})` : ""}
+            </button>
+          ) : null}
         </section>
       ) : on ? (
         <section ref={observeBossCard} className={BOSS_CARD} aria-label={name}>
@@ -155,6 +229,7 @@ export function BossHud({ name }: { name: string }) {
                 hp={hp}
                 maxHp={maxHp}
                 right={`Phase ${bossFight.phase}`}
+                bleeder={null}
                 marks={
                   <>
                     {/* Where it changes gear (solid), and where it calls
@@ -195,6 +270,13 @@ export function BossHud({ name }: { name: string }) {
             </>
           )}
         </section>
+      ) : null}
+      {on && tower && picks > 0 && picking ? (
+        <BoonPick
+          offers={tower.offers ?? []}
+          picks={picks}
+          onClose={() => setPicking(false)}
+        />
       ) : null}
       {closing && tower ? (
         <div

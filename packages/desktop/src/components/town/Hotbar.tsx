@@ -7,7 +7,7 @@ import {
   isInBag,
   SKILL_DEFS,
 } from "@herzies/shared";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   LOADOUT_COOLDOWN_MS,
   loadoutCooldownLeft,
@@ -26,7 +26,7 @@ import {
 import { canHeal, toggleStance, useStance } from "./combat/stance";
 import { useCooldownShade } from "./cooldownShade";
 import { EmoteBar } from "./EmoteBar";
-import { useLastEat } from "./eat";
+import { eatCooldownLeft } from "./eat";
 import { HotbarGhost } from "./HotbarGhost";
 import { HOTBAR_SLOT_ATTR, useDragToHotbar, useHotbarDrag } from "./hotbarDrop";
 import { slotKeysLabel, useHotbarKeys } from "./hotbarKeys";
@@ -280,19 +280,21 @@ function LoadoutSlot({ n, ...props }: SlotProps & { n: LoadoutTarget }) {
 }
 
 /** An item on the hotbar: a consumable (how many are left in the bank,
- * flashed while eating cools down) or a card to wear (outlined while worn);
- * or nothing. */
+ * greyed from the top while eating cools down, CONSUMABLE_COOLDOWN_MS) or
+ * a card to wear (outlined while worn); or nothing. */
 function ItemSlot({
   itemId,
   units,
-  cooling,
   ...props
 }: SlotProps & {
   itemId: string | null;
   units: readonly ItemUnit[];
-  cooling: boolean;
 }) {
   const { i, keyLabel, over, onPick } = props;
+  const shade = useCooldownShade(
+    (now) => ({ ms: eatCooldownLeft(now), span: CONSUMABLE_COOLDOWN_MS }),
+    { seconds: false },
+  );
   const item = itemId ? getItem(itemId) : undefined;
   const card = !!item && !item.consumable;
   const count = itemId
@@ -337,7 +339,6 @@ function ItemSlot({
         className={cn(
           slotClass(over),
           (!item || count === 0) && "opacity-45 hover:opacity-80",
-          !card && cooling && item && "border-white/50",
           worn && "border-cyan/80",
         )}
       >
@@ -348,9 +349,7 @@ function ItemSlot({
             {count}
           </span>
         ) : null}
-        {!card && cooling && item ? (
-          <span aria-hidden className="absolute inset-0 rounded bg-white/15" />
-        ) : null}
+        {item && !card ? shade : null}
       </button>
     </Tooltip>
   );
@@ -384,16 +383,6 @@ export function Hotbar({
   const carried = useHotbarDrag();
   const drag = useDragToHotbar();
   useSkills();
-  const lastEat = useLastEat();
-  // Re-render once the cooldown's over, to drop the flash.
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const left = lastEat + CONSUMABLE_COOLDOWN_MS - performance.now();
-    if (left <= 0) return;
-    const t = setTimeout(() => setTick((n) => n + 1), left);
-    return () => clearTimeout(t);
-  }, [lastEat]);
-  const cooling = performance.now() - lastEat < CONSUMABLE_COOLDOWN_MS;
   const [picker, setPicker] = useState<{
     i: number;
     x: number;
@@ -519,7 +508,6 @@ export function Hotbar({
             key={i}
             itemId={value}
             units={units}
-            cooling={cooling}
             {...props}
           />
         );

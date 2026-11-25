@@ -2648,10 +2648,13 @@ function buildDrumhideHelmSpheres(spheres: Sphere[]): Sphere[] {
       color,
       ...extra,
     });
-  // Creature space is y down: up is −y. Low, like the guard's helm, so a
-  // grown herzie's doesn't run off the top of the frame.
-  const shellY = hy - hr * 0.64;
-  const shellHalf = hr * 0.2;
+  // Creature space is y down: up is −y. Its lower hoop sits where it
+  // always did, above the eyes; the drumhead stands a little above the
+  // top of the head (hy − hr), so no head shows through it.
+  const bottomY = hy - hr * 0.44;
+  const topY = hy - hr * 1.1;
+  const shellY = (bottomY + topY) / 2;
+  const shellHalf = (bottomY - topY) / 2;
   const shellR = Math.max(
     hr * 0.96,
     headReachAt(spheres, hx, hz, shellY + shellHalf) + hr * 0.04,

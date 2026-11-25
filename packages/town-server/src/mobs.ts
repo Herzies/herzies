@@ -30,7 +30,13 @@ import {
   pushOutOfDomes,
   WAVE_HAND_HEIGHT,
 } from "@herzies/shared/combat";
-import { type Buff, SHUFFLE_REACH, shuffleScale } from "@herzies/shared/skills";
+import {
+  type Buff,
+  CYMBAL_TRAP,
+  RIMSHOT,
+  SHUFFLE_REACH,
+  shuffleScale,
+} from "@herzies/shared/skills";
 import {
   attackTokens,
   CONTACT,
@@ -66,6 +72,7 @@ import {
   TUNING,
 } from "./boss";
 import { StunReturns } from "./budgets";
+import type { SpinBody } from "./spin";
 
 /** How far behind the server the client draws mobs (its interpolation
  * delay, about), so casts are judged against what the player saw. */
@@ -130,6 +137,10 @@ export type Mob = {
   /** Stunned until (server ms), and its recent stuns. */
   stunUntil?: number;
   stunReturns?: StunReturns;
+  /** Held by a Cymbal Trap until (server ms), and its recent holds: it
+   * can't walk or lunge, but turns and attacks what it can reach. */
+  rootUntil?: number;
+  rootReturns?: StunReturns;
 };
 
 type PendingHit = {
@@ -139,6 +150,9 @@ type PendingHit = {
   damage: number;
   crit: boolean;
   skill?: string;
+  /** A Cymbal Trap's: how long it holds the mob it lands on (ms, before
+   * the returns). */
+  hold?: number;
 };
 
 /** What a pack says happened, beside the boss's kinds of event. */
@@ -225,6 +239,12 @@ export class MobPack {
   /** The Cymbrella domes standing (the host's): no mob enters one, and
    * no swing of theirs lands on anyone inside. */
   domes: () => readonly ShelterDome[] = () => [];
+  /** How much harder `uid`'s hit lands on `m` as it lands (the host's: a
+   * Tower climb's executioner boons). */
+  landBoost: (uid: string, m: Mob) => number = () => 1;
+  /** Mob `m`'s attack landed `damage` on `uid` at `at` (the host's: a
+   * Tower climb's thorns boons pay some of it back). */
+  struck: (uid: string, m: Mob, damage: number, at: number) => void = () => {};
   /** Shapes a stun took off the floor, to say so next update. */
   private cancelled: number[] = [];
 
@@ -522,6 +542,20 @@ export class MobPack {
     });
   }
 
+  /** Every standing mob's body as they stood at `seen`, for a Multispin's
+   * records (keyed by id). */
+  bodies(seen: number): SpinBody[] {
+    return this.alive.map((m) => {
+      const p = this.seenAt(m, seen);
+      return { key: String(m.id), x: p.x, z: p.z, r: MOB.radius * m.scale };
+    });
+  }
+
+  /** The mob `id`, if it's still standing. */
+  byId(id: number): Mob | undefined {
+    return this.mobs.find((m) => m.id === id && m.hp > 0);
+  }
+
   /**
    * Stuns `m` for `base`, halved for each stun of it lately (see
    * StunReturns); not while it already is. It stands where
@@ -530,7 +564,7 @@ export class MobPack {
    */
   stun(m: Mob, now: number, base: number): number {
     if (m.hp <= 0 || (m.stunUntil ?? 0) > now) return 0;
-    m.stunReturns ??= new StunReturns();
+    m.stunReturns ??= new StunReturns(RIMSHOT.drWindowMs);
     const ms = m.stunReturns.take(now, base);
     m.stunUntil = now + ms;
     for (const t of this.telegraphs)
@@ -542,8 +576,32 @@ export class MobPack {
     return ms;
   }
 
+  /**
+   * Holds `m` where it stands for `base` (a Cymbal Trap), halved for each
+   * hold of it lately (its own returns, apart from its stuns'); not while
+   * it already is. It may still turn and attack what's in its reach, but
+   * a lunge it was winding up comes off the floor: it can't go anywhere.
+   * Returns how long, or 0.
+   */
+  root(m: Mob, now: number, base: number): number {
+    if (m.hp <= 0 || (m.rootUntil ?? 0) > now) return 0;
+    m.rootReturns ??= new StunReturns(CYMBAL_TRAP.drWindowMs);
+    const ms = m.rootReturns.take(now, base);
+    m.rootUntil = now + ms;
+    if (m.dashTo) {
+      for (const t of this.telegraphs)
+        if (t.mob === m.id) this.cancelled.push(t.id);
+      this.telegraphs = this.telegraphs.filter((t) => t.mob !== m.id);
+      m.state = "idle";
+      m.waitSince = null;
+      m.dashTo = null;
+    }
+    return ms;
+  }
+
   /** A hit on `mob` from `uid`, landing at `at`: a cast's damage times
-   * `mult`, and the level gap. */
+   * `mult`, and the level gap. `hold`: a Cymbal Trap's, holding it that
+   * long (ms) as it lands. */
   queue(
     uid: string,
     mob: Mob,
@@ -551,6 +609,7 @@ export class MobPack {
     stats: HitStats,
     mult: number,
     skill?: string,
+    hold?: number,
   ): void {
     const { amount, crit } = hitDamage(stats, this.rand);
     const { dealt } = levelGapMods(towerMob(this.floor).level - this.level);
@@ -561,6 +620,19 @@ export class MobPack {
       damage: Math.max(1, Math.round(amount * mult * dealt)),
       crit,
       ...(skill ? { skill } : {}),
+      ...(hold ? { hold } : {}),
+    });
+  }
+
+  /** A blow of exactly `damage` on `mob` from `uid`, landing at `at` (no
+   * roll, no level gap: a Tower climb's thorns paying back what it took). */
+  strike(uid: string, mob: Mob, at: number, damage: number): void {
+    this.pending.push({
+      at,
+      uid,
+      mob: mob.id,
+      damage: Math.max(1, Math.round(damage)),
+      crit: false,
     });
   }
 
@@ -646,11 +718,15 @@ export class MobPack {
       const p = this.pending.shift() as PendingHit;
       const m = this.mobs.find((x) => x.id === p.mob);
       if (!m || m.hp <= 0) continue;
-      m.hp = Math.max(0, m.hp - p.damage);
+      const damage = Math.max(
+        1,
+        Math.round(p.damage * this.landBoost(p.uid, m)),
+      );
+      m.hp = Math.max(0, m.hp - damage);
       events.push({
         t: "hit",
         uid: p.uid,
-        damage: p.damage,
+        damage,
         crit: p.crit,
         hp: m.hp,
         mob: m.id,
@@ -658,7 +734,13 @@ export class MobPack {
       });
       // Hit while idle: it notices.
       if (m.state === "idle") m.state = "chase";
-      if (m.hp > 0) continue;
+      if (m.hp > 0) {
+        // A Cymbal Trap's cymbal: held where it stands, if it isn't yet.
+        const held = p.hold ? this.root(m, now, p.hold) : 0;
+        if (held > 0)
+          events.push({ t: "trap", uid: p.uid, mob: m.id, until: now + held });
+        continue;
+      }
       // Its swing dies with it: off the ground, landing on no one.
       for (const t of this.telegraphs)
         if (t.mob === m.id) events.push({ t: "resolve", id: t.id, hits: [] });
@@ -699,6 +781,9 @@ export class MobPack {
       if (m.wakeAt !== undefined && now < m.wakeAt) continue;
       // Stunned: it stands there.
       if ((m.stunUntil ?? 0) > now) continue;
+      // Held by a Cymbal Trap: it turns and attacks what it can reach from
+      // here, but takes no step.
+      const rooted = (m.rootUntil ?? 0) > now;
       let near: Target | null = null;
       let best = Number.POSITIVE_INFINITY;
       if (taunted) {
@@ -720,12 +805,12 @@ export class MobPack {
       m.state = "chase";
       m.yaw = Math.atan2(near.at.x - m.x, near.at.z - m.z);
       const safe = judge.safe(near.p.uid, now);
-      if (!safe && this.inRange(m, best)) {
+      if (!safe && this.inRange(m, best, rooted)) {
         m.waitSince ??= now;
         wanting.push({ m, near, d: best });
       } else {
         m.waitSince = null;
-        this.move(m, near.at, best, dt, false, enraged);
+        if (!rooted) this.move(m, near.at, best, dt, false, enraged);
       }
     }
     // The longest waiting go first, while there are tokens; the rest
@@ -740,16 +825,16 @@ export class MobPack {
         busy++;
         w.m.waitSince = null;
         this.attack(w.m, w.near, now, enraged, events);
-      } else {
+      } else if ((w.m.rootUntil ?? 0) <= now) {
         this.move(w.m, w.near.at, w.d, dt, true, enraged);
       }
     }
   }
 
-  /** Close enough to attack from. */
-  private inRange(m: Mob, d: number): boolean {
+  /** Close enough to attack from (held, a lunger only bites: no lunge). */
+  private inRange(m: Mob, d: number, rooted: boolean): boolean {
     if (m.rank === 2) return d <= WARDEN.slam.ahead + WARDEN.slam.radius;
-    if (m.kind === "lunger") return d <= MOB_KINDS.lunger.lunge;
+    if (m.kind === "lunger" && !rooted) return d <= MOB_KINDS.lunger.lunge;
     if (m.kind === "spitter") return d <= MOB_KINDS.spitter.range;
     return d <= MOB.reach * m.scale;
   }
@@ -919,7 +1004,9 @@ export class MobPack {
     }
 
     const d = Math.hypot(you.x - m.x, you.z - m.z);
-    if (m.kind === "lunger" && d > MOB.reach + 0.3) {
+    // Held: no dash, only the bite (inRange kept it to that).
+    const rooted = (m.rootUntil ?? 0) > now;
+    if (m.kind === "lunger" && !rooted && d > MOB.reach + 0.3) {
       // A lane of circles from it to just past where you're heading; it
       // dashes down it.
       const k = MOB_KINDS.lunger;
@@ -1133,8 +1220,15 @@ export class MobPack {
         }
         hits.push(hit);
         judge.hitAt(p.uid, tg.hitAt);
+        const by = this.mobs.find((x) => x.id === tg.mob);
+        if (by && hit.damage > 0) this.struck(p.uid, by, hit.damage, tg.hitAt);
       }
-      events.push({ t: "resolve", id: tg.id, hits });
+      events.push({
+        t: "resolve",
+        id: tg.id,
+        hits,
+        ...(tg.mob !== undefined ? { mob: tg.mob } : {}),
+      });
       const m = this.mobs.find((x) => x.id === tg.mob);
       if (m && m.hp > 0 && m.state === "windup") {
         m.state = "recover";

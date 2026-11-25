@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { CLASS_DEFS, CLASS_IDS, needsClassChoice } from "./classes.js";
+import {
+  CLASS_DEFS,
+  CLASS_IDS,
+  needsClassChoice,
+  skillLearnedAt,
+} from "./classes.js";
 import { getItem } from "./items.js";
 import {
   applyBuff,
@@ -9,6 +14,7 @@ import {
   MAX_DAMAGE_REDUCTION,
   mitigate,
   SHUFFLE_FALLOFF,
+  SKILL_DEFS,
   SKILL_IDS,
   SKILL_MAX_LEVEL,
   shuffleBounces,
@@ -147,6 +153,19 @@ describe("classes", () => {
     expect(needsClassChoice({ stage: 2, class: null })).toBe(true);
     expect(needsClassChoice({ stage: 3 })).toBe(true);
     expect(needsClassChoice({ stage: 3, class: "bard" })).toBe(false);
+  });
+
+  it("every skill a later skill needs is the same class's, learned no later", () => {
+    for (const id of CLASS_IDS) {
+      for (const skill of CLASS_DEFS[id].skills) {
+        const needs = SKILL_DEFS[skill].requires;
+        if (!needs) continue;
+        expect(CLASS_DEFS[id].skills).toContain(needs.skill);
+        expect(skillLearnedAt(needs.skill)).toBeLessThanOrEqual(
+          skillLearnedAt(skill),
+        );
+      }
+    }
   });
 });
 

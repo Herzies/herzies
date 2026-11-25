@@ -83,13 +83,13 @@ export function seenAt(
 /** A herzie a cast may meet: who, and where it stands. */
 export type PvpBody = { uid: string; x: number; z: number };
 
-/** How far along `dir` from (x, z) a wave (or a disc, which only goes so
- * far) first meets one of `bodies`, and whose. */
+/** How far along `dir` from (x, z) a wave (or a disc, or a cymbal, which
+ * only go so far: `range`) first meets one of `bodies`, and whose. */
 export function firstAlong(
   from: { x: number; z: number },
   dir: readonly [number, number, number],
   bodies: readonly PvpBody[],
-  disc: boolean,
+  range?: number,
 ): { uid: string; dist: number } | null {
   let best: { uid: string; dist: number } | null = null;
   for (const b of bodies) {
@@ -97,7 +97,7 @@ export function firstAlong(
       [from.x, WAVE_HAND_HEIGHT, from.z],
       dir,
       { ...HERZIE_BODY, x: b.x, z: b.z },
-      disc ? DISC_RANGE : undefined,
+      range,
     );
     if (dist !== null && (!best || dist < best.dist))
       best = { uid: b.uid, dist };
@@ -134,7 +134,12 @@ export function castMeets(
     return best && { ...best, flightMs: 0, mult };
   }
   const disc = kit.attack === "disc";
-  const hit = firstAlong(pos, aimDirection(yaw, pitch), bodies, disc);
+  const hit = firstAlong(
+    pos,
+    aimDirection(yaw, pitch),
+    bodies,
+    disc ? DISC_RANGE : undefined,
+  );
   if (!hit) return null;
   const flightMs = disc
     ? discLandsAfterMs(hit.dist)
