@@ -678,6 +678,8 @@ export type SellOutcome =
  *
  * Pure: never mutates `units`. A worn copy that is sold simply stops being
  * worn — it no longer exists — so ownership and equip state can't drift apart.
+ * A copy held by the other loadout (`heldBy`) can't be sold until it's taken
+ * off there: sell_units refuses it as not owned, so this does too.
  * `sellPriceOf` is the caller's price lookup (the items row on the server, the
  * bundled catalog on the client); no price means not sellable.
  */
@@ -690,7 +692,9 @@ export function applySell(
   const wanted = new Set(unitIds);
   if (wanted.size === 0) return { ok: false, reason: "not-enough" };
 
-  const chosen = units.filter((u) => wanted.has(u.id));
+  const chosen = units.filter(
+    (u) => wanted.has(u.id) && u.heldBy === undefined,
+  );
   if (chosen.length !== wanted.size) return { ok: false, reason: "not-enough" };
 
   let earned = 0;
