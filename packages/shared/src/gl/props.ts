@@ -17,9 +17,14 @@ import {
  * caller places and turns the group. `paint` gives the material for a
  * colour, so they're shaded as the herzie is; `matte`, with only a faint
  * highlight (a flat dark face turned to the light would otherwise go grey
- * all over).
+ * all over); `gloss`, polished (finish "gloss": a hard highlight and a
+ * bright rim).
  */
-export type Paint = (color: string, matte?: boolean) => THREE.Material;
+export type Paint = (
+  color: string,
+  matte?: boolean,
+  gloss?: boolean,
+) => THREE.Material;
 
 export function buildPropModel(prop: PropModel, paint: Paint): THREE.Group {
   if (prop.kind === "shoe") return shoe(prop, paint);
@@ -142,7 +147,11 @@ function shoe(prop: ShoeProp, paint: Paint): THREE.Group {
     color: string,
     matte = false,
   ) => {
-    const mesh = new THREE.Mesh(geometry, paint(color, matte));
+    // Polished (style.gloss): all but the matte sole.
+    const mesh = new THREE.Mesh(
+      geometry,
+      paint(color, matte, !matte && style.gloss),
+    );
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     group.add(mesh);
@@ -375,11 +384,11 @@ const MOUSTACHE_SIDES = 20;
 const MOUSTACHE_TIPS = 0.1;
 
 /**
- * A walrus moustache: one tube along a smooth curve through `prop.spine`,
- * as thick as `prop.radii` along it and drawn out to a point at either
- * tip. Flattened against the face, it's combed into strands (shallow
- * grooves running along it), parted in the middle (a dip in its top), and
- * its lower edge hangs in tufts.
+ * A moustache: one tube along a smooth curve through `prop.spine`, as
+ * thick as `prop.radii` along it and drawn out to a point at either tip.
+ * Flattened against the face, it's combed into strands (shallow grooves
+ * running along it), parted in the middle (a dip in its top), and, unless
+ * it's waxed, its lower edge hangs in tufts.
  */
 function moustache(prop: MoustacheProp, paint: Paint): THREE.Group {
   const group = new THREE.Group();
@@ -430,7 +439,7 @@ function moustache(prop: MoustacheProp, paint: Paint): THREE.Group {
       // Strands: shallow grooves running its length.
       const rho =
         radius * (1 + 0.05 * Math.cos(a * 10)) * (s < 0 ? parting : 1);
-      const hang = s > 0 ? radius * 0.45 * s ** 3 * tuft : 0;
+      const hang = s > 0 && !prop.waxed ? radius * 0.45 * s ** 3 * tuft : 0;
       ring.push(
         spine
           .clone()

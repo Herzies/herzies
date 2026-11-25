@@ -16,6 +16,7 @@ import {
   FF_PINK_RAMP,
   FYLLINGS_BLACK_RAMP,
   GOLD_RAMP,
+  LATTE_RAMP,
   LIGHT,
   MADAS_RAMP,
   MEDEA_RAMP,
@@ -278,9 +279,10 @@ export interface Sphere {
   held?: HeldSocket;
   /** Polished metal (the cymbal): it mirrors the sky, and its lathe grooves
    * catch the sun in a bright bar across it. Pearl (the FF Pearls): a hard
-   * highlight and a sheen that shifts colour as it turns. See
-   * herzieMaterial. */
-  finish?: "metal" | "pearl" | "marble" | "lens" | "clear-lens";
+   * highlight and a sheen that shifts colour as it turns. Gloss (the Shiny
+   * Loafers' leather, the Dollar Chain's gold): one hard, bright highlight
+   * and a bright rim, as a polished shoe. See herzieMaterial. */
+  finish?: "metal" | "pearl" | "marble" | "lens" | "clear-lens" | "gloss";
   /** Where the Evasive Pair's sparkles come from: a wing tip (the trail)
    * or a foot (footfalls). See gl/shoeSparkles.ts. */
   sparkle?: "wing" | "foot";
@@ -303,8 +305,9 @@ export type PropModel =
   | MoustacheProp
   | BeanieProp;
 
-/** The Sailor's Starter Pack's moustache, drawn as a model in 3D
- * (gl/props.ts): one tapering tube along `spine`, laid on the face. */
+/** A moustache (the Sailor's Starter Pack's walrus, the Hipster
+ * Moustache's handlebar), drawn as a model in 3D (gl/props.ts): one
+ * tapering tube along `spine`, laid on the face. */
 export interface MoustacheProp {
   kind: "moustache";
   /** Its parting, in creature space (y down). */
@@ -317,6 +320,8 @@ export interface MoustacheProp {
   normals: V3[];
   /** Its hair, and its tips. */
   colors: { hair: string; tips: string };
+  /** Waxed (a handlebar): smooth, no tufts hanging off its lower edge. */
+  waxed?: true;
 }
 
 /** A knitted watch cap, drawn as a model in 3D (gl/props.ts): a ribbed
@@ -1372,6 +1377,72 @@ function buildMarblePearlsSpheres(spheres: Sphere[]): Sphere[] {
   }).beads.map((bead) => ({ ...bead, finish: "marble" as const }));
 }
 
+/** Dollar Chain (the Streetsmart set): a fine gold rope chain, slung low, and a
+ * big glossy gold dollar sign hanging off it, flat to the chest. The sign is
+ * an S of small spheres with a bar straight down through it; every piece
+ * swings with the chain on a spin, the sign furthest. */
+function buildDollarChainSpheres(spheres: Sphere[]): Sphere[] {
+  const neck = getNeck(spheres);
+  if (!neck) return [];
+  const size = neck.size;
+  const link = size * 0.075;
+  const { beads, front } = buildNecklaceBeads(neck, {
+    count: 28,
+    beadRadius: (i) => (i % 2 === 0 ? link : link * 0.78),
+    color: (i) => (i % 2 === 0 ? GOLD_RAMP[2] : GOLD_RAMP[3]),
+    sag: size * 0.36,
+    heft: 1,
+  });
+  // The sign: drawn on a flat 2D grid (u right, v up), `a` the radius of
+  // each of the S's two loops, then stood on the chest below the lowest link.
+  const a = size * 0.11;
+  const stroke = size * 0.042;
+  const glyph: [number, number][] = [];
+  const arc = (cv: number, from: number, to: number, steps: number) => {
+    for (let k = 0; k <= steps; k++) {
+      const ang = from + ((to - from) * k) / steps;
+      glyph.push([Math.cos(ang) * a, cv + Math.sin(ang) * a]);
+    }
+  };
+  // The top loop, from its upper right over the top and round to the
+  // middle; the bottom loop from the middle round the right and under to
+  // its lower left.
+  arc(a, (25 * Math.PI) / 180, (270 * Math.PI) / 180, 14);
+  arc(-a, (90 * Math.PI) / 180, (-155 * Math.PI) / 180, 14);
+  // The bar, straight down through it and out past each end.
+  const bar: [number, number][] = [];
+  for (let k = 0; k <= 9; k++) bar.push([0, a * 2.45 - (a * 4.9 * k) / 9]);
+  const top = front[1] + link + stroke;
+  const cy = top + a * 2.45;
+  const py = cy;
+  const pz = neck.center[2] - (neckSurfaceRadius(neck, py) + stroke * 1.2);
+  const place = ([u, v]: [number, number], r: number): Sphere => {
+    const y = cy - v;
+    return {
+      center: [front[0] + u, y, pz],
+      radius: r,
+      zone: "wearable",
+      part: "body",
+      color: GOLD_RAMP[1],
+      finish: "gloss",
+      dangle: {
+        weight: 1,
+        hang: y - neck.center[1],
+        pivot: [neck.center[0], neck.center[2]],
+      },
+    };
+  };
+  for (const p of glyph) beads.push(place(p, stroke));
+  // The bar a shade deeper, and standing a hair proud of the S.
+  for (const p of bar) {
+    const s = place(p, stroke * 0.8);
+    s.center = [s.center[0], s.center[1], s.center[2] - stroke * 0.5];
+    s.color = GOLD_RAMP[2];
+    beads.push(s);
+  }
+  return beads;
+}
+
 function buildBowtieSpheres(spheres: Sphere[]): Sphere[] {
   const neck = getNeck(spheres);
   if (!neck) return [];
@@ -1699,6 +1770,7 @@ export function hasDangleEquipped(equipped?: Equipped): boolean {
     equipped?.body === "troubadour-ruff" ||
     equipped?.body === "spindle-chain" ||
     equipped?.body === "drumhide-gorget" ||
+    equipped?.body === "dollar-chain" ||
     equipped?.head === "witch-hat"
   );
 }
@@ -1707,6 +1779,7 @@ const BODY_ITEM_BUILDERS: Record<string, (spheres: Sphere[]) => Sphere[]> = {
   "gold-chain": buildGoldChainSpheres,
   "pearl-necklace": buildPearlNecklaceSpheres,
   "ff-pearls-marble": buildMarblePearlsSpheres,
+  "dollar-chain": buildDollarChainSpheres,
   bowtie: buildBowtieSpheres,
   "fyllings-necktie": buildNecktieSpheres,
   "troubadour-ruff": buildRuffSpheres,
@@ -2267,6 +2340,67 @@ function buildFedoraSpheres(spheres: Sphere[]): Sphere[] {
   return result;
 }
 
+/** Hipster Moustache (the Streetsmart set): a waxed brown handlebar under
+ * the eyes, fullest at the middle, thinning out to either side and curling
+ * up at the tips. Laid on the head's front, measured off its eyes as the
+ * Sailor's walrus is. The 3D view draws it as one model (gl/props.ts:
+ * waxed, so smooth along its lower edge); the ray caster gets capsules
+ * along it. */
+function buildHipsterMoustacheSpheres(spheres: Sphere[]): Sphere[] {
+  const head = largestPart(spheres, "head");
+  const eyes = spheres.filter((s) => s.part === "eye");
+  if (!head || eyes.length < 2) return [];
+  const [hx, hy, hz] = head.center;
+  const hr = head.radius;
+  const er = Math.max(...eyes.map((e) => e.radius));
+  const eyeBottom = Math.max(...eyes.map((e) => e.center[1] + e.radius));
+  const xs = eyes.map((e) => e.center[0]);
+  // Half its span: a little wider than the eyes, but kept on the face.
+  const span = Math.min(
+    (Math.max(...xs) - Math.min(...xs)) * 0.62 + er * 0.5,
+    hr * 0.62,
+  );
+  // Under the eyes, with room to breathe.
+  const y0 = eyeBottom + er * 0.85;
+  // `u` −1 (one tip) through 0 (the middle) to 1: out from the middle,
+  // sagging a touch, then sweeping up and in at either end.
+  const SEGMENTS = 20;
+  const along: { at: V3; r: number }[] = [];
+  for (let i = 0; i <= SEGMENTS; i++) {
+    const u = (i / SEGMENTS) * 2 - 1;
+    const t = Math.abs(u);
+    const curl = Math.max(0, (t - 0.6) / 0.4);
+    const x = span * (u - Math.sign(u) * 0.12 * curl ** 3);
+    const y =
+      y0 + er * 0.25 * Math.sin(Math.PI * t * 0.8) - er * 1.05 * curl ** 2;
+    const r = er * (0.6 - 0.44 * t ** 0.7);
+    along.push({ at: [hx + x, y, hz + eyeZ(hr, x, y - hy, r * 1.2)], r });
+  }
+  const BROWN = "#2E1C12";
+  const TIPS = "#3D2618";
+  const middle = along[SEGMENTS / 2].at;
+  const prop: MoustacheProp = {
+    kind: "moustache",
+    center: middle,
+    yaw: 0,
+    spine: along.map((p) => sub(p.at, middle)),
+    radii: along.map((p) => p.r),
+    normals: along.map((p) => norm(sub(p.at, head.center))),
+    colors: { hair: BROWN, tips: TIPS },
+    waxed: true,
+  };
+  const result: Sphere[] = [];
+  for (let i = 0; i < SEGMENTS; i++) {
+    const a = along[i];
+    const b = along[i + 1];
+    const tip = i < 3 || i >= SEGMENTS - 3;
+    const s = capsuleBetween(a.at, b.at, (a.r + b.r) / 2, tip ? TIPS : BROWN);
+    s.prop = prop;
+    result.push(s);
+  }
+  return result;
+}
+
 /** Plutus' Crown: a gold band sat on top of the head round a domed red
  * velvet cap, a ring of points with a pearl on each, and gems set round the
  * band, a big "diamond" at the front. A full ring like the guard's helm, so it
@@ -2405,12 +2539,12 @@ function headReachAt(spheres: Sphere[], x: number, z: number, y: number) {
   return reach;
 }
 
-/** The sailor's beanie (the skipper's; not out among the items yet): a red
- * knitted watch cap worn high, docker style, its ribbed cuff turned up
- * above the eyes and its crown rounded snug over the top of the head. The
- * 3D view knits it (gl/props.ts: ribs down the cuff and crown, a fold at
- * the cuff's top); the ray caster gets a band and a domed crown. */
-function buildSailorBeanieSpheres(spheres: Sphere[]): Sphere[] {
+/** The Fisherman Beanie (the Streetsmart set; the skipper wears one too):
+ * a red knitted watch cap worn high, docker style, its ribbed cuff turned
+ * up above the eyes and its crown rounded snug over the top of the head.
+ * The 3D view knits it (gl/props.ts: ribs down the cuff and crown, a fold
+ * at the cuff's top); the ray caster gets a band and a domed crown. */
+function buildFishermanBeanieSpheres(spheres: Sphere[]): Sphere[] {
   const head = getHeadBounds(spheres);
   if (!head) return [];
   const [hx, hy, hz] = head.center;
@@ -4250,6 +4384,9 @@ export interface ShoeColors {
   /** A loafer: one strap across the instep (in the `laces` colour) instead
    * of laces. */
   strap?: boolean;
+  /** Polished: one hard highlight and a bright rim (finish "gloss") on
+   * all but the sole. */
+  gloss?: boolean;
 }
 
 /** How a pair of shoes looks, and whether it has wings. */
@@ -4335,6 +4472,21 @@ const DRUMHIDE_BOOTS_STYLE: ShoeStyle = {
   wings: false,
 };
 
+/** Shiny Loafers (the Streetsmart set): polished oxblood leather, a penny
+ * strap across the instep and a dark sole. */
+const SHINY_LOAFERS_STYLE: ShoeStyle = {
+  upper: "#6A2A20",
+  toe: "#6A2A20",
+  sole: "#2A1712",
+  stripe: "#2A1712",
+  laces: "#561F17",
+  collar: "#561F17",
+  tab: "#561F17",
+  strap: true,
+  gloss: true,
+  wings: false,
+};
+
 const SHOE_STYLES: Record<string, ShoeStyle> = {
   "fyllings-loafers": FYLLINGS_LOAFERS_STYLE,
   "eivinds-evasive-pair": EVASIVE_PAIR_STYLE,
@@ -4342,6 +4494,7 @@ const SHOE_STYLES: Record<string, ShoeStyle> = {
   "troubadour-slippers": TROUBADOUR_SLIPPERS_STYLE,
   "groove-kicks": GROOVE_KICKS_STYLE,
   "drumhide-boots": DRUMHIDE_BOOTS_STYLE,
+  "shiny-loafers": SHINY_LOAFERS_STYLE,
 };
 
 /** A shoe on each foot, in `style`. Only herzies with legs (stage 3) wear
@@ -4503,6 +4656,9 @@ function appendWearableSpheres(
   if (equipped.face === "sailors-starter-pack") {
     spheres.push(...buildSailorsPackSpheres(spheres));
   }
+  if (equipped.face === "hipster-moustache") {
+    spheres.push(...buildHipsterMoustacheSpheres(spheres));
+  }
   if (equipped.head === "headphones") {
     spheres.push(...buildHeadphoneSpheres(spheres));
   }
@@ -4527,8 +4683,8 @@ function appendWearableSpheres(
   if (equipped.head === "guard-helm") {
     spheres.push(...buildGuardHelmSpheres(spheres));
   }
-  if (equipped.head === "sailors-beanie") {
-    spheres.push(...buildSailorBeanieSpheres(spheres));
+  if (equipped.head === "fisherman-beanie") {
+    spheres.push(...buildFishermanBeanieSpheres(spheres));
   }
   if (equipped.head === "troubadour-plume") {
     spheres.push(...buildPlumedBeretSpheres(spheres));
@@ -4599,6 +4755,8 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
   "ff-pink": [FF_PINK_RAMP[2]],
   // Black, one band (not the ramp: no stripes).
   "fyllings-black": [FYLLINGS_BLACK_RAMP[3]],
+  // Milky coffee, one band (no stripes); the card keeps the foam.
+  latte: [LATTE_RAMP[2]],
   // Not an item: Good ol' George's gold, applied only by the desktop's
   // Events emblem (see GOLD_SCHEME_ID). No player can equip it.
   [GOLD_SCHEME_ID]: GOLD_RAMP,
@@ -6603,6 +6761,9 @@ export interface PrimitiveShading {
   /** A lens of clear glass (the monocle): the eye behind shows plainly.
    * See herzieMaterial's CLEAR. */
   clear?: true;
+  /** Polished (patent leather, glossy gold): see herzieMaterial's GLOSS.
+   * Absent otherwise. */
+  gloss?: true;
 }
 
 /** The shades shadeWearableColor gives `hex`, dim to bright. */
@@ -6682,6 +6843,9 @@ export function primitiveShading(
   }
   if (sp.color && sp.finish === "pearl") {
     return { ...shading(0.3, 0.6, wearableShades(sp.color)), pearl: true };
+  }
+  if (sp.color && sp.finish === "gloss") {
+    return { ...shading(0.3, 0.6, wearableShades(sp.color)), gloss: true };
   }
   if (sp.color && sp.finish === "marble") {
     return {
