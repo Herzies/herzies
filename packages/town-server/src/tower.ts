@@ -9,9 +9,10 @@
  * herzie's casts, and "cleared" once the last mob falls. No breather
  * after a hit here: every attack that lands, lands.
  * Linger past a floor's par time and its mobs enrage.
- * A Warden's floor, cleared, leaves a chest (TOWER_CHEST) that opens as
- * the herzie walks up to it ("chest"); what's in it is `town-vitals`' to
- * roll, like a kill's drop.
+ * A Warden's floor, cleared, leaves a chest (TOWER_CHEST) that opens when
+ * the herzie presses E by it (openChestAt: "chest"); what's in it is
+ * `town-vitals`' to roll, like a kill's drop. A climb's boons (picked by
+ * FightRuntime) quicken, strengthen and toughen its herzie here.
  */
 
 import type { AttackStyle } from "@herzies/shared/classes";
@@ -32,11 +33,25 @@ import {
   BACKSPIN_SPREAD,
   type Buff,
   buffMultiplier,
+  CYMBAL_TRAP,
+  cymbalLandsAfterMs,
+  MULTISPIN,
   RIMSHOT,
+  SILENCIO,
+  SKILL_DEFS,
   shuffleOn,
+  skillValue,
 } from "@herzies/shared/skills";
-import { isChestFloor, TOWER_CHEST, towerMob } from "@herzies/shared/tower";
+import {
+  isChestFloor,
+  TOWER_CHEST,
+  TOWER_SHOCKWAVE_RADIUS,
+  type TowerBoonId,
+  towerBoonDrawback,
+  towerMob,
+} from "@herzies/shared/tower";
 import type { TowerFloor, TowerMob } from "@herzies/shared/town-net";
+import { BLEED_SKILLS, type BleedSkill, Bleeds, bleedTag } from "./bleed";
 import {
   type BossEvent,
   type BossPlayer,
@@ -50,8 +65,14 @@ import {
 import { CastBudget } from "./budgets";
 import { DiscHands } from "./hands";
 import { type MobJudge, MobPack, SEEN_LAG_MS, type TowerArena } from "./mobs";
+import type { SpinBody } from "./spin";
+import { LOOT_REACH_SLACK } from "./wilds-loot";
 
 export { predict, SEEN_LAG_MS, type TowerArena } from "./mobs";
+
+/** How long a Shockwave's burst takes to reach the mobs round its fallen
+ * one (ms): a beat, so a chain of them reads as a chain. */
+const SHOCKWAVE_DELAY_MS = 120;
 
 /** The Tower's extra events, beside the boss's. */
 export type TowerEvent =
@@ -75,6 +96,16 @@ export class TowerEngine {
   private buffs = new Map<string, Buff[]>();
   /** Cymbrella domes standing (or about to). */
   private domes: ShelterDome[] = [];
+  /** Bleeds by mob id: Forbidden Frequency's discs and bleeds (a minute
+   * each), and Silencio's (one stack each). */
+  private bleeds: Record<BleedSkill, Bleeds> = {
+    "forbidden-frequency": new Bleeds(
+      SKILL_DEFS["forbidden-frequency"].durationMs ?? 0,
+    ),
+    silencio: new Bleeds(SKILL_DEFS.silencio.durationMs ?? 0, 1),
+  };
+  /** Each herzie's climb's boons, added up (towerBoonTotals). */
+  private boons = new Map<string, Record<TowerBoonId, number>>();
   /** For a Rimshot's stun (apart from the pack's own rolls). */
   private readonly rand: () => number;
   private readonly judge: MobJudge = {
@@ -105,6 +136,36 @@ export class TowerEngine {
       arena,
     );
     this.pack.domes = () => this.domes;
+    // A climb's boons on its hits as they land: executioner harder on a
+    // mob under a third of its health, opener on one still untouched,
+    // power chord on a skill's (its bleeds too). Glass Cannon's cost on
+    // the mobs' hits. Its thorns: a mob that hits the herzie takes a share
+    // back. Its shockwave: a mob it takes down bursts on those round it.
+    this.pack.landBoost = (uid, m, skill) => {
+      const b = this.boons.get(uid);
+      if (!b) return 1;
+      return (
+        (m.hp < m.maxHp / 3 ? 1 + b.executioner : 1) *
+        (m.hp >= m.maxHp ? 1 + b.opener : 1) *
+        (skill ? 1 + b["power-chord"] : 1)
+      );
+    };
+    this.pack.takenMult = (uid) =>
+      1 +
+      towerBoonDrawback(
+        "glass-cannon",
+        this.boons.get(uid)?.["glass-cannon"] ?? 0,
+      );
+    this.pack.struck = (uid, m, damage, at) => {
+      const thorns = this.boons.get(uid)?.thorns ?? 0;
+      if (thorns > 0 && m.hp > 0) this.pack.strike(uid, m, at, damage * thorns);
+    };
+    this.pack.fell = (uid, m, now) => {
+      const share = this.boons.get(uid)?.shockwave ?? 0;
+      if (share <= 0) return;
+      for (const o of this.pack.within(m, TOWER_SHOCKWAVE_RADIUS, now))
+        this.pack.strike(uid, o, now + SHOCKWAVE_DELAY_MS, m.maxHp * share);
+    };
     this.rand = rng(opts.seed + 7_919);
     this.pack.spawnFloor(opts.now);
   }
@@ -158,13 +219,36 @@ export class TowerEngine {
     };
   }
 
-  /** Opens the floor's chest if one stands shut (walked up to, or the
-   * herzie going on without it): what it was, or null. */
+  /** Opens the floor's chest if one stands shut (the herzie going on
+   * without it): what it was, or null. */
   openChest(): Extract<TowerEvent, { t: "chest" }> | null {
     const at = this.chest;
     if (!at) return null;
     this.chest = null;
     return { t: "chest", floor: this.floor, x: at.x, z: at.z };
+  }
+
+  /** E pressed at `at`: the chest opens if it's landed (settleMs) and
+   * within TOWER_CHEST.reach, give or take the room's slack. */
+  openChestAt(
+    at: { x: number; z: number },
+    now: number,
+  ): Extract<TowerEvent, { t: "chest" }> | null {
+    const chest = this.chest;
+    if (!chest || now < this.chestFrom) return null;
+    if (
+      Math.hypot(at.x - chest.x, at.z - chest.z) >
+      TOWER_CHEST.reach + LOOT_REACH_SLACK
+    )
+      return null;
+    return this.openChest();
+  }
+
+  /** `uid`'s climb's boons, added up (towerBoonTotals): its attacks
+   * quicker and harder here, executioner and thorns (its Def, crit and
+   * cooldowns are FightRuntime's). */
+  setBoons(uid: string, totals: Record<TowerBoonId, number>): void {
+    this.boons.set(uid, totals);
   }
 
   /** Whether the floor's mobs have enraged. */
@@ -233,6 +317,7 @@ export class TowerEngine {
     this.pack.floor++;
     this.cleared = false;
     this.chest = null;
+    for (const skill of BLEED_SKILLS) this.bleeds[skill].clear();
     this.pack.spawnFloor(now);
     return true;
   }
@@ -283,7 +368,7 @@ export class TowerEngine {
         now,
         target?.dist ?? null,
         // As quick as the app flies it: Haste and Timing both.
-        quickness(this.buffs.get(uid) ?? [], now, stats.timing),
+        this.quickness(uid, now, stats.timing),
       )
     )
       return "miss";
@@ -344,6 +429,142 @@ export class TowerEngine {
     return { hit, stunned };
   }
 
+  /** Cymbal Trap, like {@link BossEngine.cymbalTrap}: the first mob along
+   * the aim within CYMBAL_TRAP.range takes the blow when it gets there,
+   * and is held where it stands for `holdMs` (MobPack.root). */
+  cymbalTrap(
+    uid: string,
+    from: { x: number; z: number },
+    yaw: number,
+    pitch: number,
+    stats: HitStats,
+    holdMs: number,
+    now: number,
+  ): boolean {
+    const target = this.pack.along(
+      from,
+      aimDirection(yaw, pitch),
+      now - SEEN_LAG_MS,
+      CYMBAL_TRAP.range,
+    );
+    if (!target) return false;
+    this.pack.queue(
+      uid,
+      target.mob,
+      now + cymbalLandsAfterMs(target.dist),
+      stats,
+      CYMBAL_TRAP.damage * STRIKE_DAMAGE * this.damageMult(uid, now),
+      "cymbal-trap",
+      holdMs,
+    );
+    return true;
+  }
+
+  /** What a Multispin's records may touch now: every mob's body, as
+   * {@link BossEngine.spinBodies}. */
+  spinBodies(now: number): SpinBody[] {
+    return this.pack.bodies(now - SEEN_LAG_MS);
+  }
+
+  /** A Multispin's record touched mob `key`: MULTISPIN.damage of a wave,
+   * now. */
+  spinHit(uid: string, key: string, stats: HitStats, now: number): void {
+    const mob = this.pack.byId(Number(key));
+    if (!mob) return;
+    this.pack.queue(
+      uid,
+      mob,
+      now,
+      stats,
+      MULTISPIN.damage * this.damageMult(uid, now),
+      "multispin",
+    );
+  }
+
+  /** Forbidden Frequency, like {@link BossEngine.forbiddenFrequency}: a
+   * disc to the first mob along the aim; a bleed takes hold where it
+   * lands. */
+  forbiddenFrequency(
+    uid: string,
+    from: { x: number; z: number },
+    yaw: number,
+    pitch: number,
+    stats: HitStats,
+    level: number,
+    now: number,
+  ): boolean {
+    const target = this.pack.along(
+      from,
+      aimDirection(yaw, pitch),
+      now - SEEN_LAG_MS,
+      DISC_RANGE,
+    );
+    if (!target) return false;
+    this.bleeds["forbidden-frequency"].throw({
+      at: now + discLandsAfterMs(target.dist),
+      by: uid,
+      key: String(target.mob.id),
+      level,
+      stats,
+    });
+    return true;
+  }
+
+  /** Silencio bursts at `at`, like {@link BossEngine.silencio}: every mob
+   * whose body is within SILENCIO.radius bleeds, and is shoved out before
+   * its wave. How many it caught. */
+  silencio(
+    uid: string,
+    at: { x: number; z: number },
+    stats: HitStats,
+    level: number,
+    now: number,
+  ): number {
+    const caught = this.pack.within(at, SILENCIO.radius, now - SEEN_LAG_MS);
+    for (const m of caught)
+      this.bleeds.silencio.throw({
+        at: now,
+        by: uid,
+        key: String(m.id),
+        level,
+        stats,
+      });
+    this.pack.wave(at, now);
+    return caught.length;
+  }
+
+  /** Bleeds that arrived take hold on mobs still standing, and bleeds
+   * tick (see BossEngine's). */
+  private stepBleeds(now: number, events: TowerEvent[]) {
+    for (const skill of BLEED_SKILLS) {
+      const bleeds = this.bleeds[skill];
+      for (const d of bleeds.landed(now)) {
+        if (!this.pack.byId(Number(d.key))) continue;
+        const b = bleeds.stack(d, now);
+        events.push({
+          t: "bleed",
+          uid: b.by,
+          mob: Number(d.key),
+          ...bleedTag(skill),
+          stacks: b.stacks,
+          until: b.until,
+        });
+      }
+      for (const { key, bleed: b } of bleeds.ticks(now)) {
+        const mob = this.pack.byId(Number(key));
+        if (!mob) continue;
+        this.pack.queue(
+          b.by,
+          mob,
+          now,
+          { ...b.stats, critChance: 0 },
+          skillValue(skill, b.level) * this.damageMult(b.by, now),
+          skill,
+        );
+      }
+    }
+  }
+
   /** Backspin: three discs fanned about the aim, each at `mult` of a
    * wave. */
   backspin(
@@ -375,26 +596,55 @@ export class TowerEngine {
     return landed;
   }
 
-  /** How much harder `uid` hits right now (an in-tune Record Slinger), as
-   * in the boss's cave: in tune means the same everywhere. */
+  /** How much harder `uid` hits right now: an in-tune Record Slinger, a
+   * Rage (as in the boss's cave), and its climb's damage and Glass Cannon
+   * boons. */
   private damageMult(uid: string, now: number): number {
-    return buffMultiplier(this.buffs.get(uid) ?? [], "damage", now);
+    const b = this.boons.get(uid);
+    return (
+      buffMultiplier(this.buffs.get(uid) ?? [], "damage", now) *
+      (1 + (b?.damage ?? 0)) *
+      (1 + (b?.["glass-cannon"] ?? 0))
+    );
+  }
+
+  /** How quick `uid`'s attacks are now (quickness), its climb's speed
+   * boons on top. */
+  private quickness(uid: string, now: number, timing = 0): number {
+    return (
+      quickness(this.buffs.get(uid) ?? [], now, timing) *
+      (1 + (this.boons.get(uid)?.speed ?? 0))
+    );
   }
 
   /** A cast's token (a heal bolt spends one too); see BossEngine's. */
   spendCast(uid: string, now: number, timing = 0): boolean {
-    return this.casts.spend(
-      uid,
-      now,
-      quickness(this.buffs.get(uid) ?? [], now, timing),
-    );
+    return this.casts.spend(uid, now, this.quickness(uid, now, timing));
   }
 
   // --- Time passing.
 
   update(now: number, players: readonly BossPlayer[]): TowerEvent[] {
     this.domes = this.domes.filter((d) => d.until > now);
-    const events: TowerEvent[] = this.pack.update(now, players, this.judge);
+    const events: TowerEvent[] = [];
+    // Bleeds tick first, so their hits land this update.
+    this.stepBleeds(now, events);
+    for (const ev of this.pack.update(now, players, this.judge)) {
+      events.push(ev);
+      if (ev.t !== "mobDown") continue;
+      for (const skill of BLEED_SKILLS) {
+        const b = this.bleeds[skill].end(String(ev.mob));
+        if (b)
+          events.push({
+            t: "bleed",
+            uid: b.by,
+            mob: ev.mob,
+            ...bleedTag(skill),
+            stacks: 0,
+            until: now,
+          });
+      }
+    }
     if (!this.cleared && this.pack.size > 0 && !this.pack.alive.length) {
       this.cleared = true;
       this.pack.clearPending();
@@ -404,21 +654,6 @@ export class TowerEngine {
       }
       events.push({ t: "cleared", floor: this.floor });
     }
-    // The chest opens to the first herzie up on their feet who comes
-    // close (in the Tower, the only one), once it's down.
-    if (this.chest && now >= this.chestFrom)
-      for (const p of players) {
-        const at = p.alive ? p.posAt(now) : null;
-        if (
-          at &&
-          Math.hypot(at.x - this.chest.x, at.z - this.chest.z) <=
-            TOWER_CHEST.reach
-        ) {
-          const opened = this.openChest();
-          if (opened) events.push(opened);
-          break;
-        }
-      }
     return events;
   }
 }

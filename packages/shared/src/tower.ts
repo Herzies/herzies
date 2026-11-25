@@ -281,8 +281,9 @@ export function towerRareFactor(floor: number): number {
 
 /**
  * Every 10th floor (the Warden's) leaves a chest on the compass in the
- * middle of the hall once its mobs are down. Walking up to it opens it —
- * the Town server judges that, as it judges every hit — and what's in it is
+ * middle of the hall once its mobs are down. It stands shut until the
+ * herzie, within `reach`, presses E (a `chestOpen`) — the Town server
+ * judges that, as it judges every hit — and what's in it is
  * rolled by `town-vitals` like a kill's drop and tossed out like one:
  * towerChestRolls items, without Nostalgic Tokens (as a boss's loot),
  * leaning rarer than a kill's by `lean` on top of the floor's
@@ -294,11 +295,15 @@ export const TOWER_CHEST = {
   every: WARDEN.every,
   /** Where it stands: the compass at the hall's middle. */
   at: { x: 0, z: 0 },
-  /** Opens when you come this close (centre to centre): onto the star. */
-  reach: 2,
-  /** It lands first: it opens no sooner than this after the floor clears,
-   * so it's seen before it opens even with you standing on the star. */
+  /** E opens it from this close (centre to centre), plus the server's
+   * usual slack for interpolation. */
+  reach: 2.5,
+  /** It lands first: it can't be opened sooner than this after the floor
+   * clears, so it's seen landing. */
   settleMs: 1_000,
+  /** How long the app plays its lid swinging open (and the loot bursting
+   * out) before the chest fades away. */
+  openMs: 900,
   /** On top of the floor's lean: a little rarer than a boss's random loot
    * leans (BOSS_LOOT_RARITY_BOOST in items.ts). */
   lean: {
@@ -313,6 +318,357 @@ export const TOWER_CHEST = {
 /** Whether clearing `floor` leaves a chest. */
 export const isChestFloor = (floor: number) =>
   Number.isInteger(floor) && floor >= 1 && floor % TOWER_CHEST.every === 0;
+
+/**
+ * Tower boons (players see them as "buffs"; boon here, so as not to be
+ * mistaken for a skill's Buff in skills.ts): floors cleared in a climb earn
+ * picks, often at first and less often the higher it goes
+ * (TOWER_BOON_TIERS), for the rest of the month's Tower (its event), in the
+ * Tower only. A pick offers three different boons at random, each at a
+ * rarity rolled on its own that leans rarer the higher the floor
+ * (towerBoonOffers); the herzie takes one, or skips the lot. Picks stack:
+ * two rare damage boons are +24%. The Tower Guard can start a climb over
+ * (tower_reset): back to floor 1 with no boons, the month's best floor
+ * (the leaderboard) kept.
+ *
+ * The offers are the Town server's to roll and the app's to show; seeded
+ * by the herzie, the Tower, the climb and the pick, so a reconnect brings
+ * back the same three. Mirrored in SQL: tower_boon_picks, tower_grant's cap
+ * on picks (00166_tower_buffs_tiered.sql).
+ */
+export const TOWER_BOON_IDS = [
+  "speed",
+  "damage",
+  "def",
+  "crit",
+  "ferocity",
+  "tempo",
+  "thorns",
+  "executioner",
+  "second-wind",
+  "crossover",
+  "shockwave",
+  "glass-cannon",
+  "power-chord",
+  "vigor",
+  "opener",
+] as const;
+export type TowerBoonId = (typeof TOWER_BOON_IDS)[number];
+
+/** A boon a climb holds (or is offered): which, and how rare. */
+export type TowerBoon = { id: TowerBoonId; rarity: Rarity };
+
+/** The rarities a boon comes in, plainest first (items' rarities). */
+export const TOWER_BOON_RARITIES = [
+  "common",
+  "uncommon",
+  "rare",
+  "legendary",
+  "mythic",
+] as const satisfies readonly Rarity[];
+
+/** When a climb earns its picks: one every `every` floors cleared, up to
+ * floor `upTo`, then the next tier's. A pick on each of the first five
+ * floors, every 2nd to 15, every 3rd to 30, every 5th after: a climb
+ * finds its build early, and the deep floors are earned by it. Each tier
+ * ends on a floor that earns a pick. */
+export const TOWER_BOON_TIERS = [
+  { upTo: 5, every: 1 },
+  { upTo: 15, every: 2 },
+  { upTo: 30, every: 3 },
+  { upTo: Number.POSITIVE_INFINITY, every: 5 },
+] as const;
+
+export const TOWER_BOONS = {
+  /** How many boons a pick offers. */
+  offers: 3,
+  /** Each rarity's weight on the first pick's floor; `lean` raises the
+   * rarer ones from there (see towerBoonWeights). */
+  weights: { common: 60, uncommon: 25, rare: 10, legendary: 4, mythic: 1 },
+  /** Each floor up adds this much to a factor that multiplies a rarity's
+   * weight once per step above common: by floor 30 a pick is more likely
+   * rare or better than common, by floor 60 legendary leads. */
+  lean: 0.04,
+} as const satisfies { weights: Record<Rarity, number> } & Record<
+  string,
+  unknown
+>;
+
+/** Each boon: its name, what it does (`{v}` its value; `{d}` its
+ * `drawback`'s, a trade-off's cost), and its value at each rarity, plainest
+ * first. Shares unless said: 0.1 = 10%. */
+export const TOWER_BOON_DEFS: Record<
+  TowerBoonId,
+  {
+    name: string;
+    describe: string;
+    values: readonly [number, number, number, number, number];
+    /** A trade-off's cost, as a share of its value: Glass Cannon's damage
+     * taken (see towerBoonDrawback). */
+    drawback?: number;
+  }
+> = {
+  speed: {
+    name: "Quick Hands",
+    describe: "Attacks {v} faster.",
+    values: [0.05, 0.08, 0.12, 0.18, 0.25],
+  },
+  damage: {
+    name: "Heavy Hitter",
+    describe: "Hits {v} harder.",
+    values: [0.05, 0.08, 0.12, 0.18, 0.25],
+  },
+  def: {
+    name: "Thick Skin",
+    describe: "{v} more Def.",
+    values: [0.08, 0.12, 0.18, 0.27, 0.4],
+  },
+  crit: {
+    name: "Keen Ear",
+    describe: "{v} more crit chance (points).",
+    values: [3, 5, 8, 12, 16],
+  },
+  ferocity: {
+    name: "Ferocity",
+    describe: "Crits hit {v} harder.",
+    values: [0.1, 0.15, 0.25, 0.4, 0.6],
+  },
+  tempo: {
+    name: "Tempo",
+    describe: "Skills come back {v} sooner.",
+    values: [0.05, 0.08, 0.12, 0.16, 0.2],
+  },
+  thorns: {
+    name: "Thorns",
+    describe: "A mob that hits you takes {v} of the blow back.",
+    values: [0.1, 0.15, 0.25, 0.4, 0.6],
+  },
+  executioner: {
+    name: "Executioner",
+    describe: "Hits {v} harder on a mob under a third of its health.",
+    values: [0.1, 0.15, 0.25, 0.4, 0.6],
+  },
+  "second-wind": {
+    name: "Second Wind",
+    describe: "Each mob you take down heals you {v} of your max health.",
+    values: [0.02, 0.03, 0.04, 0.06, 0.08],
+  },
+  crossover: {
+    name: "Crossover",
+    describe:
+      "{v} of your Euphony becomes Sonic Power: you hit harder, but heal and buff less.",
+    values: [0.2, 0.3, 0.4, 0.5, 0.6],
+  },
+  shockwave: {
+    name: "Shockwave",
+    describe:
+      "A mob you take down bursts, hitting every mob within 4 m for {v} of its max health.",
+    values: [0.1, 0.15, 0.2, 0.3, 0.4],
+  },
+  "glass-cannon": {
+    name: "Glass Cannon",
+    describe: "Hits {v} harder, but mobs hit you {d} harder.",
+    values: [0.1, 0.15, 0.2, 0.3, 0.4],
+    drawback: 0.5,
+  },
+  "power-chord": {
+    name: "Power Chord",
+    describe: "Skills hit {v} harder (their bleeds too).",
+    values: [0.08, 0.12, 0.18, 0.24, 0.3],
+  },
+  vigor: {
+    name: "Vigor",
+    describe: "{v} more max health in the Tower.",
+    values: [0.05, 0.08, 0.12, 0.18, 0.25],
+  },
+  opener: {
+    name: "Opener",
+    describe: "Hits {v} harder on a mob still at full health.",
+    values: [0.2, 0.3, 0.45, 0.6, 0.8],
+  },
+};
+
+/** Shockwave: how far round a fallen mob its burst reaches (metres, to
+ * the other mobs' centres; its description says 4 m). */
+export const TOWER_SHOCKWAVE_RADIUS = 4;
+
+/** The most a climb's boons may add up to, where unbounded stacking would
+ * break something: cooldowns never less than half, crit chance points, no
+ * more Euphony moved than there is, a Glass Cannon's cost at most +50%
+ * damage taken, and a heal per kill, a burst and max health that can't
+ * run away. */
+export const TOWER_BOON_CAPS: Partial<Record<TowerBoonId, number>> = {
+  tempo: 0.5,
+  crit: 50,
+  crossover: 1,
+  "glass-cannon": 1,
+  "second-wind": 0.2,
+  shockwave: 1,
+  vigor: 1,
+};
+
+export function isTowerBoonId(value: unknown): value is TowerBoonId {
+  return (
+    typeof value === "string" &&
+    (TOWER_BOON_IDS as readonly string[]).includes(value)
+  );
+}
+
+export function isTowerBoon(value: unknown): value is TowerBoon {
+  if (!value || typeof value !== "object") return false;
+  const v = value as { id?: unknown; rarity?: unknown };
+  return (
+    isTowerBoonId(v.id) &&
+    (TOWER_BOON_RARITIES as readonly unknown[]).includes(v.rarity)
+  );
+}
+
+/** A boon's value at its rarity. */
+export function towerBoonValue(boon: TowerBoon): number {
+  return TOWER_BOON_DEFS[boon.id].values[
+    TOWER_BOON_RARITIES.indexOf(boon.rarity)
+  ];
+}
+
+/** A trade-off's cost at `total` of its boon (0 for a boon without one):
+ * Glass Cannon's +damage taken. */
+export function towerBoonDrawback(id: TowerBoonId, total: number): number {
+  return total * (TOWER_BOON_DEFS[id].drawback ?? 0);
+}
+
+/** A boon's line for the app: its description with its value in ("Hits
+ * 12% harder."). */
+export function describeTowerBoon(boon: TowerBoon): string {
+  const v = towerBoonValue(boon);
+  const pct = (n: number) => `${Math.round(n * 100)}%`;
+  return TOWER_BOON_DEFS[boon.id].describe
+    .replace("{v}", boon.id === "crit" ? `+${v}` : pct(v))
+    .replace("{d}", pct(towerBoonDrawback(boon.id, v)));
+}
+
+/** Stats with a climb's Crossover in: `share` of the Euphony moved over to
+ * Sonic Power, point for point (capped at all of it). */
+export function crossedStats<T extends { sonicPower: number; euphony: number }>(
+  stats: T,
+  share: number,
+): T {
+  const moved = stats.euphony * Math.min(1, Math.max(0, share));
+  if (moved <= 0) return stats;
+  return {
+    ...stats,
+    sonicPower: stats.sonicPower + moved,
+    euphony: stats.euphony - moved,
+  };
+}
+
+/** How many boon picks a climb has earned by clearing `cleared` floors
+ * (TOWER_BOON_TIERS). */
+export function towerBoonPicks(cleared: number): number {
+  const c = Math.max(0, Math.floor(cleared));
+  let picks = 0;
+  let from = 0;
+  for (const t of TOWER_BOON_TIERS) {
+    if (c <= from) break;
+    picks += Math.floor((Math.min(c, t.upTo) - from) / t.every);
+    from = t.upTo;
+  }
+  return picks;
+}
+
+/** The floor whose clearing earns a climb's `n`th pick (1 the first). */
+export function towerBoonPickFloor(n: number): number {
+  let left = Math.max(1, Math.floor(n));
+  let from = 0;
+  for (const t of TOWER_BOON_TIERS) {
+    const here = (t.upTo - from) / t.every;
+    if (left <= here) return from + left * t.every;
+    left -= here;
+    from = t.upTo;
+  }
+  return from;
+}
+
+/** What a climb's boons add up to per boon, capped (TOWER_BOON_CAPS). */
+export function towerBoonTotals(
+  boons: readonly TowerBoon[],
+): Record<TowerBoonId, number> {
+  const t = Object.fromEntries(TOWER_BOON_IDS.map((id) => [id, 0])) as Record<
+    TowerBoonId,
+    number
+  >;
+  for (const b of boons) t[b.id] += towerBoonValue(b);
+  for (const [id, cap] of Object.entries(TOWER_BOON_CAPS))
+    t[id as TowerBoonId] = Math.min(t[id as TowerBoonId], cap);
+  return t;
+}
+
+/** Each rarity's weight for a pick earned on `floor`. */
+export function towerBoonWeights(floor: number): Record<Rarity, number> {
+  const first = towerBoonPickFloor(1);
+  const f = 1 + TOWER_BOONS.lean * Math.max(0, floor - first);
+  const w = {} as Record<Rarity, number>;
+  TOWER_BOON_RARITIES.forEach((r, tier) => {
+    w[r] = TOWER_BOONS.weights[r] * f ** tier;
+  });
+  return w;
+}
+
+/** The seed for a herzie's `pick`th boon pick (0 the first) in a climb. */
+export function towerBoonSeed(
+  uid: string,
+  event: string,
+  climb: number,
+  pick: number,
+): string {
+  return `${uid}:${event}:${climb}:${pick}`;
+}
+
+/** The boons a pick offers: TOWER_BOONS.offers different ones, each at a
+ * rarity rolled from towerBoonWeights(floor), the same every time for the
+ * same seed. `floor`: the floor that earned the pick. */
+export function towerBoonOffers(seed: string, floor: number): TowerBoon[] {
+  const rand = seededRandom(seed);
+  const ids = [...TOWER_BOON_IDS];
+  const weights = towerBoonWeights(floor);
+  const total = TOWER_BOON_RARITIES.reduce((s, r) => s + weights[r], 0);
+  const out: TowerBoon[] = [];
+  for (let i = 0; i < TOWER_BOONS.offers && ids.length; i++) {
+    const id = ids.splice(Math.floor(rand() * ids.length), 1)[0];
+    let roll = rand() * total;
+    let rarity: Rarity = "common";
+    for (const r of TOWER_BOON_RARITIES) {
+      roll -= weights[r];
+      if (roll < 0) {
+        rarity = r;
+        break;
+      }
+    }
+    out.push({ id, rarity });
+  }
+  return out;
+}
+
+/** A boon as the database keeps it: "damage:rare". */
+export function towerBoonKey(boon: TowerBoon): string {
+  return `${boon.id}:${boon.rarity}`;
+}
+
+/** A string hash (FNV-1a) into mulberry32: a small seeded RNG. */
+function seededRandom(seed: string): () => number {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  let a = h >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 /** How many items a chest holds: 2 on floor 10, one more every 20 floors,
  * at most 4 (floor 40 on). */

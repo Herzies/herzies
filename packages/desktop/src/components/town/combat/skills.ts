@@ -8,9 +8,11 @@ import {
 import { useSyncExternalStore } from "react";
 import { notify } from "../../../lib/notices";
 import { offerSkillSlot } from "../hotbarSlots";
+import { clearBleeds } from "./bleeds";
 import { addDome, clearDomes } from "./domes";
 import { clearSlams } from "./slams";
 import { clearStuns } from "./stuns";
+import { clearTraps } from "./traps";
 
 /**
  * Class skills as the client holds them: yours (which, their levels, when
@@ -274,6 +276,12 @@ export function attackSpeedOf(id: number | null, now: number): number {
   return 1 + (buffOn(id, "haste", now)?.value ?? 0);
 }
 
+/** How much Timing entity `id` has on top of its own at `now`: its
+ * Focus's, or 0 (as focusTiming has a buff list). */
+export function focusOf(id: number | null, now: number): number {
+  return buffOn(id, "focus", now)?.value ?? 0;
+}
+
 /** A resurrect began (or, with `target` null, stopped). */
 export function setChannel(by: number, channel: Channel | null): void {
   if (channel) skills.channels.set(by, channel);
@@ -292,6 +300,8 @@ export function resetSkills(): void {
   clearDomes();
   clearSlams();
   clearStuns();
+  clearTraps();
+  clearBleeds();
   emitSkills();
 }
 

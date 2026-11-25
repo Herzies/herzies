@@ -1,7 +1,8 @@
 /**
  * Integration tests for the Tower (00115): the ticket's claim starts a
- * herzie one floor past their best, kill batches pay once, the daily caps
- * hold, and Tower XP waits in pending_xp for the next sync to take.
+ * herzie one floor past their climb (00161: a reset starts it over), kill
+ * batches pay once, the daily caps hold, and Tower XP waits in pending_xp
+ * for the next sync to take.
  *
  * Requires: `npx supabase start`
  */
@@ -88,13 +89,52 @@ describe("the Tower", () => {
     expect(await claim(await player())).toBeNull();
   });
 
-  it("starts you one floor past your best", async () => {
+  it("starts you one floor past your climb, with its boons, skips and number", async () => {
     const event = await openTower();
     const uid = await player();
-    expect(await claim(uid)).toMatchObject({ event, floor: 1 });
+    expect(await claim(uid)).toMatchObject({
+      event,
+      floor: 1,
+      boons: [],
+      skips: 0,
+      climb: 1,
+    });
     await grant(uid, event, "c1", { cleared: 3 });
     await grant(uid, event, "c2", { cleared: 2 });
     expect((await claim(uid))?.floor).toBe(4);
+
+    const { error: grantError } = await admin().rpc("tower_grant", {
+      p_user: uid,
+      p_event: event,
+      p_batch: "c3",
+      p_xp: 0,
+      p_cleared: 10,
+      p_item_ids: [],
+      p_xp_cap: 300,
+      p_drop_cap: 12,
+      p_climb: 1,
+      p_boons: ["tempo:legendary"],
+      p_skips: 1,
+    });
+    if (grantError) throw new Error(grantError.message);
+    expect(await claim(uid)).toMatchObject({
+      floor: 11,
+      boons: [{ id: "tempo", rarity: "legendary" }],
+      skips: 1,
+      climb: 1,
+    });
+
+    const { error } = await admin().rpc("tower_reset", {
+      p_user: uid,
+      p_event: event,
+    });
+    if (error) throw new Error(error.message);
+    expect(await claim(uid)).toMatchObject({
+      floor: 1,
+      boons: [],
+      skips: 0,
+      climb: 2,
+    });
   });
 
   it("pays a batch once: drops on the ground, XP pending", async () => {

@@ -53,16 +53,28 @@ import {
 import { CONSUMABLE_COOLDOWN_MS } from "@herzies/shared/medea";
 import {
   buffMultiplier,
-  HASTE_MAX,
   isSkillId,
+  multispinRecords,
   SKILL_COOLDOWN_GRACE_MS,
   SKILL_DEFS,
   type SkillId,
   shuffleBounces,
+  skillDurationMs,
   skillValue,
-  skillXpFor,
+  skillXpPerUse,
 } from "@herzies/shared/skills";
 import { buffMult, healMult } from "@herzies/shared/stats";
+import {
+  crossedStats,
+  isTowerBoon,
+  type TowerBoon,
+  type TowerBoonId,
+  towerBoonOffers,
+  towerBoonPickFloor,
+  towerBoonPicks,
+  towerBoonSeed,
+  towerBoonTotals,
+} from "@herzies/shared/tower";
 import type {
   BossClaim,
   BossPlace,
@@ -73,20 +85,25 @@ import type {
   RaidState,
   ServerMessage,
   SkillRefusal,
+  TowerFloor,
   TownLook,
   TownTicketPayload,
 } from "@herzies/shared/town-net";
 import { TOWN_TICKET_TTL_S } from "@herzies/shared/town-net";
+import { isBleedSkill } from "./bleed";
 import {
   BossEngine,
   type BossEvent,
   type BossHit,
   type BossPlayer,
+  focused,
   rng,
   type Telegraph,
   TUNING,
 } from "./boss";
+import { BARD_BUFF_MAX } from "./budgets";
 import { PositionHistory } from "./history";
+import { Spin } from "./spin";
 import { type TowerArena, TowerEngine, type TowerEvent } from "./tower";
 
 /** The room holds eating to CONSUMABLE_COOLDOWN_MS less this, so a client
@@ -146,7 +163,10 @@ export type FightPlayer = {
   /** The room's entity id for this socket. */
   id: number;
   hp: number;
+  /** Its max health here: its own (`baseMaxHp`, the ticket's), raised by
+   * a Tower climb's Vigor (vigorMaxHp). */
   maxHp: number;
+  baseMaxHp: number;
   down: boolean;
   stats: FightStats;
   present: boolean;
@@ -272,6 +292,12 @@ export type TowerBatch = {
   /** A Warden's floor's chest opened (TOWER_CHEST): its floor, and where
    * it stood, for its loot to come out of. */
   chest?: { floor: number; x: number; z: number };
+  /** The climb this batch belongs to (the ticket's), so the database can
+   * drop one from before a reset; and the climb's boons, in full, and the
+   * picks it skipped, when either changed. */
+  climb?: number;
+  boons?: TowerBoon[];
+  skips?: number;
 };
 
 /** What one herzie did for the fight since the last batch: damage dealt,
@@ -368,8 +394,12 @@ export class FightRuntime {
   private healed = new Map<string, number>();
   /** When each player last started eating (server ms). */
   private ate = new Map<string, number>();
-  /** Skill XP not yet reported, by `uid|skill` (fractions carry over). */
+  /** Skill XP not yet reported, by `uid|skill`, unrounded: whole points
+   * go out, the rest carries over. */
   private pendingXp = new Map<string, number>();
+  /** Each herzie's latest use of each skill, by `uid|skill`: whether it
+   * has paid yet (a use pays once, the first time it does something). */
+  private uses = new Map<string, boolean>();
   private xpInflight: {
     batch: string;
     xp: { uid: string; skill: string; xp: number }[];
@@ -382,6 +412,17 @@ export class FightRuntime {
   private towerInflight: TowerBatch | null = null;
   /** The Tower's one herzie (a room of their own). */
   private towerUid = "";
+  /** The Tower's climb, from its ticket's claim: its number, the boons it
+   * has taken and the picks it has skipped (this room's word once it's
+   * running), what the boons add up to; whether the database has them as
+   * they are. */
+  private climb: {
+    n?: number;
+    boons: TowerBoon[];
+    skips: number;
+    totals: Record<TowerBoonId, number>;
+  } = { boons: [], skips: 0, totals: towerBoonTotals([]) };
+  private boonsUnsent = false;
 
   // --- The raid (boss room only).
 
@@ -404,12 +445,20 @@ export class FightRuntime {
   private channels = new Map<string, Channel>();
   /** The last step a Taunt's hold was paid up to (see creditTaunt). */
   private tauntAt: number | null = null;
-  /** Rimshots winding up: where each Percussionist stands (held there),
-   * when it lands, and at what level. */
+  /** Wind-ups (a Rimshot's, a Silencio's): which skill, where each caster
+   * stands (held there), when it lands, and at what level. */
   private slams = new Map<
     string,
-    { until: number; x: number; z: number; level: number }
+    {
+      skill: "rimshot" | "silencio";
+      until: number;
+      x: number;
+      z: number;
+      level: number;
+    }
   >();
+  /** Multispins running, by their Record Slinger (see stepSpins). */
+  private spins = new Map<string, Spin>();
   /** Bards whose lute is in its heal stance (user ids). */
   private healers = new Set<string>();
   /** Heal bolts in flight: who sent each, at whom, and when it lands. */
@@ -506,6 +555,17 @@ export class FightRuntime {
       engine,
     );
     f.towerUid = uid;
+    const boons = (claim.boons ?? []).filter(isTowerBoon);
+    f.climb = {
+      n: claim.climb,
+      boons,
+      skips:
+        Number.isInteger(claim.skips) && (claim.skips ?? 0) > 0
+          ? (claim.skips as number)
+          : 0,
+      totals: towerBoonTotals(boons),
+    };
+    engine.setBoons(uid, f.climb.totals);
     return f;
   }
 
@@ -535,7 +595,103 @@ export class FightRuntime {
     // A breather on arrival, as on joining.
     tower.noteSpawn(uid, now);
     this.history.forget(uid);
-    return [{ to: "all", msg: { t: "floor", ...tower.view() } }];
+    return [this.floorMsg(tower)];
+  }
+
+  /** The floor as the room tells it: the engine's, with the climb's boons,
+   * the picks it has earned (towerBoonPicks of the floors it has cleared:
+   * those before this room's first, and this one if it is) and not spent
+   * (taken or skipped), and the next pick's offers while there is one. */
+  floorView(tower: TowerEngine): TowerFloor {
+    const cleared = tower.floor - 1 + (tower.isCleared ? 1 : 0);
+    const { boons, skips } = this.climb;
+    const picks = Math.max(0, towerBoonPicks(cleared) - boons.length - skips);
+    return {
+      ...tower.view(),
+      boons: [...boons],
+      picks,
+      ...(picks > 0 ? { offers: this.offers() } : {}),
+    };
+  }
+
+  /** The next pick's offers: seeded by the herzie, the Tower, the climb and
+   * the pick, so a reconnect brings back the same three; rolled for the
+   * floor that earned it. */
+  private offers(): TowerBoon[] {
+    const pick = this.climb.boons.length + this.climb.skips;
+    return towerBoonOffers(
+      towerBoonSeed(this.towerUid, this.eventId, this.climb.n ?? 1, pick),
+      towerBoonPickFloor(pick + 1),
+    );
+  }
+
+  private floorMsg(tower: TowerEngine): Outbound {
+    return { to: "all", msg: { t: "floor", ...this.floorView(tower) } };
+  }
+
+  /** The Tower's climb number, from the ticket that started it. */
+  get climbNo(): number | undefined {
+    return this.climb.n;
+  }
+
+  /** `uid` spends a pick, if the climb has one unspent: on the offer at
+   * index `offer`, or skipping them all (null). Its effects start at once,
+   * the database hears of it with the next batch, and the room gets the
+   * floor (and the next offers). Nothing otherwise, an index out of the
+   * offers' range included. */
+  towerPick(uid: string, offer: number | null): Outbound[] {
+    const tower = this.tower;
+    if (!tower || uid !== this.towerUid || !this.floorView(tower).picks)
+      return [];
+    if (offer === null) this.climb.skips++;
+    else {
+      const boon = this.offers()[offer];
+      if (!boon) return [];
+      this.climb.boons.push(boon);
+      this.climb.totals = towerBoonTotals(this.climb.boons);
+      tower.setBoons(uid, this.climb.totals);
+    }
+    this.boonsUnsent = true;
+    this.reportNow = true;
+    return [this.floorMsg(tower), ...this.reVigor(uid)];
+  }
+
+  /** `uid`'s max health with its climb's Vigor on `base` (its own). */
+  private vigorMaxHp(uid: string, base: number): number {
+    return Math.round(base * (1 + (this.boonsOf(uid)?.vigor ?? 0)));
+  }
+
+  /** A Vigor just picked: `uid`'s max health grows, and its health by as
+   * much (a heal, told to the database as one). The room hears. */
+  private reVigor(uid: string): Outbound[] {
+    const p = this.players.get(uid);
+    if (!p) return [];
+    const max = this.vigorMaxHp(uid, p.baseMaxHp);
+    const gain = max - p.maxHp;
+    if (gain <= 0) return [];
+    p.maxHp = max;
+    const healed = this.restore(uid, gain);
+    return healed.length ? healed : [this.hpMsg(p)];
+  }
+
+  /** The climb's boons, added up, if `uid` is the Tower's herzie. */
+  private boonsOf(uid: string): Record<TowerBoonId, number> | null {
+    return this.tower && uid === this.towerUid ? this.climb.totals : null;
+  }
+
+  /** `uid` pressed E for the cleared floor's chest: it opens if they're on
+   * their feet by it once it's landed (TowerEngine.openChestAt), and the
+   * room gets the floor (no chest); its loot follows the batch. */
+  chestOpen(uid: string, now: number): Outbound[] {
+    const tower = this.tower;
+    const p = this.players.get(uid);
+    const at = this.history.at(uid, now);
+    if (!tower || !p?.present || p.down || !this.open || !at) return [];
+    const opened = tower.openChestAt(at, now);
+    if (!opened) return [];
+    const out: Outbound[] = [];
+    this.apply(opened, out, now);
+    return out;
   }
 
   get open(): boolean {
@@ -634,7 +790,8 @@ export class FightRuntime {
       look: ticket.look,
       id,
       hp,
-      maxHp,
+      maxHp: this.vigorMaxHp(uid, maxHp),
+      baseMaxHp: maxHp,
       down: !!down,
       stats: statsOf(ticket.st),
       present: true,
@@ -761,7 +918,7 @@ export class FightRuntime {
     const tower = this.tower;
     if (tower && ticket.lv && ticket.lv !== tower.level) {
       tower.level = Math.max(1, ticket.lv);
-      return [...unhealed, { to: "all", msg: { t: "floor", ...tower.view() } }];
+      return [...unhealed, this.floorMsg(tower)];
     }
     return unhealed;
   }
@@ -797,7 +954,8 @@ export class FightRuntime {
       return "ignored";
     const pos = this.history.at(uid, now);
     if (!pos) return "ignored";
-    // Winding up a Rimshot: its hands are busy (the app swings none).
+    // Winding up a Rimshot or a Silencio: its hands are busy (the app
+    // swings none).
     if (this.slams.has(uid)) return "ignored";
     if (this.healers.has(uid) && p.attack === "wave")
       return this.healBolt(p, pos, yaw, pitch, now);
@@ -806,7 +964,7 @@ export class FightRuntime {
       pos,
       yaw,
       pitch,
-      p.stats,
+      this.hitStats(p, now),
       now,
       p.attack,
       p.melee,
@@ -875,7 +1033,7 @@ export class FightRuntime {
       const heal = Math.min(
         o.maxHp - o.hp,
         HEAL_BOLT *
-          healMult(bard.stats.euphony) *
+          healMult(this.fightStats(bard).euphony) *
           this.healBoost(b.by, now) *
           o.maxHp,
       );
@@ -948,6 +1106,7 @@ export class FightRuntime {
       // Pressing it again mid-channel does nothing; the cooldown proper
       // starts when it lands, and a cancelled one costs none.
       p.ready.set(skillId, until);
+      this.used(uid, skillId);
       out.push(this.skillCast(p, skillId, level, pos, yaw));
       out.push({
         to: "all",
@@ -956,12 +1115,16 @@ export class FightRuntime {
       return { result: "used", readyAt: until, out };
     }
 
-    p.ready.set(skillId, now + def.cooldownMs);
+    // Tempo boons bring skills back sooner (in the Tower).
+    const cooldownMs = def.cooldownMs * (1 - (this.boonsOf(uid)?.tempo ?? 0));
+    p.ready.set(skillId, now + cooldownMs);
+    this.used(uid, skillId);
     out.push(this.skillCast(p, skillId, level, pos, yaw));
 
     if (skillId === "soothing-drones") {
       let restored = 0;
-      const mult = healMult(p.stats.euphony) * this.healBoost(uid, now);
+      const mult =
+        healMult(this.fightStats(p).euphony) * this.healBoost(uid, now);
       for (const o of this.players.values()) {
         if (!o.present || o.down || !this.fighting(o.uid)) continue;
         const at = this.history.at(o.uid, now);
@@ -980,8 +1143,8 @@ export class FightRuntime {
         });
         this.reportNow = true;
       }
-      // Overheal earns nothing: only what was really restored.
-      this.earn(uid, skillId, skillXpFor(skillId, restored));
+      // Overheal earns nothing: only a use that really restored some.
+      if (restored > 0) this.earn(uid, skillId);
       this.credit(uid, "healing", restored);
       this.engine.addThreat(uid, restored * TUNING.threat.perHeal);
     } else if (skillId === "cymbrella") {
@@ -1002,11 +1165,18 @@ export class FightRuntime {
         now,
       );
       out.push(this.buffMsg(p.id, buff));
-    } else if (skillId === "haste") {
+    } else if (
+      skillId === "haste" ||
+      skillId === "rage" ||
+      skillId === "focus"
+    ) {
       // Everyone standing near (the Bard too), for its length. Euphony
       // strengthens it like any buff, to a ceiling.
-      const strength = Math.min(HASTE_MAX, value * buffMult(p.stats.euphony));
-      const until = now + (def.durationMs ?? 0);
+      const strength = Math.min(
+        BARD_BUFF_MAX[skillId],
+        value * buffMult(this.fightStats(p).euphony),
+      );
+      const until = now + skillDurationMs(skillId, level);
       for (const o of this.players.values()) {
         if (!o.present || o.down || !this.fighting(o.uid)) continue;
         const at = this.history.at(o.uid, now);
@@ -1016,7 +1186,7 @@ export class FightRuntime {
         const buff = this.engine.buff(
           o.uid,
           {
-            id: "haste",
+            id: skillId,
             value: strength,
             until,
             by: uid,
@@ -1026,11 +1196,61 @@ export class FightRuntime {
         out.push(this.buffMsg(o.id, buff));
       }
     } else if (skillId === "backspin") {
-      this.engine.backspin(uid, pos, yaw, pitch, p.stats, value, now);
-    } else if (skillId === "rimshot") {
+      this.engine.backspin(
+        uid,
+        pos,
+        yaw,
+        pitch,
+        this.hitStats(p, now),
+        value,
+        now,
+      );
+    } else if (skillId === "multispin") {
+      // Records round them for its length: they hit what they touch (see
+      // stepSpins). The app draws them from the buff.
+      const records = multispinRecords(level);
+      const until = now + skillDurationMs(skillId, level);
+      this.spins.set(uid, new Spin(now, until, records));
+      out.push(
+        this.buffMsg(
+          p.id,
+          this.engine.buff(
+            uid,
+            { id: "multispin", value: records, until },
+            now,
+          ),
+        ),
+      );
+    } else if (skillId === "forbidden-frequency") {
+      // A disc that bleeds what it hits (see Bleeds): the bleed taking
+      // hold pays it, said with "bleed" then.
+      this.engine.forbiddenFrequency(
+        uid,
+        pos,
+        yaw,
+        pitch,
+        this.hitStats(p, now),
+        level,
+        now,
+      );
+    } else if (skillId === "cymbal-trap") {
+      // Thrown: the first along the aim takes a strike when it gets there
+      // (its damage pays it: hits tagged "cymbal-trap"), and a mob is held
+      // where it stands (said with "trap" then); the boss isn't.
+      this.engine.cymbalTrap(
+        uid,
+        pos,
+        yaw,
+        pitch,
+        this.hitStats(p, now),
+        Math.round(value * 1000),
+        now,
+      );
+    } else if (skillId === "rimshot" || skillId === "silencio") {
       // The wind-up: it lands where they stand, when it's done (see
       // stepSlams). The room saw it start with the skill's word.
       this.slams.set(uid, {
+        skill: skillId,
         until: now + (def.castMs ?? 0),
         x: pos.x,
         z: pos.z,
@@ -1044,13 +1264,13 @@ export class FightRuntime {
         {
           id: "shuffle",
           value: shuffleBounces(level),
-          until: now + (def.durationMs ?? 0),
+          until: now + skillDurationMs(skillId, level),
         },
         now,
       );
       out.push(this.buffMsg(p.id, buff));
     } else if (skillId === "taunt" && boss) {
-      const until = now + (def.durationMs ?? 0);
+      const until = now + skillDurationMs(skillId, level);
       const before = boss.setTaunt(uid, until, now);
       if (before) out.push(...this.untaunt(before));
       const buff = boss.buff(uid, { id: "taunt", value: 1, until }, now);
@@ -1060,7 +1280,7 @@ export class FightRuntime {
       out.push(this.buffMsg(p.id, buff));
       this.raidDirty = true;
     }
-    return { result: "used", readyAt: now + def.cooldownMs, out };
+    return { result: "used", readyAt: now + cooldownMs, out };
   }
 
   private skillCast(
@@ -1104,6 +1324,32 @@ export class FightRuntime {
   /** How much stronger `uid`'s heals are right now (an in-tune Bard). */
   private healBoost(uid: string, now: number): number {
     return buffMultiplier(this.engine.buffsOf(uid, now), "heal", now);
+  }
+
+  /** `p`'s stats as it fights here: its own, with its climb's Crossover
+   * moving Euphony over to Sonic Power in the Tower (crossedStats). */
+  private fightStats(p: FightPlayer): FightStats {
+    const share = this.boonsOf(p.uid)?.crossover ?? 0;
+    return share > 0 ? crossedStats(p.stats, share) : p.stats;
+  }
+
+  /** The stats `p`'s hits are rolled with now: its own (fightStats), its
+   * crit chance raised by a Focus on it; in the Tower, its climb's crit
+   * boons add chance (points) and its ferocity boons a share of its crit
+   * bonus. */
+  private hitStats(p: FightPlayer, now: number): FightStats {
+    const stats = focused(
+      this.fightStats(p),
+      this.engine.buffsOf(p.uid, now),
+      now,
+    );
+    const boons = this.boonsOf(p.uid);
+    if (!boons) return stats;
+    return {
+      ...stats,
+      critChance: stats.critChance + boons.crit,
+      critDamage: stats.critDamage * (1 + boons.ferocity),
+    };
   }
 
   /** The downed fighter nearest to `pos` within `radius`, if any. */
@@ -1216,25 +1462,48 @@ export class FightRuntime {
    * database through `healed`, like a skill's heal. Nothing if they were
    * knocked out or left while it was being used up. */
   eat(uid: string, amount: number): Outbound[] {
+    if (!this.fighting(uid)) return [];
+    return this.restore(uid, amount);
+  }
+
+  /** `uid` gets back `amount` health, capped at its max; reported to the
+   * database through `healed`, like a skill's heal. Nothing if it's down,
+   * gone or already full. */
+  private restore(uid: string, amount: number): Outbound[] {
     const p = this.players.get(uid);
-    if (!p?.present || p.down || amount <= 0 || !this.fighting(uid)) return [];
+    if (!p?.present || p.down || amount <= 0) return [];
     const heal = Math.min(p.maxHp - p.hp, amount);
     if (heal <= 0) return [];
     p.hp += heal;
     this.touch(uid);
     this.healed.set(uid, (this.healed.get(uid) ?? 0) + heal);
     this.reportNow = true;
-    return [
-      { to: "all", msg: { t: "hp", id: p.id, hp: p.hp, maxHp: p.maxHp } },
-    ];
+    return [this.hpMsg(p)];
   }
 
-  /** Skill XP for `uid`, toward the next report. */
-  private earn(uid: string, skill: SkillId, xp: number) {
-    // The local-dev boss is never reported: nothing to earn toward.
-    if (!(xp > 0) || this.eventId === DEV_EVENT) return;
+  private hpMsg(p: FightPlayer): Outbound {
+    return {
+      to: "all",
+      msg: { t: "hp", id: p.id, hp: p.hp, maxHp: p.maxHp },
+    };
+  }
+
+  /** `uid` pressed `skill`: a new use, not paid yet. */
+  private used(uid: string, skill: SkillId) {
+    this.uses.set(`${uid}|${skill}`, false);
+  }
+
+  /** `uid`'s latest use of `skill` did something: it pays skillXpPerUse,
+   * once, toward the next report. */
+  private earn(uid: string, skill: SkillId) {
     const key = `${uid}|${skill}`;
-    this.pendingXp.set(key, (this.pendingXp.get(key) ?? 0) + xp);
+    // The local-dev boss is never reported: nothing to earn toward.
+    if (this.uses.get(key) !== false || this.eventId === DEV_EVENT) return;
+    this.uses.set(key, true);
+    this.pendingXp.set(
+      key,
+      (this.pendingXp.get(key) ?? 0) + skillXpPerUse(skill),
+    );
   }
 
   /** `town-vitals` says these skills now stand at these levels: use them,
@@ -1308,7 +1577,7 @@ export class FightRuntime {
       health: [...this.players.values()]
         .filter((p) => p.present)
         .map((p) => ({ id: p.id, hp: p.hp, maxHp: p.maxHp })),
-      ...(this.tower ? { tower: this.tower.view() } : {}),
+      ...(this.tower ? { tower: this.floorView(this.tower) } : {}),
       buffs: this.engine.activeBuffs(now).flatMap(({ uid, buff }) => {
         const p = this.players.get(uid);
         return p?.present
@@ -1375,8 +1644,9 @@ export class FightRuntime {
         alive: !p.down,
         maxHp: p.maxHp,
         // A Percussionist is the tank wherever it fights: its Def counts
-        // more in the Tower too (classDef).
-        def: classDef(p.cls, p.stats.def),
+        // more in the Tower too (classDef), as do the climb's Def boons.
+        def:
+          classDef(p.cls, p.stats.def) * (1 + (this.boonsOf(p.uid)?.def ?? 0)),
         // When their Cymbrella is next ready (the dirge waits for one).
         ...(p.skills.has("cymbrella")
           ? { domeAt: p.ready.get("cymbrella") ?? 0 }
@@ -1385,9 +1655,10 @@ export class FightRuntime {
       });
     }
     if (this.open) {
-      // Rimshots land before the engine steps, so their hits land this
-      // update.
+      // Rimshots and Silencios land before the engine steps, so their hits
+      // (and bleeds) land this update.
       this.stepSlams(now, out);
+      this.stepSpins(now, out);
       for (const ev of this.engine.update(now, alive)) this.apply(ev, out, now);
       if (boss) this.creditTaunt(boss, now);
       this.landBolts(now, out);
@@ -1574,10 +1845,11 @@ export class FightRuntime {
     }
   }
 
-  /** Rimshots whose wind-up is done land: a ground slam where each
-   * Percussionist stood (its damage pays it: hits tagged "rimshot"). One
-   * knocked out, or gone, before it lands loses it; the room is told as
-   * for a stopped channel. */
+  /** Wind-ups that are done land where each caster stood: a Rimshot's
+   * ground slam (its damage pays it: hits tagged "rimshot"), or a
+   * Silencio's wave (it pays once if it caught anyone; its bleed's ticks
+   * don't). One knocked out, or gone, before it lands loses it; the room
+   * is told as for a stopped channel. */
   private stepSlams(now: number, out: Outbound[]) {
     for (const [uid, s] of [...this.slams]) {
       const p = this.players.get(uid);
@@ -1592,13 +1864,51 @@ export class FightRuntime {
       }
       if (now < s.until) continue;
       this.slams.delete(uid);
+      if (s.skill === "silencio") {
+        const caught = this.engine.silencio(
+          uid,
+          { x: s.x, z: s.z },
+          this.hitStats(p, now),
+          s.level,
+          now,
+        );
+        if (caught > 0) this.earn(uid, "silencio");
+        continue;
+      }
       this.engine.rimshot(
         uid,
         { x: s.x, z: s.z },
-        p.stats,
+        this.hitStats(p, now),
         skillValue("rimshot", s.level),
         now,
       );
+    }
+  }
+
+  /** Multispins' records touch what they meet (their damage pays them:
+   * hits tagged "multispin"), round wherever their Slinger stands. One
+   * knocked out, or gone, loses its records; the room is told its buff
+   * came off (a leaver's buffs were said gone as it left). */
+  private stepSpins(now: number, out: Outbound[]) {
+    for (const [uid, s] of [...this.spins]) {
+      const p = this.players.get(uid);
+      if (!p?.present || p.down) {
+        this.spins.delete(uid);
+        if (p?.present && this.engine.clearBuff(uid, "multispin"))
+          out.push({
+            to: "all",
+            msg: { t: "buffOff", id: p.id, buff: "multispin" },
+          });
+        continue;
+      }
+      const stats = this.hitStats(p, now);
+      for (const touch of s.touches(
+        now,
+        (t) => this.history.at(uid, t),
+        this.engine.spinBodies(now),
+      ))
+        this.engine.spinHit(uid, touch.key, stats, now);
+      if (s.over(now)) this.spins.delete(uid);
     }
   }
 
@@ -1639,7 +1949,7 @@ export class FightRuntime {
     const def = SKILL_DEFS.resurrect;
     const share =
       skillValue("resurrect", level) *
-      healMult(bard.stats.euphony) *
+      healMult(this.fightStats(bard).euphony) *
       this.healBoost(bard.uid, now);
     const hp = Math.max(
       1,
@@ -1657,7 +1967,7 @@ export class FightRuntime {
       { uid: target.uid, hp },
     ];
     bard.ready.set("resurrect", now + def.cooldownMs);
-    this.earn(bard.uid, "resurrect", skillXpFor("resurrect", hp));
+    this.earn(bard.uid, "resurrect");
     this.credit(bard.uid, "healing", hp);
     this.engine.addThreat(bard.uid, hp * TUNING.threat.perHeal);
     this.reportNow = true;
@@ -1856,16 +2166,12 @@ export class FightRuntime {
     for (const h of hits) {
       const p = this.players.get(h.uid);
       if (!p || p.down) continue;
-      // Under a dome: nothing lands. All of what would have pays the
-      // dome's Percussionist, and counts as their support.
+      // Under a dome: nothing lands. All of what would have counts as the
+      // dome's Percussionist's support (and pays its use).
       if (h.shelteredBy) {
         sheltered.push(p.id);
         if (h.blocked > 0) {
-          this.earn(
-            h.shelteredBy,
-            "cymbrella",
-            skillXpFor("cymbrella", h.blocked),
-          );
+          this.earn(h.shelteredBy, "cymbrella");
           this.credit(h.shelteredBy, "blocked", h.blocked);
         }
         continue;
@@ -1873,9 +2179,14 @@ export class FightRuntime {
       p.hp = Math.max(0, p.hp - h.damage);
       this.touch(p.uid);
       hit.push(p.id);
-      // A taunt pays for the hits it drew.
-      if (h.aimed && taunter === p.uid && p.skills.has("taunt"))
-        this.earn(p.uid, "taunt", skillXpFor("taunt", h.damage + h.absorbed));
+      // A taunt pays for drawing the boss's hits.
+      if (
+        h.aimed &&
+        taunter === p.uid &&
+        p.skills.has("taunt") &&
+        h.damage + h.absorbed > 0
+      )
+        this.earn(p.uid, "taunt");
       out.push({
         to: "all",
         msg: { t: "hp", id: p.id, hp: p.hp, maxHp: p.maxHp },
@@ -1903,7 +2214,7 @@ export class FightRuntime {
 
   private apply(ev: BossEvent | TowerEvent, out: Outbound[], now: number) {
     switch (ev.t) {
-      case "mobDown":
+      case "mobDown": {
         if (this.tower)
           this.towerKills.push({
             floor: this.tower.floor,
@@ -1914,19 +2225,22 @@ export class FightRuntime {
           to: "all",
           msg: { t: "mobDown", mob: ev.mob, x: round(ev.x), z: round(ev.z) },
         });
+        // A climb's Second Wind: each mob it takes down heals it.
+        const wind = this.boonsOf(ev.by)?.["second-wind"] ?? 0;
+        const by = this.players.get(ev.by);
+        if (wind > 0 && by) out.push(...this.restore(ev.by, wind * by.maxHp));
         break;
+      }
       case "cleared":
         this.towerCleared = Math.max(this.towerCleared, ev.floor);
         this.reportNow = true;
-        if (this.tower)
-          out.push({ to: "all", msg: { t: "floor", ...this.tower.view() } });
+        if (this.tower) out.push(this.floorMsg(this.tower));
         break;
       case "chest":
         this.towerChest = { floor: ev.floor, x: round(ev.x), z: round(ev.z) };
         this.reportNow = true;
         // Off the floor: it's open.
-        if (this.tower)
-          out.push({ to: "all", msg: { t: "floor", ...this.tower.view() } });
+        if (this.tower) out.push(this.floorMsg(this.tower));
         break;
       case "telegraph":
         out.push({
@@ -1966,24 +2280,19 @@ export class FightRuntime {
           ev.mob !== undefined && !this.tower ? "adds" : "damage",
           ev.damage,
         );
-        if (ev.skill && isSkillId(ev.skill))
-          this.earn(ev.uid, ev.skill, skillXpFor(ev.skill, ev.damage));
-        // A hasted hit: the Bard who hasted them earns for the share of
-        // their damage the haste added. Only casts are quickened (a
-        // Shuffle's bounces are a cast's), not a skill's own hits.
-        if (!ev.skill || ev.skill === "shuffle") {
-          const haste = this.engine
-            .buffsOf(ev.uid, now)
-            .find((b) => b.id === "haste");
-          if (haste?.by && ev.damage > 0)
-            this.earn(
-              haste.by,
-              "haste",
-              skillXpFor(
-                "haste",
-                (ev.damage * haste.value) / (1 + haste.value),
-              ),
-            );
+        if (ev.damage > 0) {
+          // A skill's hit pays its use; a bleed's ticks don't (its use
+          // paid when it took hold, or when its Silencio caught anyone).
+          if (ev.skill && isSkillId(ev.skill) && !isBleedSkill(ev.skill))
+            this.earn(ev.uid, ev.skill);
+          // Whoever hasted, enraged or focused them: their use did
+          // something.
+          for (const b of this.engine.buffsOf(ev.uid, now))
+            if (
+              b.by &&
+              (b.id === "haste" || b.id === "rage" || b.id === "focus")
+            )
+              this.earn(b.by, b.id);
         }
         out.push({
           to: { uid: ev.uid },
@@ -1992,6 +2301,9 @@ export class FightRuntime {
             damage: ev.damage,
             crit: ev.crit,
             ...(ev.mob !== undefined ? { mob: ev.mob } : {}),
+            // Forbidden Frequency and Silencio have no hit of their own:
+            // their hits bleed.
+            ...(isBleedSkill(ev.skill) ? { bleed: true as const } : {}),
           },
         });
         break;
@@ -2024,6 +2336,39 @@ export class FightRuntime {
       }
       case "minions":
         this.summon(now, out);
+        break;
+      case "bleed":
+        // A bleed took hold, or started over, or ended early (stacks 0):
+        // everyone sees it. Forbidden Frequency's taking hold pays its
+        // use (a Silencio's paid as it burst, see stepSlams).
+        if (ev.stacks > 0 && !ev.skill)
+          this.earn(ev.uid, "forbidden-frequency");
+        out.push({
+          to: "all",
+          msg: {
+            t: "bleed",
+            by: this.players.get(ev.uid)?.id ?? 0,
+            target: ev.mob ?? 0,
+            ...(ev.mob !== undefined ? { mob: true as const } : {}),
+            ...(ev.mob === undefined ? { boss: true as const } : {}),
+            ...(ev.skill ? { skill: ev.skill } : {}),
+            stacks: ev.stacks,
+            until: ev.until,
+          },
+        });
+        break;
+      case "trap":
+        // Held by a Cymbal Trap: everyone sees the cymbal spin round it.
+        out.push({
+          to: "all",
+          msg: {
+            t: "trap",
+            by: this.players.get(ev.uid)?.id ?? 0,
+            target: ev.mob,
+            mob: true,
+            until: ev.until,
+          },
+        });
         break;
       case "killed": {
         const by = this.players.get(ev.by)?.id ?? 0;
@@ -2105,7 +2450,10 @@ export class FightRuntime {
     }
     if (
       !this.towerInflight &&
-      (this.towerKills.length || this.towerCleared || this.towerChest) &&
+      (this.towerKills.length ||
+        this.towerCleared ||
+        this.towerChest ||
+        this.boonsUnsent) &&
       !dev
     ) {
       this.towerInflight = {
@@ -2115,10 +2463,15 @@ export class FightRuntime {
         kills: this.towerKills,
         ...(this.towerCleared ? { cleared: this.towerCleared } : {}),
         ...(this.towerChest ? { chest: this.towerChest } : {}),
+        ...(this.climb.n !== undefined ? { climb: this.climb.n } : {}),
+        ...(this.boonsUnsent
+          ? { boons: [...this.climb.boons], skips: this.climb.skips }
+          : {}),
       };
       this.towerKills = [];
       this.towerChest = null;
       this.towerCleared = 0;
+      this.boonsUnsent = false;
     }
     // Over: ask for the end screen's table, but only on a report whose
     // batch carries every hit there was (one re-sent from before would
@@ -2458,6 +2811,7 @@ export class FightRuntime {
       this.towerKills.length > 0 ||
       this.towerCleared > 0 ||
       this.towerChest !== null ||
+      this.boonsUnsent ||
       this.pending.size > 0 ||
       this.leftUnreported.size > 0 ||
       this.xpInflight !== null ||

@@ -71,6 +71,7 @@ export function PlayerMenu({
       y={menu.y}
       items={items}
       onClose={closePlayerMenu}
+      numbered
       heading={
         <>
           <div className="font-medium text-white">{remote.name}</div>

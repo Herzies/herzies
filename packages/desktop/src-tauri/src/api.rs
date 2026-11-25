@@ -1112,6 +1112,12 @@ pub async fn api_claim_tower_reward(client: &Client) -> Result<serde_json::Value
     api_buy(client, "/npc/tower-guard/claim", serde_json::json!({})).await
 }
 
+/// Starts the caller's Tower climb over: back to floor 1 with no boons, the
+/// month's best floor kept. A refusal comes back as `{ ok: false, reason }`.
+pub async fn api_reset_tower_climb(client: &Client) -> Result<serde_json::Value, String> {
+    api_post_with_reason(client, "/npc/tower-guard/reset", serde_json::json!({})).await
+}
+
 /// Buys from Medea, who's always in Town: sweets and potions.
 pub async fn api_buy_from_medea(
     client: &Client,

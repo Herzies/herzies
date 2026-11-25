@@ -424,6 +424,7 @@ export class TownRoom extends DurableObject<Env> {
         yes?: unknown;
         auto?: unknown;
         id?: unknown;
+        offer?: unknown;
       };
       try {
         m = JSON.parse(message);
@@ -442,6 +443,8 @@ export class TownRoom extends DurableObject<Env> {
       else if (m?.t === "emote" && s.player) this.onEmote(s, m.e, now);
       else if (m?.t === "duel" && s.player) this.onDuel(s, m, now);
       else if (m?.t === "wildsTake" && s.player) this.onWildsTake(s, m.id, now);
+      else if (m?.t === "chestOpen" && s.player) this.onChestOpen(s, now);
+      else if (m?.t === "towerPick" && s.player) this.onTowerPick(s, m.offer);
       else this.strike(s);
       return;
     }
@@ -463,9 +466,9 @@ export class TownRoom extends DurableObject<Env> {
     // way from before the fall aren't held against the socket).
     if (this.fight?.frozen(p.uid)) return;
     let next = quantizeState(frame.state);
-    // On its mark for a duel's countdown, or stunned in one (or in the
-    // Wilds, down or stunned): it may turn, not walk (put right without a
-    // strike: its app eases it there).
+    // On its mark for a duel's countdown, or stunned or caught by a Cymbal
+    // Trap in one (or in the Wilds, down, stunned or caught): it may turn,
+    // not walk (put right without a strike: its app eases it there).
     const held =
       this.duels?.hold(p.uid, next.x, next.z, now) ??
       this.wilds?.hold(p.uid, next.x, next.z, now);
@@ -995,10 +998,13 @@ export class TownRoom extends DurableObject<Env> {
       this.drop(s, TOWN_CLOSE.sealed, "down");
       return false;
     }
-    // Another event's Tower, or one that ended: start over.
+    // Another event's Tower, one that ended, or a climb started over (the
+    // Tower Guard's reset): start over.
     if (
       this.fight &&
-      (claim.event !== this.fight.eventId || !this.fight.open)
+      (claim.event !== this.fight.eventId ||
+        !this.fight.open ||
+        (claim.climb !== undefined && claim.climb !== this.fight.climbNo))
     ) {
       this.fight = null;
       this.closeScheduled = false;
@@ -1030,6 +1036,35 @@ export class TownRoom extends DurableObject<Env> {
     const moved = this.fight.next(p.uid, now);
     if (moved.length) p.guard.respawn = true;
     for (const o of moved) this.dispatch(o);
+  }
+
+  /** E by the Tower's chest: the fight opens it if they're close enough
+   * once it's landed (too soon or too far is lag, not a cheat). */
+  private onChestOpen(s: Session, now: number) {
+    const p = s.player;
+    if (!p || !this.fight?.tower) {
+      this.strike(s);
+      return;
+    }
+    for (const o of this.fight.chestOpen(p.uid, now)) this.dispatch(o);
+  }
+
+  /** A Tower pick: an offer's index, or null to skip. One the climb hasn't
+   * earned, or an index past the offers, is just ignored (a second click
+   * on the last pick, offers moved on); one that isn't an index or null is
+   * struck. */
+  private onTowerPick(s: Session, offer: unknown) {
+    const p = s.player;
+    if (
+      !p ||
+      !this.fight?.tower ||
+      (offer !== null && !Number.isInteger(offer))
+    ) {
+      this.strike(s);
+      return;
+    }
+    for (const o of this.fight.towerPick(p.uid, offer as number | null))
+      this.dispatch(o);
   }
 
   private onCast(s: Session, message: ArrayBuffer, now: number) {

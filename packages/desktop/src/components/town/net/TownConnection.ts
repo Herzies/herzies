@@ -545,6 +545,25 @@ export class TownConnection {
     this.sendJson({ t: "next" });
   }
 
+  /** In the Tower: open the cleared floor's chest. The room judges reach
+   * and whether it's settled; it answers with the floor (no chest), and
+   * the loot follows. False if there's no room to ask. */
+  sendChestOpen(): boolean {
+    if (this.status !== "online") return false;
+    this.sendJson({ t: "chestOpen" });
+    return true;
+  }
+
+  /** In the Tower: spend the climb's next pick on offer `offer` of the
+   * floor's offers (its index), or skip it (null). The room answers with
+   * the floor (its boons, picks and next offers). False if there's no
+   * room to ask. */
+  sendTowerPick(offer: number | null): boolean {
+    if (this.status !== "online") return false;
+    this.sendJson({ t: "towerPick", offer });
+    return true;
+  }
+
   /** Eat a consumable in a boss fight, where the room holds HP. `seq`
    * comes back in its `ate`. False if there's no room to ask. */
   sendEat(item: string, seq: number): boolean {

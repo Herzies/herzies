@@ -178,8 +178,10 @@ Deno.serve(async (request) => {
   }
 
   // The Tower: only while a Tower event is on, and only on your feet. Each
-  // herzie has a room of their own there, named by their user id.
-  let tower: { event: string; until: number; floor: number } | undefined;
+  // herzie has a room of their own there, named by their user id. The
+  // claim (00161's open_tower_json) starts you one past the floor your
+  // climb has reached, with its boons and its number.
+  let tower: TownTicketPayload["tower"];
   if (map === "tower") {
     if (vitals.down) {
       return jsonResponse({ error: "Knocked out", reason: "down" }, 403);

@@ -9,9 +9,10 @@
 // `?net=local` joins the multiplayer Town on `wrangler dev` (in
 // packages/town-server, with TOWN_TICKET_SECRET=dev-town-secret in .dev.vars);
 // `&name=` and `&server=ws://…` to taste. Open it twice to see each other.
-// Duels too: in each tab, click the other's name, then "Challenge to duel"
+// Duels too: in each tab, click the other's name (or stand by them and
+// press E), then "Challenge to duel" ([1])
 // (within 8 u); `&title=` wears a title (a titles.ts id, e.g.
-// `&title=duel-10`), shown over the name and on the duel's cards.
+// `&title=duel-10`), shown under the name and on the duel's cards.
 // `?map=bossroom` (with `?net=local`) joins the boss's cave on `wrangler dev`
 // (`&lobby=20` makes it a raid that locks 20 s after loading; `&per=` sets
 // its health per herzie)
@@ -345,7 +346,7 @@ const player = {
 };
 // `?hotbar=star-candy`: that item on slot 2, with three in a pretend bank.
 const hotbarParam = params.get("hotbar");
-if (hotbarParam) assignHotbar("2", hotbarParam);
+if (hotbarParam) assignHotbar(1, hotbarParam);
 const hotbarUnits: ItemUnit[] = hotbarParam
   ? [0, 1, 2].map((i) => ({
       id: `sandbox-${i}`,

@@ -25,6 +25,9 @@ export type WildsStanding = {
   shield: number | null;
   /** Stunned until. */
   stun: number | null;
+  /** Held by a Cymbal Trap until: it can't walk, but may still turn,
+   * attack and use skills. */
+  root: number | null;
   /** Last hurt (its bar shows for a while after). */
   hurtAt: number;
 };
@@ -46,6 +49,8 @@ export type WildsEvent =
       damage: number;
       crit: boolean;
       blocked: boolean;
+      /** A Forbidden Frequency bleed hit. */
+      bleed: boolean;
     }
   | { k: "stun"; id: number; until: number }
   | { k: "down"; id: number }
@@ -124,11 +129,20 @@ export function myWildsDown(): boolean {
   return wildsDown(wilds.you);
 }
 
-/** Your herzie is held where it stands: down, or stunned. */
+/** Your herzie is held where it stands: down, or stunned. Nothing goes off
+ * either (see {@link wildsRooted} for a hold that only stops your feet). */
 export function wildsHeld(now = performance.now()): boolean {
   if (wilds.you === null) return false;
   const s = wilds.standing.get(wilds.you);
   return !!s && (s.down !== null || (s.stun !== null && now < s.stun));
+}
+
+/** Your herzie is held where it stands by a Cymbal Trap: it can't walk
+ * (or jump), but turns, attacks and uses skills as ever. */
+export function wildsRooted(now = performance.now()): boolean {
+  if (wilds.you === null) return false;
+  const root = wilds.standing.get(wilds.you)?.root ?? null;
+  return root !== null && now < root;
 }
 
 /**
@@ -214,6 +228,7 @@ function standingOf(
     down: m.down !== undefined ? ctx.toLocal(m.down) : null,
     shield: m.shield !== undefined ? ctx.toLocal(m.shield) : null,
     stun: was?.stun ?? null,
+    root: was?.root ?? null,
     hurtAt: was?.hurtAt ?? Number.NEGATIVE_INFINITY,
   };
 }
@@ -246,9 +261,10 @@ export function handleWildsMessage(
         if (m.id === wilds.you) wilds.hurtMeAt = now;
       }
       if (up) {
-        // Up in the camp: not stunned, its last fight over (as the server
-        // has it), and that isn't a heal to show.
+        // Up in the camp: not stunned nor held, its last fight over (as
+        // the server has it), and that isn't a heal to show.
         next.stun = null;
+        next.root = null;
         next.hurtAt = Number.NEGATIVE_INFINITY;
         if (m.id === wilds.you) wilds.hurtMeAt = Number.NEGATIVE_INFINITY;
       } else if (m.hp !== before)
@@ -273,6 +289,7 @@ export function handleWildsMessage(
         damage: m.damage,
         crit: m.crit,
         blocked: !!m.blocked,
+        bleed: !!m.bleed,
       });
       return true;
     case "pvpStun": {
@@ -282,6 +299,16 @@ export function handleWildsMessage(
       fire({ k: "stun", id: m.id, until });
       emit();
       return true;
+    }
+    case "trap": {
+      // A Cymbal Trap's hold on a herzie. Also everyone's (the cymbal's
+      // show, its sound: fight.ts), so not the free-for-all's alone.
+      const s = m.mob ? undefined : wilds.standing.get(m.target);
+      if (s) {
+        s.root = ctx.toLocal(m.until);
+        emit();
+      }
+      return false;
     }
     case "pvpFeed": {
       if (m.victim === wilds.you) wilds.downBy = m.byName;

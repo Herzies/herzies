@@ -12,6 +12,7 @@ import {
   duel,
   duelFighting,
   duelHeld,
+  duelRooted,
   handleDuelMessage,
   inDuel,
   myOpponent,
@@ -198,6 +199,25 @@ describe("a duel", () => {
     // Someone else's stun isn't yours.
     recv({ t: "duelStun", id: 2, until: s.startsAt + 5_000 });
     expect(duelHeld()).toBe(false);
+  });
+
+  it("holds your feet while a cymbal traps you, and nothing else", () => {
+    const s = state();
+    recv({ t: "duel", ...s, phase: "fight" });
+    now = s.startsAt + OFFSET + 100;
+    // Also the room's (its cymbal's show): not the duel's alone.
+    expect(
+      recv({ t: "trap", by: 2, target: 1, until: s.startsAt + 2_000 }),
+    ).toBe(false);
+    expect(duelRooted()).toBe(true);
+    // Not a stun: you may still attack and use skills.
+    expect(duelHeld()).toBe(false);
+    now = s.startsAt + OFFSET + 2_000;
+    expect(duelRooted()).toBe(false);
+    // Someone else's hold isn't yours, nor a mob's that shares your id.
+    recv({ t: "trap", by: 1, target: 2, until: s.startsAt + 5_000 });
+    recv({ t: "trap", by: 2, target: 1, mob: true, until: s.startsAt + 5_000 });
+    expect(duelRooted()).toBe(false);
   });
 
   it("takes a phase's news without starting over", () => {

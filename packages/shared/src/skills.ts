@@ -5,8 +5,11 @@
  *
  * Design rules (see the classes plan):
  *  - The Town server decides; the client predicts cooldowns and buffers input.
- *  - Skill XP pays for what a skill actually did — HP restored, damage
- *    absorbed, damage dealt — never for pressing the button. Overheal is 0.
+ *  - Skill XP pays per use that did something (hit, healed, blocked, held,
+ *    buffed someone who then fought), never for a press that did nothing.
+ *    Every use pays in proportion to the skill's cooldown, so pressing any
+ *    skill whenever it's ready levels it at the same pace, at any herzie
+ *    level and with any gear (skillXpPerUse).
  *  - The same buff from several casters doesn't stack: the strongest applies.
  *  - Damage reduction multiplies and is clamped, so it never reaches 100%.
  *
@@ -23,6 +26,12 @@ export const SKILL_IDS = [
   "haste",
   "shuffle",
   "rimshot",
+  "cymbal-trap",
+  "multispin",
+  "rage",
+  "focus",
+  "forbidden-frequency",
+  "silencio",
 ] as const;
 export type SkillId = (typeof SKILL_IDS)[number];
 
@@ -34,7 +43,8 @@ export interface SkillDef {
   id: SkillId;
   name: string;
   kind: SkillKind;
-  /** Short description; `{v}` is replaced with the level's value. */
+  /** Short description; `{v}` is replaced with the level's value, `{d}`
+   * with its length (skillDurationMs) in seconds. */
   describe: string;
   /** Effect value at level 1 and level 10; linear in between. A fraction:
    * 0.2 is 20% (of max HP healed, of damage reduced, of a normal hit),
@@ -44,8 +54,11 @@ export interface SkillDef {
    * not a share: what one and several of them are called. */
   count?: readonly [string, string];
   cooldownMs: number;
-  /** Buffs only: how long the buff lasts. */
+  /** Buffs only: how long the buff lasts (at level 1). */
   durationMs?: number;
+  /** How long it lasts at SKILL_MAX_LEVEL, when it grows with the skill:
+   * linear from `durationMs` at level 1 (skillDurationMs). */
+  maxDurationMs?: number;
   /** Heals: who is in reach, metres from the caster. A revive: how close
    * the downed herzie must be. */
   radius?: number;
@@ -56,13 +69,12 @@ export interface SkillDef {
    * lands (only going down cancels it). Its cooldown runs from the press. */
   castMs?: number;
   /** A skill a class learns later: the herzie level it's learned at (the
-   * database grants it then; see 00137_shuffle.sql). */
+   * database grants it then; see 00160_skill_unlocks.sql). */
   minLevel?: number;
-  /** Skill XP per unit of effect (per HP healed, per damage absorbed, per
-   * damage dealt). Meant to make each class level at a similar pace over
-   * the same number of fights — first guesses, not yet calibrated against
-   * a simulated fight with skill-using players. */
-  xpPerUnit: number;
+  /** Learned only once another skill of the class has reached `level` as
+   * well as the herzie `minLevel` (the database grants it on whichever
+   * comes last). */
+  requires?: { skill: SkillId; level: number };
 }
 
 export const SKILL_DEFS: Record<SkillId, SkillDef> = {
@@ -76,7 +88,6 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     // between, so this one comes round often.
     cooldownMs: 12_000,
     radius: 8,
-    xpPerUnit: 1 / 6,
   },
   backspin: {
     id: "backspin",
@@ -87,7 +98,6 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     // burst worth pressing, not a weaker throw.
     value: [1.5, 2.5],
     cooldownMs: 12_000,
-    xpPerUnit: 1 / 40,
   },
   cymbrella: {
     id: "cymbrella",
@@ -101,8 +111,6 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     value: [3, 5],
     count: ["second", "seconds"],
     cooldownMs: 30_000,
-    // Per HP it kept off anyone inside (as a heal pays per HP restored).
-    xpPerUnit: 1 / 6,
   },
   resurrect: {
     id: "resurrect",
@@ -116,8 +124,6 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     cooldownMs: 30_000,
     channelMs: 3_000,
     radius: 4,
-    // Per HP brought back, as a heal pays.
-    xpPerUnit: 1 / 6,
   },
   taunt: {
     id: "taunt",
@@ -130,27 +136,22 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     // trading it is the job.
     cooldownMs: 20_000,
     durationMs: 10_000,
-    // Per point of boss damage it drew onto you (aimed, before Def): what
-    // a taunt is for.
-    xpPerUnit: 0.25,
   },
   haste: {
     id: "haste",
     name: "Haste",
     kind: "buff",
     describe:
-      "A quickening tune: every herzie nearby (you too) attacks {v} faster for 12 s.",
+      "A quickening tune: every herzie nearby (you too) attacks {v} faster for {d}.",
     // Raid-wide attack speed, as Bloodlust/Heroism (30%) or a Bard's
     // songs: strong, so on a long cooldown, to be called at the right time.
+    // Like every Bard buff, it lasts longer as the skill grows.
     value: [0.25, 0.4],
     cooldownMs: 60_000,
     durationMs: 12_000,
+    maxDurationMs: 18_000,
     radius: 10,
     minLevel: 15,
-    // Per point of extra damage the hasted dealt because of it (the share
-    // of their hits that haste added): the Backspin scale, a little lower
-    // since it comes from many hands at once.
-    xpPerUnit: 1 / 150,
   },
   shuffle: {
     id: "shuffle",
@@ -167,25 +168,226 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     cooldownMs: 30_000,
     durationMs: 10_000,
     minLevel: 15,
-    // Per point of damage the bounces dealt (the first hit is a plain
-    // throw's): Backspin's scale.
-    xpPerUnit: 1 / 40,
+  },
+  multispin: {
+    id: "multispin",
+    name: "Multispin",
+    kind: "attack",
+    describe:
+      "Sets {v} spinning round you for 8 s: each one that touches an enemy hits it for 60% of a wave.",
+    // One record at level 1, one more a level, ten at the cap. For when
+    // you're surrounded: a pack, or a melee opponent up close. See
+    // MULTISPIN for the orbit; each record is its own hit, so more
+    // records hit more often, and hit more of a crowd.
+    value: [1, 10],
+    count: ["record", "records"],
+    cooldownMs: 24_000,
+    durationMs: 8_000,
+    minLevel: 20,
+    requires: { skill: "shuffle", level: 8 },
+  },
+  rage: {
+    id: "rage",
+    name: "Rage",
+    kind: "buff",
+    describe:
+      "A rousing tune: every herzie nearby (you too) hits {v} harder for {d}.",
+    // Raid-wide damage, strengthened by Euphony as Haste is (capped at
+    // RAGE_MAX).
+    value: [0.1, 0.2],
+    cooldownMs: 40_000,
+    durationMs: 15_000,
+    maxDurationMs: 22_000,
+    radius: 10,
+    minLevel: 20,
+  },
+  focus: {
+    id: "focus",
+    name: "Focus",
+    kind: "buff",
+    describe:
+      "A steadying tune: every herzie nearby (you too) gains +{v} for {d}: faster attacks, more crits.",
+    // Flat Timing on top of the herzie's own, strengthened by Euphony as
+    // Haste is (capped at FOCUS_MAX). Timing's returns diminish
+    // (timingShare in stats.ts), so it's worth most to those with little.
+    value: [5, 20],
+    count: ["Timing", "Timing"],
+    cooldownMs: 60_000,
+    durationMs: 15_000,
+    maxDurationMs: 22_000,
+    radius: 10,
+    minLevel: 30,
+    requires: { skill: "rage", level: 8 },
   },
   rimshot: {
     id: "rimshot",
     name: "Rimshot",
     kind: "attack",
     describe:
-      "Winds up for 0.8 s, then slams the ground: every enemy within 3.5 m takes twice a strike, each with a {v} chance to be stunned for 2 s (the boss 1 s, half that again for each stun in the last 16 s), cutting short whatever it was winding up.",
+      "Winds up for 0.8 s, then slams the ground: every enemy within 3.5 m takes five strikes' worth, each with a {v} chance to be stunned for 2 s (the boss 1 s, half that again for each stun in the last 16 s), cutting short whatever it was winding up.",
     // The chance to stun each enemy hit (see RIMSHOT).
     value: [0.25, 0.5],
     cooldownMs: 10_000,
     castMs: 800,
     minLevel: 15,
-    // Per point of damage it dealt.
-    xpPerUnit: 1 / 40,
+  },
+  "cymbal-trap": {
+    id: "cymbal-trap",
+    name: "Cymbal Trap",
+    kind: "attack",
+    describe:
+      "Throws your cymbal: the first enemy it meets within 18 m takes a strike, and the cymbal spins round it, holding it where it stands for {v} (it can still attack). The boss is too big to hold.",
+    // How long it holds (seconds): see CYMBAL_TRAP for its reach and
+    // flight. A herzie walks 4.5 m a second, so each second held is that
+    // much ground a Percussionist makes up on one running from it.
+    value: [2, 3],
+    count: ["second", "seconds"],
+    // Longer than CYMBAL_TRAP.drWindowMs: one Percussionist's traps never
+    // shorten each other.
+    cooldownMs: 18_000,
+    minLevel: 20,
+    requires: { skill: "rimshot", level: 5 },
+  },
+  "forbidden-frequency": {
+    id: "forbidden-frequency",
+    name: "Forbidden Frequency",
+    kind: "attack",
+    describe:
+      "Throws a disc tuned to a frequency nothing should hear: what it hits bleeds for 1 minute (12 s on a herzie), each bleed hit {v} of a wave, one a second. Stacks up to 3 times, each stack bleeding faster; each new hit starts the time over.",
+    // A bleed hit's share of a wave: see FORBIDDEN_FREQUENCY. The
+    // Slinger's answer to one big target (a boss, a duel): kept at three
+    // stacks, it adds about half again to its damage. The bleed outlasts
+    // the cooldown by far, so three throws build it and one every so often
+    // keeps it up.
+    value: [0.1, 0.2],
+    cooldownMs: 15_000,
+    durationMs: 60_000,
+    minLevel: 30,
+  },
+  silencio: {
+    id: "silencio",
+    name: "Silencio",
+    kind: "attack",
+    describe:
+      "Hushes the air for 0.5 s (you can't move), then a wave of silence bursts out of you: every enemy within 5 m is flung out before it, a little further than a Cymbrella's dome, and bleeds {v} of a wave a second for 8 s. The boss is too big to fling and herzies hold their ground: they only bleed.",
+    // A bleed hit's share of a wave: see SILENCIO for the wave. The Bard's
+    // answer to a pack on its healers: room to breathe, and a bleed on
+    // everything it moved. Its wind-up holds the Bard still and swings
+    // nothing for half a second, so the bleed pays that back: 2.4 waves
+    // over its 8 s at level 1, 4 at the cap, on each enemy it caught.
+    value: [0.3, 0.5],
+    cooldownMs: 20_000,
+    durationMs: 8_000,
+    castMs: 500,
+    minLevel: 25,
+    requires: { skill: "rage", level: 3 },
   },
 };
+
+/** Forbidden Frequency's bleed: how many stacks one target holds, and how
+ * often it hits. One bleed per target, whoever threw it: a new hit adds a
+ * stack (up to `maxStacks`) and starts its time over — SKILL_DEFS'
+ * `durationMs` on a mob or the boss, `herzieMs` on a herzie (a duel or the
+ * Wilds is over in well under a minute) — at the stronger of the two
+ * throwers' levels, credited to the newest. Stacks quicken it: it hits
+ * every `tickMs` / stacks (one a second, two, three), each hit skillValue
+ * of a wave from its thrower's stats (no crit), through Def, damage buffs
+ * and domes like any hit (a dome turns a hit away; the bleed runs on), and
+ * said to the thrower as a bleed hit (the `bleed` flag on hit, duelHit,
+ * pvpHit). It ends when the time runs out or the target falls. The disc
+ * itself flies like a thrown disc (DISC_RANGE, discLandsAfterMs) and deals
+ * no hit of its own. */
+export const FORBIDDEN_FREQUENCY = {
+  maxStacks: 3,
+  tickMs: 1_000,
+  herzieMs: 12_000,
+} as const;
+
+/** How often a bleed of `stacks` hits, ms. */
+export function bleedEveryMs(stacks: number): number {
+  return (
+    FORBIDDEN_FREQUENCY.tickMs /
+    Math.max(1, Math.min(FORBIDDEN_FREQUENCY.maxStacks, stacks))
+  );
+}
+
+/** Silencio, a Bard's wave of silence. It bursts from where its caster
+ * stood when the wind-up (SKILL_DEFS.silencio.castMs) ends. Every enemy
+ * whose body is within `radius` then bleeds, a bleed of its own beside
+ * Forbidden Frequency's: one stack, hitting every FORBIDDEN_FREQUENCY.tickMs
+ * for skillValue of a wave like Forbidden Frequency's (no crit), for
+ * SKILL_DEFS' `durationMs` on anything; a new one starts the time over.
+ * Every mob there is flung out before the wave, which grows as a
+ * Cymbrella's dome does (domeRadiusAt, DOME.growMs) but to `radius`, a
+ * metre past the dome's edge, and is gone `standMs` after it bursts: then
+ * they may walk back in. It shelters nobody. The boss is too big to fling,
+ * and a herzie (a duel, the Wilds) moves itself: they only bleed. */
+export const SILENCIO = {
+  radius: 5,
+  standMs: 500,
+} as const;
+
+/** Cymbal Trap, a thrown cymbal: how far it flies, how fast (its hit lands
+ * after the flight, like a disc's), its blow as a share of a strike's, and
+ * its hold's diminishing returns. A hold isn't a stun: the target can't
+ * walk (a mob can't lunge either) but can turn, attack and use skills. Its
+ * returns are its own, apart from a stun's (WoW keeps roots and stuns in
+ * separate categories): each hold on the same target in the last
+ * `drWindowMs` halves the next (stunMs in combat.ts). The boss is never
+ * held: it takes the blow only. A blow a Cymbrella's dome takes holds
+ * nobody. */
+export const CYMBAL_TRAP = {
+  range: 18,
+  speed: 24,
+  damage: 1,
+  drWindowMs: 16_000,
+} as const;
+
+/** How long a Cymbal Trap's cymbal is in the air to `dist` metres. */
+export function cymbalLandsAfterMs(dist: number): number {
+  return Math.round((Math.max(0, dist) / CYMBAL_TRAP.speed) * 1000);
+}
+
+/** Multispin: records orbiting their Slinger, its centre wherever the
+ * Slinger stands now. `radius`: from the Slinger's centre to a record's,
+ * on the ground plane, inside melee reach so the records pass through
+ * whatever's fighting you up close; `turnMs`: one turn round; each record
+ * is a disc of `recordRadius`. A record touches an enemy whose body it
+ * overlaps, and also one standing inside its ring (its centre nearer the
+ * Slinger than `radius`) as the record sweeps past its bearing: nothing is
+ * safe hugging the Slinger. A touch hits for `damage` of a wave (a disc's
+ * share in a duel or the Wilds, as Backspin), and the same record can't
+ * touch the same enemy again for `rehitMs`. The boss counts: each record
+ * touches its body. */
+export const MULTISPIN = {
+  radius: 1.4,
+  recordRadius: 0.35,
+  turnMs: 1_200,
+  damage: 0.6,
+  rehitMs: 600,
+} as const;
+
+/** How many records a Multispin at skill `level` spins. */
+export function multispinRecords(level: number): number {
+  return Math.round(skillValue("multispin", level));
+}
+
+/** Where record `i` of `n` is, `elapsedMs` into its Multispin, from its
+ * Slinger's centre (x, z; anticlockwise seen from above, spread evenly
+ * round). The server's touches and the app's drawing both come from this. */
+export function multispinOffset(
+  i: number,
+  n: number,
+  elapsedMs: number,
+): { x: number; z: number } {
+  const a =
+    (2 * Math.PI * elapsedMs) / MULTISPIN.turnMs +
+    (2 * Math.PI * i) / Math.max(1, n);
+  return {
+    x: Math.cos(a) * MULTISPIN.radius,
+    z: Math.sin(a) * MULTISPIN.radius,
+  };
+}
 
 /** Rimshot, a ground slam: how far round its caster it reaches, its blow
  * on each enemy there as a share of a strike's, and its stun: how long on
@@ -193,19 +395,30 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
  * stun on the same target is halved again (WoW-style diminishing
  * returns, so two Percussionists can't keep the boss locked). Its wind-up
  * is SKILL_DEFS.rimshot.castMs; the herzie's slam lands at its end
- * (gl/HerzieModel SLAM_RELEASE_SECONDS). */
+ * (gl/HerzieModel SLAM_RELEASE_SECONDS). The blow is five strikes: the
+ * wind-up and the slam cost about four swings of the stick, and the slam
+ * must out-hit them on every enemy it reaches. */
 export const RIMSHOT = {
   radius: 3.5,
-  damage: 2,
+  damage: 5,
   stunMs: 2_000,
   bossStunScale: 0.5,
   drWindowMs: 16_000,
 } as const;
 
-/** The skills a class has learned by herzie level `level` (a skill with no
- * minLevel from the start). */
-export function skillLearned(id: SkillId, level: number): boolean {
-  return level >= (SKILL_DEFS[id].minLevel ?? 0);
+/** Whether a herzie at `level` has unlocked skill `id`: its `minLevel`
+ * reached, and its `requires` met (`levelOf`: the herzie's level in a
+ * skill it knows, undefined for one it doesn't). Mirrored by
+ * grant_earned_skills (00160_skill_unlocks.sql). */
+export function skillUnlocked(
+  id: SkillId,
+  level: number,
+  levelOf: (skill: SkillId) => number | undefined,
+): boolean {
+  const def = SKILL_DEFS[id];
+  if (level < (def.minLevel ?? 0)) return false;
+  if (!def.requires) return true;
+  return (levelOf(def.requires.skill) ?? 0) >= def.requires.level;
 }
 
 /** Shuffle: how far a disc bounces on from what it hit, centre to centre
@@ -213,6 +426,11 @@ export function skillLearned(id: SkillId, level: number): boolean {
 /** The most attack speed a Haste can give, however much Euphony is behind
  * it (+50%). */
 export const HASTE_MAX = 0.5;
+/** The most extra damage a Rage can give, however much Euphony is behind
+ * it (+30%). */
+export const RAGE_MAX = 0.3;
+/** The most Timing a Focus can give, however much Euphony is behind it. */
+export const FOCUS_MAX = 30;
 
 export const SHUFFLE_REACH = 9;
 export const SHUFFLE_FALLOFF = 0.7;
@@ -250,8 +468,21 @@ export function clampSkillLevel(level: number): number {
 /** The skill's effect at `level`: linear from level 1 to SKILL_MAX_LEVEL. */
 export function skillValue(id: SkillId, level: number): number {
   const [lo, hi] = SKILL_DEFS[id].value;
-  const t = (clampSkillLevel(level) - 1) / (SKILL_MAX_LEVEL - 1);
-  return lo + (hi - lo) * t;
+  return lo + (hi - lo) * levelShare(level);
+}
+
+/** How far `level` is from level 1 to SKILL_MAX_LEVEL, 0..1. */
+function levelShare(level: number): number {
+  return (clampSkillLevel(level) - 1) / (SKILL_MAX_LEVEL - 1);
+}
+
+/** How long a use of the skill at `level` lasts, ms (0 for one that
+ * doesn't): its `durationMs`, growing to `maxDurationMs` at
+ * SKILL_MAX_LEVEL in whole seconds, for a skill whose length grows. */
+export function skillDurationMs(id: SkillId, level: number): number {
+  const { durationMs = 0, maxDurationMs = durationMs } = SKILL_DEFS[id];
+  const ms = durationMs + (maxDurationMs - durationMs) * levelShare(level);
+  return Math.round(ms / 1000) * 1000;
 }
 
 export function describeSkill(id: SkillId, level: number): string {
@@ -262,7 +493,9 @@ export function describeSkill(id: SkillId, level: number): string {
     ? `${n} ${n === 1 ? count[0] : count[1]}`
     : `${Math.round(v * 100)}%`;
   // A skill without a value (Taunt) has no {v} to fill.
-  return SKILL_DEFS[id].describe.replace("{v}", shown);
+  return SKILL_DEFS[id].describe
+    .replace("{v}", shown)
+    .replace("{d}", `${skillDurationMs(id, level) / 1000} s`);
 }
 
 // --- Skill XP ---------------------------------------------------------------
@@ -312,9 +545,18 @@ export function skillLevelProgress(progress: SkillProgress): number {
   return Math.min(1, Math.max(0, (progress.xp - from) / need));
 }
 
-/** XP earned for `units` of effect. */
-export function skillXpFor(id: SkillId, units: number): number {
-  return Math.max(0, units) * SKILL_DEFS[id].xpPerUnit;
+/** How many hours of pressing a skill whenever it's ready (in fights where
+ * it does something) take it from level 1 to SKILL_MAX_LEVEL. */
+export const SKILL_XP_HOURS = 10;
+
+/** The skill XP one use of `id` pays when it did something: its share of
+ * SKILL_XP_HOURS, by its cooldown. A 12 s skill pays about 0.86, a 60 s
+ * one about 4.3; the Town server adds them up unrounded and sends whole
+ * points (the rest carries over). */
+export function skillXpPerUse(id: SkillId): number {
+  const perSecond =
+    skillTotalXpForLevel(SKILL_MAX_LEVEL) / (SKILL_XP_HOURS * 3600);
+  return (perSecond * SKILL_DEFS[id].cooldownMs) / 1000;
 }
 
 // --- Buffs and mitigation ---------------------------------------------------
@@ -324,14 +566,19 @@ export function skillXpFor(id: SkillId, units: number): number {
  * holds it; no stat). `in_tune`: listening to what the boss hates, a class
  * bonus whose `kind` says what it does. `haste`: attacks this much faster
  * (0.3 = 30% more often). `shuffle`: thrown discs bounce on this many
- * times. */
+ * times. `multispin`: this many records orbit the herzie (it began
+ * `SKILL_DEFS.multispin.durationMs` before `until`). `rage`: hits this
+ * much harder (0.1 = 10%). `focus`: this much Timing on top of its own. */
 export type BuffId =
   | "cymbrella"
   | "taunt"
   | "in_tune"
   | "rattled"
   | "haste"
-  | "shuffle";
+  | "shuffle"
+  | "multispin"
+  | "rage"
+  | "focus";
 
 /** What an in-tune bonus does: less damage taken, stronger heals, harder
  * hits. */
@@ -358,16 +605,20 @@ export function buffReductions(buffs: readonly Buff[], now: number): number[] {
     .map((b) => b.value);
 }
 
-/** A multiplier a buff list gives at `now` for `kind` (1 if none). */
+/** A multiplier a buff list gives at `now` for `kind` (1 if none): an
+ * in-tune bonus's, and for damage a Rage's on top. */
 export function buffMultiplier(
   buffs: readonly Buff[],
   kind: "heal" | "damage",
   now: number,
 ): number {
   let m = 1;
-  for (const b of activeBuffs(buffs, now))
+  let rage = 0;
+  for (const b of activeBuffs(buffs, now)) {
     if (b.id === "in_tune" && b.kind === kind) m *= b.value;
-  return m;
+    if (b.id === "rage" && kind === "damage") rage = Math.max(rage, b.value);
+  }
+  return m * (1 + rage);
 }
 
 /** Adds a buff under the no-stacking rule: one of each kind. A stronger
@@ -412,6 +663,16 @@ export function shuffleOn(buffs: readonly Buff[], now: number): number {
   for (const b of activeBuffs(buffs, now))
     if (b.id === "shuffle") n = Math.max(n, Math.round(b.value));
   return n;
+}
+
+/** How much Timing a buff list adds at `now`: its Focus's, or 0. Added to
+ * the herzie's own before its attack speed and crit chance are worked out
+ * (timingAttackSpeed, timingCritChance in stats.ts). */
+export function focusTiming(buffs: readonly Buff[], now: number): number {
+  let t = 0;
+  for (const b of activeBuffs(buffs, now))
+    if (b.id === "focus") t = Math.max(t, b.value);
+  return t;
 }
 
 export function activeBuffs(buffs: readonly Buff[], now: number): Buff[] {

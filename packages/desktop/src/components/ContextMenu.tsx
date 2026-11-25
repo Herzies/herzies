@@ -29,6 +29,7 @@ export function ContextMenu({
   onClose,
   heading,
   closeOnScroll = true,
+  numbered = false,
 }: {
   x: number;
   y: number;
@@ -41,6 +42,9 @@ export function ContextMenu({
    * to the newest message), which would otherwise dismiss the menu on its
    * own a moment after it opened. */
   closeOnScroll?: boolean;
+  /** Number the items `[1]`, `[2]`…: while open, those keys pick them,
+   * ahead of anything else on them (the Town's hotbar). */
+  numbered?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -56,6 +60,31 @@ export function ContextMenu({
     };
   }, [onClose, closeOnScroll]);
   useEscape(onClose);
+  useEffect(() => {
+    if (!numbered) return;
+    // Capturing on window runs before the Town's own (bubbling) listener,
+    // and stopping it there keeps the hotbar from also firing.
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || !e.code.startsWith("Digit"))
+        return;
+      const el = e.target as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.tagName === "SELECT" ||
+          el.isContentEditable)
+      )
+        return;
+      const item = items[Number(e.code.slice(5)) - 1];
+      if (!item) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (!e.repeat && !item.disabled) item.onClick();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [numbered, items]);
 
   const width = items.some((i) => i.hint) ? MENU_WIDTH_HINTED : MENU_WIDTH;
   const left = Math.min(x, window.innerWidth - width - EDGE_PADDING);
@@ -80,7 +109,7 @@ export function ContextMenu({
           {heading}
         </div>
       ) : null}
-      {items.map((item) => (
+      {items.map((item, i) => (
         <button
           key={item.label}
           type="button"
@@ -88,7 +117,12 @@ export function ContextMenu({
           className="flex w-full cursor-pointer items-center justify-between gap-3 border-none bg-transparent px-3 py-1 text-left text-text hover:bg-white/5 disabled:cursor-default disabled:text-text-dim disabled:hover:bg-transparent"
           onClick={item.onClick}
         >
-          <span>{item.label}</span>
+          <span>
+            {numbered ? (
+              <span className="mr-1.5 text-text-dim">[{i + 1}]</span>
+            ) : null}
+            {item.label}
+          </span>
           {item.hint ? (
             <span className="text-ui-sm text-text-dim">{item.hint}</span>
           ) : null}

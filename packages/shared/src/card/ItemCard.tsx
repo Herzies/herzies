@@ -18,13 +18,12 @@ import {
   ItemStatLines,
   ItemTypeTag,
   ModifierEffectTag,
-  SetTag,
   type TagTooltip,
 } from "./tags.js";
 
 /** How strongly each rarity's frame shines (the `.holo-foil` layer's
  * `--foil`) — a common card is plain cardstock, a mythic one full foil. */
-const RARITY_FOIL: Record<Rarity, number> = {
+export const RARITY_FOIL: Record<Rarity, number> = {
   common: 0,
   uncommon: 0.35,
   rare: 0.55,
@@ -35,14 +34,38 @@ const RARITY_FOIL: Record<Rarity, number> = {
 /** Rarities whose art window is foil too, like a real holo card's. */
 const HOLO_ART: ReadonlySet<Rarity> = new Set(["legendary", "mythic"]);
 
+/** A card frame in the rarity's colour, lit from the top-left. */
+export function rarityFrameBackground(rarity: Rarity): string {
+  const c = ITEM_RARITY_COLORS[rarity];
+  return `linear-gradient(135deg, color-mix(in srgb, ${c} 55%, white), color-mix(in srgb, ${c} 75%, #12121e) 35%, color-mix(in srgb, ${c} 40%, #12121e) 70%, color-mix(in srgb, ${c} 70%, #12121e))`;
+}
+
 /** The card's metallic frame: the set's gradient for a set member (the same
- * clue its small icon wears), otherwise the rarity colour, lit from the
- * top-left. */
+ * clue its small icon wears), otherwise the rarity's (rarityFrameBackground). */
 export function cardFrameBackground(itemId: string, rarity: Rarity): string {
   const gradient = getItemIconGradient(itemId);
   if (gradient) return `linear-gradient(135deg, ${gradient.join(", ")})`;
+  return rarityFrameBackground(rarity);
+}
+
+/** A rarity as a card prints it, bottom left: its diamond and its name in
+ * its colour ("◆ Legendary"). The diamond stands on the text's baseline,
+ * 0.75em across, let down 0.08em: its middle is then level with the
+ * middle of a capital (about 0.29em up) at any size. Centred on the line
+ * box instead, it sat low of the letters. */
+export function RarityMark({ rarity }: { rarity: Rarity }) {
   const c = ITEM_RARITY_COLORS[rarity];
-  return `linear-gradient(135deg, color-mix(in srgb, ${c} 55%, white), color-mix(in srgb, ${c} 75%, #12121e) 35%, color-mix(in srgb, ${c} 40%, #12121e) 70%, color-mix(in srgb, ${c} 70%, #12121e))`;
+  return (
+    <span className="inline-flex items-baseline gap-1">
+      <span
+        className="inline-block size-[0.75em] translate-y-[0.08em] rotate-45"
+        style={{ background: c }}
+      />
+      <span className="italic" style={{ color: c }}>
+        {RARITY_LABELS[rarity]}
+      </span>
+    </span>
+  );
 }
 
 /** The item as a collector card: framed art (its commissioned
@@ -135,19 +158,18 @@ export function ItemCard({
               style={{ "--foil": 0.6 } as CSSProperties}
             />
           )}
+          {artist ? (
+            <span className="absolute right-1 bottom-0.5 max-w-[90%] truncate text-[6px] text-white italic [text-shadow:0_1px_2px_#000,0_0_4px_#000]">
+              Illus. {artist}
+            </span>
+          ) : null}
         </div>
 
-        <div className="-mt-0.5 flex items-center gap-1">
-          <ItemTypeTag item={item} className="shrink-0" />
-          <ModifierEffectTag item={item} tooltip={tooltip} />
-          <SetTag itemId={itemId} tooltip={tooltip} />
-          <span
-            className="ml-auto text-ui-sm italic"
-            style={{ color: rarityColor }}
-          >
-            {RARITY_LABELS[item.rarity]}
-          </span>
-        </div>
+        {item.modifier && (
+          <div className="-mt-0.5 flex">
+            <ModifierEffectTag item={item} tooltip={tooltip} />
+          </div>
+        )}
 
         <ItemStatLines item={item} level={level} />
 
@@ -163,33 +185,16 @@ export function ItemCard({
               {set.name} set {equippedCount}/{set.itemIds.length}
             </div>
             <div className="text-text-dim">{set.effect}</div>
-            <div>
-              {set.itemIds.map((id, i) => (
-                <span
-                  key={id}
-                  className={
-                    equippedIds.has(id) ? "text-white" : "text-text-dim"
-                  }
-                >
-                  {i > 0 ? " · " : ""}
-                  {getItem(id)?.name ?? id}
-                </span>
-              ))}
-            </div>
           </div>
         )}
 
         <div className="mt-auto flex items-center gap-1 text-[8px] text-text-dim">
-          <span
-            className="inline-block size-1.5 rotate-45"
-            style={{ background: rarityColor }}
-          />
+          <RarityMark rarity={item.rarity} />
+          <span>·</span>
+          <ItemTypeTag item={item} variant="text" />
           {meta ? <span>{meta}</span> : null}
-          {artist ? (
-            <span className="ml-auto truncate italic">Illus. {artist}</span>
-          ) : null}
           {number > 0 && (
-            <span className={cx("shrink-0", !artist && "ml-auto")}>
+            <span className="ml-auto shrink-0">
               № {number}/{ITEMS.length}
             </span>
           )}

@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.1.0-beta.76",
+    "highlights": [
+      "the tower now features roguelite mechanics!! yeehaa",
+      "selling duplicates now lets you choose the rarity threshold yourself",
+      "new skills for everyone! (>^o^)> ~~~~~~)  <(x_x)>",
+      "more hotkeys, and settings to configure them",
+      "bug fixes, UI improvements++"
+    ]
+  },
+  {
+    "version": "0.1.0-beta.75",
+    "highlights": [
+      "press E next to another herzie to see their profile or challenge them to a duel; 1, 2… pick from the menu",
+      "titles over names are white, and your own name steps aside while you aim",
+      "fixes: Pip walks with his name again, NPC windows fit whoever's talking"
+    ]
+  },
+  {
+    "version": "0.1.0-beta.74",
+    "highlights": [
+        "bug fix"
+    ]
+  },
+  {
     "version": "0.1.0-beta.73",
     "highlights": [
       "the wilds: get ready for some pvp action!",

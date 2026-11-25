@@ -260,6 +260,15 @@ const DEBUG_TREAT_TRADER: GameEvent = {
  * idle card. */
 const LIMITED_TYPES = ["treat_trader"];
 
+/** Who only talks (their name, themselves and what they say, nothing
+ * else): their panel in the big window is only as tall as that. */
+const TALK_ONLY = new Set<string>([
+  NAKATA_KEY,
+  MADAS_KEY,
+  SKIPPER_KEY,
+  HUNT_CRYSTAL_KEY,
+]);
+
 /** List order of the visitors that always get a card in Town. */
 const EVENT_TYPES: { type: string }[] = [
   { type: "boss_fight" },
@@ -1602,6 +1611,7 @@ function EventsViewImpl({
         createPortal(
           <VisitorPanel
             full={!inPanel}
+            fit={selected !== null && TALK_ONLY.has(selected)}
             // The board closes with an x (no Back) in the small window too;
             // a visitor opened from it has Back instead.
             closeButton={screenInPanel || selected === BULLETIN_KEY}
@@ -1659,11 +1669,15 @@ function ScreenView({
  */
 function VisitorPanel({
   full = false,
+  fit = false,
   closeButton = !full,
   onClose,
   children,
 }: {
   full?: boolean;
+  /** Only as tall as what's in it (in the big window; full fills it
+   * anyway): someone who only talks. */
+  fit?: boolean;
   /** Its x, top right. Off by default when full: the screen has Back. */
   closeButton?: boolean;
   onClose: () => void;
@@ -1674,8 +1688,13 @@ function VisitorPanel({
   useEscape(onClose);
 
   const host = useRef<HTMLDivElement>(null);
+  // The visitor's herzie draws out to the panel's edges (HerzieView's
+  // `bleed`), not just its own box: their pipe smoke isn't cut off.
+  const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     visitorHerzieStage.setHost(host.current);
+    visitorHerzieStage.setBleed(panel.current);
+    return () => visitorHerzieStage.setBleed(null);
   }, []);
   const [skySlot, setSkySlot] = useState<HTMLDivElement | null>(null);
   const stageContext = useMemo(
@@ -1697,10 +1716,15 @@ function VisitorPanel({
       )}
     >
       <div
+        ref={panel}
         data-tauri-drag-region="false"
         className={cn(
           "overlay-in pointer-events-auto relative flex flex-col overflow-hidden rounded-2xl border border-white/12 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.7)]",
-          full ? "size-full" : "h-[min(480px,100%)] w-[356px]",
+          full
+            ? "size-full"
+            : fit
+              ? "max-h-full w-[356px]"
+              : "h-[min(480px,100%)] w-[356px]",
         )}
       >
         {/* The blur reaches past the panel, which clips it (see

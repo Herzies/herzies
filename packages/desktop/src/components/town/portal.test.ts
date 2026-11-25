@@ -117,8 +117,11 @@ describe("the Tower's door", () => {
     expect(portalsOf(home).filter((p) => p.to === "tower" && !p.door)).toEqual(
       [],
     );
-    // And the Tower still leads back home.
-    expect(portalsOf(mapById("tower")).map((p) => p.to)).toContain("home");
+    // And the Tower still leads back home, by its hall's doorway (as on
+    // up, by its stair): E there, no discs, nothing to walk through.
+    const hall = portalsOf(mapById("tower"));
+    expect(hall.map((p) => p.to)).toContain("home");
+    expect(hall.every((p) => p.door)).toBe(true);
   });
 
   it("is reached with E from where a herzie can stand, in front of the porch", () => {

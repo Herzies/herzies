@@ -93,9 +93,11 @@ function beamMaterial(color: THREE.Color, fadeIn: number) {
 
 /** The chest at (x, ground, z) in the island's frame, its front turned to
  * `yaw`. `born` (performance.now() ms) is when it appeared: it pops up
- * from then. `lift` (0 ajar, 1 held wide; more flings it back) and `glow`
- * (the beam's strength, 1 full) are read every frame. `beam` is the
- * beam's height (a room's vault is lower than the Wilds' sky). */
+ * from then. `lift` (0 ajar, 1 held wide; more flings it back), `shut`
+ * (0 ajar and breathing, 1 the lid down on it: lift still lifts it from
+ * there), `glow` (the beam's strength, 1 full) and `fade` (1 solid, 0
+ * gone: given, the chest can fade away) are read every frame. `beam` is
+ * the beam's height (a room's vault is lower than the Wilds' sky). */
 export function LootChest({
   x,
   z,
@@ -103,7 +105,9 @@ export function LootChest({
   yaw,
   born,
   lift,
+  shut,
   glow,
+  fade,
   beam = BEAM_HEIGHT,
 }: {
   x: number;
@@ -112,21 +116,27 @@ export function LootChest({
   yaw: number;
   born: number;
   lift?: { readonly current: number };
+  shut?: { readonly current: number };
   glow?: { readonly current: number };
+  fade?: { readonly current: number };
   beam?: number;
 }) {
   const halo = Math.min(HALO_HEIGHT, beam);
-  const parts = useMemo(
-    () => ({
+  const fades = fade !== undefined;
+  const parts = useMemo(() => {
+    const wood = chestMaterial();
+    // Transparent from the start rather than once it fades: switching
+    // over mid-fade would recompile its shader on the spot.
+    if (fades) wood.transparent = true;
+    return {
       body: chestBodyGeometry(),
       lid: chestLidGeometry(),
       glow: chestGlowGeometry(),
-      wood: chestMaterial(),
+      wood,
       beam: beamMaterial(GOLD, BEAM_FADE_IN / beam),
       halo: beamMaterial(GOLD, HALO_FADE_IN / halo),
-    }),
-    [beam, halo],
-  );
+    };
+  }, [beam, halo, fades]);
   useEffect(
     () => () => {
       for (const p of Object.values(parts)) p.dispose();
@@ -136,17 +146,27 @@ export function LootChest({
   const lid = useRef<THREE.Group>(null);
   const ping = useRef<THREE.Mesh>(null);
   const chest = useRef<THREE.Group>(null);
+  const inner = useRef<THREE.Mesh>(null);
   useFrame(({ clock }) => {
     const t = clock.elapsedTime;
     const pop = Math.min(1, (performance.now() - born) / POP_MS);
     const strength = glow?.current ?? 1;
+    const solid = fade?.current ?? 1;
     if (chest.current)
-      chest.current.scale.setScalar(CHEST_SCALE * (0.3 + 0.7 * pop));
+      chest.current.scale.setScalar(
+        CHEST_SCALE * (0.3 + 0.7 * pop) * (0.85 + 0.15 * solid),
+      );
     if (lid.current)
       lid.current.rotation.x =
-        -LID_AJAR -
-        (lift?.current ?? 0) * LID_HELD -
-        Math.max(0, Math.sin(t * 1.6)) * 0.08;
+        -(1 - (shut?.current ?? 0)) *
+          (LID_AJAR + Math.max(0, Math.sin(t * 1.6)) * 0.08) -
+        (lift?.current ?? 0) * LID_HELD;
+    if (fades) {
+      parts.wood.opacity = solid;
+      // The glow inside is solid colour: it goes with the first of the
+      // fade rather than hanging on in the air.
+      if (inner.current) inner.current.visible = solid > 0.7;
+    }
     parts.beam.uniforms.uOpacity.value =
       (0.7 + Math.sin(t * 2) * 0.08) * strength;
     parts.halo.uniforms.uOpacity.value =
@@ -171,7 +191,7 @@ export function LootChest({
           <group ref={lid} position={LID_HINGE}>
             <mesh geometry={parts.lid} material={parts.wood} castShadow />
           </group>
-          <mesh geometry={parts.glow}>
+          <mesh ref={inner} geometry={parts.glow}>
             <meshBasicMaterial color="#ffe08a" toneMapped={false} />
           </mesh>
         </group>

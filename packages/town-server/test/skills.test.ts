@@ -6,11 +6,16 @@ import {
   WAVE_HAND_HEIGHT,
 } from "@herzies/shared/combat";
 import {
+  FOCUS_MAX,
+  MULTISPIN,
+  multispinRecords,
+  RAGE_MAX,
   SKILL_COOLDOWN_GRACE_MS,
   SKILL_DEFS,
   skillValue,
+  skillXpPerUse,
 } from "@herzies/shared/skills";
-import { timingAttackSpeed } from "@herzies/shared/stats";
+import { timingAttackSpeed, timingCritChance } from "@herzies/shared/stats";
 import type { ServerMessage, TownTicketPayload } from "@herzies/shared/town-net";
 import { armed } from "./arms";
 import { describe, expect, it } from "vitest";
@@ -18,6 +23,8 @@ import {
   BossEngine,
   type BossPlayer,
   castSpeed,
+  focused,
+  quickness,
   TUNING,
 } from "../src/boss";
 import { FightRuntime, type Outbound, statsOf } from "../src/fight";
@@ -108,18 +115,16 @@ describe("Soothing Drones", () => {
     expect(f.report(T0 + 1, true)?.skills).toBeUndefined();
   });
 
-  it("pays XP for what it restored, and lets the database rise that far", () => {
+  it("pays its use's XP once, however much it restored", () => {
     const f = setup([{ uid: "near", x: 3, z: 8 }]);
     f.skill("bard", "soothing-drones", 0, 0, T0);
     const r = f.report(T0 + 1, true);
-    const restored = 2 * skillValue("soothing-drones", 1) * 200;
-    expect(r?.skills?.xp).toEqual([
-      {
-        uid: "bard",
-        skill: "soothing-drones",
-        xp: Math.floor(restored * SKILL_DEFS["soothing-drones"].xpPerUnit),
-      },
-    ]);
+    const per = skillXpPerUse("soothing-drones");
+    expect(r?.skills?.xp ?? []).toEqual(
+      per >= 1
+        ? [{ uid: "bard", skill: "soothing-drones", xp: Math.floor(per) }]
+        : [],
+    );
     const near = r?.hp.find((h) => h.uid === "near");
     expect(near).toEqual({ uid: "near", hp: 140, heal: 40 });
     // Once the database has it, the allowance is spent.
@@ -239,7 +244,7 @@ describe("ticket stats", () => {
 });
 
 describe("Backspin", () => {
-  it("throws three discs that land for a share of a hit, paying XP", () => {
+  it("throws three discs that land for a share of a hit", () => {
     const f = new FightRuntime(claim(), T0);
     f.join("dj", 1, ticket("dj", [["backspin", 1]]), { x: 0, z: 8 }, T0 - 5_000);
     f.onState("dj", 0, 8, T0);
@@ -247,8 +252,42 @@ describe("Backspin", () => {
     expect(f.skill("dj", "backspin", yaw, pitch, T0).result).toBe("used");
     const out = f.step(T0 + 2_000);
     expect(msgs(out, "hit")).toHaveLength(3);
-    const r = f.report(T0 + 2_000, true);
-    expect(r?.skills?.xp[0]).toMatchObject({ uid: "dj", skill: "backspin" });
+  });
+});
+
+describe("skill XP", () => {
+  it("pays each use that did something once, whatever it hit, carrying fractions to whole points", () => {
+    const f = new FightRuntime(claim(), T0);
+    // Tough enough to stand through ten uses beside the boss.
+    f.join("dj", 1, ticket("dj", [["backspin", 1]], 1e9), { x: 0, z: 8 }, T0 - 5_000);
+    const { yaw, pitch } = aim(0, 8);
+    const per = skillXpPerUse("backspin");
+    const every = SKILL_DEFS.backspin.cooldownMs + 100;
+    let paid = 0;
+    for (let i = 0; i < 10; i++) {
+      const t = T0 + i * every;
+      f.onState("dj", 0, 8, t);
+      expect(f.skill("dj", "backspin", yaw, pitch, t).result).toBe("used");
+      f.step(t + 2_000);
+      const r = f.report(t + 2_001, true);
+      paid += r?.skills?.xp.find((x) => x.uid === "dj")?.xp ?? 0;
+      if (r) f.reported(r);
+    }
+    expect(paid).toBe(Math.floor(10 * per + 1e-9));
+  });
+
+  it("pays nothing for a use that hit nothing", () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("dj", 1, ticket("dj", [["backspin", 1]], 1e9), { x: 0, z: 8 }, T0 - 5_000);
+    const every = SKILL_DEFS.backspin.cooldownMs + 100;
+    for (let i = 0; i < 10; i++) {
+      const t = T0 + i * every;
+      f.onState("dj", 0, 8, t);
+      // Aimed away from the boss.
+      expect(f.skill("dj", "backspin", 0, 0, t).result).toBe("used");
+      f.step(t + 2_000);
+    }
+    expect(f.report(T0 + 10 * every, true)?.skills).toBeUndefined();
   });
 });
 
@@ -548,22 +587,29 @@ describe("Haste", () => {
 });
 
 describe("Haste's pay", () => {
-  it("is for hasted casts only, not a skill's own hits", () => {
+  it("is once a cast, the first time someone it hasted lands a hit (a skill's too)", () => {
     const f = new FightRuntime(claim(), T0);
     f.join("bard", 1, ticket("bard", [["haste", 1]]), { x: 0, z: 8 }, T0 - 5_000);
-    // Hits hard enough that one Backspin would pay whole points.
     f.join("near", 2, ticket("near", [["backspin", 10]]), { x: 5, z: 8 }, T0 - 5_000);
-    const near = f.player("near");
-    if (!near) throw new Error("no near");
-    near.stats.sonicPower = 5_000;
     f.onState("bard", 0, 8, T0);
     f.onState("near", 5, 8, T0);
     f.skill("bard", "haste", 0, 0, T0);
     const { yaw, pitch } = aim(5, 8);
+    // Nobody hit anything yet: nothing.
+    f.step(T0 + 50);
+    expect(f.report(T0 + 51, true)?.skills).toBeUndefined();
+    // Three discs and a dozen casts: still the one use.
     expect(f.skill("near", "backspin", yaw, pitch, T0 + 100).result).toBe("used");
-    f.step(T0 + 3_000);
-    const xp = f.report(T0 + 3_001, true)?.skills?.xp ?? [];
-    expect(xp.find((x) => x.uid === "bard" && x.skill === "haste")).toBeUndefined();
+    for (let i = 0; i < 12; i++) {
+      f.onState("near", 5, 8, T0 + 200 + i * 400);
+      f.cast("near", yaw, pitch, T0 + 200 + i * 400);
+      f.step(T0 + 200 + i * 400);
+    }
+    f.step(T0 + 8_000);
+    const xp = f.report(T0 + 8_001, true)?.skills?.xp ?? [];
+    expect(xp.find((x) => x.uid === "bard" && x.skill === "haste")?.xp).toBe(
+      Math.floor(skillXpPerUse("haste")),
+    );
   });
 });
 
@@ -664,5 +710,235 @@ describe("the lute's heal stance", () => {
     const out = f.renew("bard", { ...ticket("bard", [["soothing-drones", 1]]), look: { seed: "s", stage: 2, equipped: {} } });
     expect(out).toContainEqual({ to: "all", msg: { t: "stance", id: 1, heal: false } });
     expect(f.state(T0).healers).toBeUndefined();
+  });
+});
+
+describe("Rage", () => {
+  it("enrages everyone near, the Bard too, to its ceiling", () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("bard", 1, ticket("bard", [["rage", 10]]), { x: 0, z: 8 }, T0 - 5_000);
+    f.join("near", 2, ticket("near", [["backspin", 1]]), { x: 5, z: 8 }, T0 - 5_000);
+    f.join("far", 3, ticket("far", [["backspin", 1]]), { x: 0, z: -12 }, T0 - 5_000);
+    for (const [u, x, z] of [["bard", 0, 8], ["near", 5, 8], ["far", 0, -12]] as const)
+      f.onState(u, x, z, T0);
+    const bard = f.player("bard");
+    if (!bard) throw new Error("no bard");
+    // Euphony enough to pass the ceiling.
+    bard.stats.euphony = 10_000;
+    const { result, out } = f.skill("bard", "rage", 0, 0, T0);
+    expect(result).toBe("used");
+    expect(msgs(out, "buff").map((o) => o.msg.t === "buff" && o.msg.id).sort()).toEqual([1, 2]);
+    expect(f.engine.buffsOf("near", T0)).toEqual([
+      expect.objectContaining({ id: "rage", value: RAGE_MAX, by: "bard" }),
+    ]);
+    expect(f.engine.buffsOf("far", T0)).toEqual([]);
+  });
+
+  it("makes a hit on the boss land harder by its share", () => {
+    const hitFor = (rage: number) => {
+      const e = new BossEngine({ hp: 1e9, maxHp: 1e9, seed: 1, now: T0 });
+      if (rage) e.buff("a", { id: "rage", value: rage, until: T0 + 60_000 });
+      const { yaw, pitch } = aim(0, 8);
+      expect(e.cast("a", { x: 0, z: 8 }, yaw, pitch, statsOf([500, 0, 0, 0]), T0 + 1_000)).toBe("hit");
+      for (let t = T0 + 1_000; t <= T0 + 3_000; t += 50)
+        for (const ev of e.update(t, [])) if (ev.t === "hit") return ev.damage;
+      throw new Error("no hit");
+    };
+    const plain = hitFor(0);
+    expect(hitFor(0.2)).toBe(Math.round(plain * 1.2));
+  });
+
+  it("pays its Bard for the share of the damage it added, a skill's too", () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("bard", 1, ticket("bard", [["rage", 1]]), { x: 0, z: 8 }, T0 - 5_000);
+    f.join("near", 2, ticket("near", [["backspin", 10]]), { x: 5, z: 8 }, T0 - 5_000);
+    const near = f.player("near");
+    if (!near) throw new Error("no near");
+    near.stats.sonicPower = 5_000;
+    f.onState("bard", 0, 8, T0);
+    f.onState("near", 5, 8, T0);
+    f.skill("bard", "rage", 0, 0, T0);
+    const { yaw, pitch } = aim(5, 8);
+    expect(f.skill("near", "backspin", yaw, pitch, T0 + 100).result).toBe("used");
+    f.step(T0 + 3_000);
+    const xp = f.report(T0 + 3_001, true)?.skills?.xp ?? [];
+    expect(xp.find((x) => x.uid === "bard" && x.skill === "rage")?.xp).toBeGreaterThan(0);
+  });
+});
+
+describe("Focus", () => {
+  const focus = [{ id: "focus" as const, value: FOCUS_MAX, until: T0 + 60_000 }];
+
+  it("quickens the cast budget as Timing would", () => {
+    // Faster than the server's slack lets anyone cast, but no faster than
+    // the Focus's Timing allows.
+    const every = (TUNING.castEveryMs / (1 + timingAttackSpeed(FOCUS_MAX))) * 1.02;
+    const refused = (focused: boolean) => {
+      const e = new BossEngine({ hp: 1e9, maxHp: 1e9, seed: 1, now: T0 });
+      if (focused) e.buff("a", focus[0]);
+      let n = 0;
+      for (let i = 0; i < 40; i++)
+        if (e.cast("a", { x: 0, z: 8 }, Math.PI, 0, statsOf(undefined), T0 + 1_000 + i * every) === "cooldown")
+          n++;
+      return n;
+    };
+    expect(refused(true)).toBe(0);
+    expect(refused(false)).toBeGreaterThan(0);
+    expect(quickness(focus, T0, 0)).toBeCloseTo(1 + timingAttackSpeed(FOCUS_MAX));
+  });
+
+  it("raises crit chance as Timing would, over the herzie's own", () => {
+    const stats = { sonicPower: 0, critChance: 10, critDamage: 50, timing: 40 };
+    expect(focused(stats, focus, T0).critChance).toBeCloseTo(
+      10 + timingCritChance(40 + FOCUS_MAX) - timingCritChance(40),
+    );
+    expect(focused(stats, focus, T0 + 60_000)).toBe(stats);
+  });
+
+  it("is everyone near's, capped, and pays its Bard for the casts it quickened", () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("bard", 1, ticket("bard", [["focus", 10]]), { x: 0, z: 8 }, T0 - 5_000);
+    f.join("near", 2, ticket("near", [["backspin", 1]]), { x: 5, z: 8 }, T0 - 5_000);
+    f.onState("bard", 0, 8, T0);
+    f.onState("near", 5, 8, T0);
+    const bard = f.player("bard");
+    if (!bard) throw new Error("no bard");
+    bard.stats.euphony = 10_000;
+    expect(f.skill("bard", "focus", 0, 0, T0).result).toBe("used");
+    expect(f.engine.buffsOf("near", T0)).toEqual([
+      expect.objectContaining({ id: "focus", value: FOCUS_MAX, by: "bard" }),
+    ]);
+    const { yaw, pitch } = aim(5, 8);
+    for (let i = 0; i < 24; i++) {
+      f.onState("near", 5, 8, T0 + 100 + i * 400);
+      expect(f.cast("near", yaw, pitch, T0 + 100 + i * 400)).toBe("hit");
+      f.step(T0 + 100 + i * 400);
+    }
+    f.step(T0 + 12_000);
+    const xp = f.report(T0 + 12_001, true)?.skills?.xp ?? [];
+    expect(xp.find((x) => x.uid === "bard" && x.skill === "focus")?.xp).toBeGreaterThan(0);
+  });
+});
+
+describe("Multispin", () => {
+  it("spins records round its Slinger that hit the boss beside it, paying XP", () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("dj", 1, ticket("dj", [["multispin", 5]]), { x: 0, z: 8 }, T0 - 5_000);
+    const at = { x: TUNING.boss.x, z: TUNING.boss.z + TUNING.boss.radius + 1 };
+    f.onState("dj", at.x, at.z, T0);
+    const { result, out } = f.skill("dj", "multispin", 0, 0, T0);
+    expect(result).toBe("used");
+    const records = multispinRecords(5);
+    expect(msgs(out, "buff")[0]?.msg).toMatchObject({
+      id: 1,
+      buff: "multispin",
+      value: records,
+      until: T0 + (SKILL_DEFS.multispin.durationMs ?? 0),
+    });
+    const hits: Outbound[] = [];
+    for (let t = T0 + 50; t <= T0 + MULTISPIN.turnMs; t += 50) {
+      f.onState("dj", at.x, at.z, t);
+      hits.push(...msgs(f.step(t), "hit"));
+    }
+    expect(hits.length).toBeGreaterThanOrEqual(records);
+    f.step(T0 + 3_000);
+    const xp = f.report(T0 + 3_001, true)?.skills?.xp ?? [];
+    expect(xp.find((x) => x.uid === "dj" && x.skill === "multispin")?.xp).toBeGreaterThan(0);
+  });
+});
+
+describe("Forbidden Frequency", () => {
+  it("bleeds the boss, tells the room each stack, and pays each use that took hold", () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("dj", 1, ticket("dj", [["forbidden-frequency", 5]], 1e9), { x: 0, z: 8 }, T0 - 5_000);
+    const { yaw, pitch } = aim(0, 8);
+    const every = SKILL_DEFS["forbidden-frequency"].cooldownMs + 100;
+    const per = skillXpPerUse("forbidden-frequency");
+    // Enough uses for a whole point.
+    const uses = Math.ceil(1 / per);
+    const said: ServerMessage[] = [];
+    for (let i = 0; i < uses; i++) {
+      const t = T0 + i * every;
+      f.onState("dj", 0, 8, t);
+      expect(f.skill("dj", "forbidden-frequency", yaw, pitch, t).result).toBe("used");
+      for (let u = t + 50; u < t + every; u += 50)
+        said.push(...msgs(f.step(u), "bleed").map((o) => o.msg));
+    }
+    expect(said.map((m) => m.t === "bleed" && m.stacks)).toEqual(
+      Array.from({ length: uses }, (_, i) => Math.min(i + 1, 3)),
+    );
+    expect(said[0]).toMatchObject({ by: 1, target: 0, boss: true });
+    // Its ticks pay nothing more.
+    const xp = f.report(T0 + uses * every, true)?.skills?.xp ?? [];
+    expect(xp.find((x) => x.skill === "forbidden-frequency")?.xp).toBe(
+      Math.floor(uses * per + 1e-9),
+    );
+  });
+});
+
+describe("Silencio", () => {
+  const castMs = SKILL_DEFS.silencio.castMs ?? 0;
+  /** A Bard beside the boss (in reach), or far from it. */
+  const bard = (z: number) => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("bard", 1, ticket("bard", [["silencio", 5]], 200), { x: 0, z }, T0 - 5_000);
+    f.onState("bard", 0, z, T0);
+    return f;
+  };
+  const near = TUNING.boss.z + TUNING.boss.radius + 2;
+
+  it("bursts once its wind-up is done: the boss bleeds, and each use that caught it pays once", () => {
+    const f = bard(near);
+    const every = SKILL_DEFS.silencio.cooldownMs + 100;
+    const per = skillXpPerUse("silencio");
+    const uses = Math.ceil(1 / per);
+    const said: ServerMessage[] = [];
+    let ticks = 0;
+    for (let i = 0; i < uses; i++) {
+      const t = T0 + i * every;
+      f.onState("bard", 0, near, t);
+      expect(f.skill("bard", "silencio", 0, 0, t).result).toBe("used");
+      // Nothing yet while it winds up.
+      expect(msgs(f.step(t + castMs - 50), "bleed")).toEqual([]);
+      for (let u = t + castMs; u < t + every; u += 50) {
+        const out = f.step(u);
+        said.push(...msgs(out, "bleed").map((o) => o.msg));
+        ticks += msgs(out, "hit").filter((o) => o.msg.t === "hit" && o.msg.bleed).length;
+      }
+    }
+    expect(said).toHaveLength(uses);
+    expect(said[0]).toMatchObject({ by: 1, target: 0, boss: true, skill: "silencio", stacks: 1 });
+    // Its ticks hit, and pay nothing more.
+    expect(ticks).toBeGreaterThan(uses);
+    const xp = f.report(T0 + uses * every, true)?.skills?.xp ?? [];
+    expect(xp.find((x) => x.skill === "silencio")?.xp).toBe(Math.floor(uses * per + 1e-9));
+  });
+
+  it("catching nobody pays nothing", () => {
+    const f = bard(TUNING.boss.z + TUNING.boss.radius + 12);
+    const every = SKILL_DEFS.silencio.cooldownMs + 100;
+    const uses = Math.ceil(1 / skillXpPerUse("silencio"));
+    for (let i = 0; i < uses; i++) {
+      const t = T0 + i * every;
+      expect(f.skill("bard", "silencio", 0, 0, t).result).toBe("used");
+      for (let u = t + 50; u < t + castMs + 500; u += 50)
+        expect(msgs(f.step(u), "bleed")).toEqual([]);
+    }
+    const xp = f.report(T0 + uses * every, true)?.skills?.xp ?? [];
+    expect(xp.find((x) => x.skill === "silencio")).toBeUndefined();
+  });
+
+  it("is lost if its Bard goes down winding it up", () => {
+    const f = bard(near);
+    expect(f.skill("bard", "silencio", 0, 0, T0).result).toBe("used");
+    const p = f.player("bard");
+    if (!p) throw new Error("no bard");
+    p.down = true;
+    const out = f.step(T0 + 100);
+    expect(msgs(out, "channel").map((o) => o.msg)).toEqual([
+      { t: "channel", by: 1, target: null, until: 0 },
+    ]);
+    for (let u = T0 + 150; u < T0 + 2_000; u += 50)
+      expect(msgs(f.step(u), "bleed")).toEqual([]);
   });
 });

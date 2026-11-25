@@ -18,6 +18,7 @@
  */
 import {
   aimDirection,
+  DISC_RANGE,
   discLandsAfterMs,
   HERZIE_BODY,
   hitDamage,
@@ -30,14 +31,21 @@ import {
   BACKSPIN_DISCS,
   BACKSPIN_SPREAD,
   type Buff,
+  buffMultiplier,
   buffReductions,
-  HASTE_MAX,
+  CYMBAL_TRAP,
+  cymbalLandsAfterMs,
+  FORBIDDEN_FREQUENCY,
   isSkillId,
+  MULTISPIN,
+  multispinRecords,
   RIMSHOT,
+  SILENCIO,
   SKILL_COOLDOWN_GRACE_MS,
   SKILL_DEFS,
   type SkillId,
   shuffleBounces,
+  skillDurationMs,
   skillValue,
 } from "@herzies/shared/skills";
 import { buffMult, healMult } from "@herzies/shared/stats";
@@ -54,8 +62,15 @@ import {
   wildsRegenStep,
   wildsSonicCap,
 } from "@herzies/shared/wilds-pvp";
-import { quickness, type ShelterDome, shelterOf, TUNING } from "./boss";
-import { CastBudget, StunReturns } from "./budgets";
+import { BLEED_SKILLS, type BleedSkill, Bleeds, bleedTag } from "./bleed";
+import {
+  focused,
+  quickness,
+  type ShelterDome,
+  shelterOf,
+  TUNING,
+} from "./boss";
+import { BARD_BUFF_MAX, CastBudget, StunReturns } from "./budgets";
 import { HOLD_CORRECT_EVERY_MS, HOLD_EASE_MS, HOLD_SLACK } from "./duel";
 import type { Outbound, SkillResult } from "./fight";
 import { DiscHands } from "./hands";
@@ -73,6 +88,7 @@ import {
   seenAt,
   to,
 } from "./pvp";
+import { Spin } from "./spin";
 
 /** A herzie arriving in the room, as the free-for-all needs it. */
 export type WildsPeer = {
@@ -128,8 +144,24 @@ type Brawler = PvpKit & {
   heldFrom: number;
   /** When it was last put right while held. */
   correctedAt: number;
-  /** A Rimshot winding up: it lands at `until` where it began. */
-  slam: { until: number; x: number; z: number; level: number } | null;
+  /** Held by a Cymbal Trap from `rootFrom` until `rootUntil`, at `rootAt`:
+   * it can't walk, but casts and uses its skills. Its holds' returns are
+   * its own, apart from its stuns'. */
+  rootFrom: number;
+  rootUntil: number;
+  rootAt: { x: number; z: number };
+  roots: StunReturns;
+  /** A Rimshot or a Silencio winding up: it lands at `until` where it
+   * began. */
+  slam: {
+    skill: "rimshot" | "silencio";
+    until: number;
+    x: number;
+    z: number;
+    level: number;
+  } | null;
+  /** Its Multispin's records, while they spin. */
+  spin: Spin | null;
   /** When it last took, and last dealt, PvP damage. */
   hurtAt: number;
   dealtAt: number;
@@ -157,6 +189,12 @@ type PendingHit = {
   crit: boolean;
   /** The attack's share of a wave. */
   mult: number;
+  /** A Cymbal Trap's: how long it holds its victim (ms, before the
+   * returns). */
+  hold?: number;
+  /** One of a Forbidden Frequency's or a Silencio's bleed hits (said so
+   * to its thrower). */
+  bleed?: true;
 };
 
 export class WildsPvpRuntime {
@@ -165,18 +203,30 @@ export class WildsPvpRuntime {
   /** Hits in flight: rolled at the cast, judged as they land. */
   private pending: PendingHit[] = [];
   private domes: ShelterDome[] = [];
+  /** Bleeds by the bleeding herzie's uid: Forbidden Frequency's discs and
+   * bleeds (FORBIDDEN_FREQUENCY.herzieMs each), and Silencio's. */
+  private bleeds: Record<BleedSkill, Bleeds> = {
+    "forbidden-frequency": new Bleeds(FORBIDDEN_FREQUENCY.herzieMs),
+    silencio: new Bleeds(SKILL_DEFS.silencio.durationMs ?? 0, 1),
+  };
   private casts = new CastBudget(TUNING.castEveryMs, TUNING.castBurst);
   private hands = new DiscHands();
   private history = new PositionHistory();
 
   constructor(private readonly rand: () => number = Math.random) {}
 
-  /** Something to keep the room ticking for: hits in flight, a Rimshot
-   * winding up, someone down, or someone's health still coming back. */
+  /** Something to keep the room ticking for: hits in flight, bleeds, a
+   * Rimshot or a Silencio winding up, records spinning, someone down, or
+   * someone's health still coming back. */
   get live(): boolean {
-    if (this.pending.length) return true;
+    if (
+      this.pending.length ||
+      BLEED_SKILLS.some((skill) => this.bleeds[skill].busy)
+    )
+      return true;
     for (const b of this.brawlers.values())
-      if (b.downUntil !== null || b.slam || b.hp < b.maxHp) return true;
+      if (b.downUntil !== null || b.slam || b.spin || b.hp < b.maxHp)
+        return true;
     return false;
   }
 
@@ -284,6 +334,12 @@ export class WildsPvpRuntime {
     this.hands.forget(uid);
     this.domes = this.domes.filter((d) => d.by !== uid);
     this.pending = this.pending.filter((h) => h.by !== uid && h.to !== uid);
+    // Its bleeds go with it; those it threw last end, nobody to credit.
+    for (const skill of BLEED_SKILLS) {
+      this.bleeds[skill].end(uid);
+      for (const key of this.bleeds[skill].forget(uid))
+        this.bleedOver(key, skill, b.id, now, e);
+    }
     let downUntil = b.downUntil;
     if (downUntil === null && b.lastHitBy && wildsInCombat(b.hurtAt, now)) {
       downUntil = now + WILDS_PVP.respawnMs;
@@ -307,9 +363,9 @@ export class WildsPvpRuntime {
 
   /**
    * Where `uid`'s move to (x, z) is held, if it is: where it lies while
-   * it's down, and where it was stunned while it is. `correct`: tell it
-   * (as a duel's hold: past HOLD_SLACK, after the ease, not too often).
-   * Null: it moves freely.
+   * it's down, where it was stunned while it is, and where a Cymbal Trap
+   * caught it while that holds. `correct`: tell it (as a duel's hold: past
+   * HOLD_SLACK, after the ease, not too often). Null: it moves freely.
    */
   hold(
     uid: string,
@@ -318,11 +374,19 @@ export class WildsPvpRuntime {
     now: number,
   ): { x: number; z: number; correct: boolean } | null {
     const b = this.brawlers.get(uid);
-    if (!b || (b.downUntil === null && now >= b.stunUntil)) return null;
-    const at = b.heldAt;
+    if (!b) return null;
+    let at: { x: number; z: number };
+    let since: number;
+    if (b.downUntil !== null || now < b.stunUntil) {
+      at = b.heldAt;
+      since = b.heldFrom;
+    } else if (now < b.rootUntil) {
+      at = b.rootAt;
+      since = b.rootFrom;
+    } else return null;
     const correct =
       Math.hypot(x - at.x, z - at.z) > HOLD_SLACK &&
-      now - b.heldFrom >= HOLD_EASE_MS &&
+      now - since >= HOLD_EASE_MS &&
       now - b.correctedAt >= HOLD_CORRECT_EVERY_MS;
     if (correct) b.correctedAt = now;
     return { x: at.x, z: at.z, correct };
@@ -362,7 +426,7 @@ export class WildsPvpRuntime {
     )
       return { result: "miss", out };
     if (!hit) return { result: "miss", out };
-    this.queue(b, hit.uid, now + hit.flightMs, hit.mult);
+    this.queue(b, hit.uid, now, now + hit.flightMs, hit.mult);
     return { result: "hit", out };
   }
 
@@ -446,19 +510,43 @@ export class WildsPvpRuntime {
           ),
         ),
       );
-    } else if (skillId === "haste") {
-      const strength = Math.min(HASTE_MAX, value * buffMult(b.stats.euphony));
-      const until = now + (def.durationMs ?? 0);
+    } else if (
+      skillId === "haste" ||
+      skillId === "rage" ||
+      skillId === "focus"
+    ) {
+      // Its own only: nobody is anybody's ally here.
+      const strength = Math.min(
+        BARD_BUFF_MAX[skillId],
+        value * buffMult(b.stats.euphony),
+      );
+      const until = now + skillDurationMs(skillId, level);
       out.push(
         all(
           buffMsg(
             b.id,
-            this.buff(b, { id: "haste", value: strength, until, by: uid }, now),
+            this.buff(b, { id: skillId, value: strength, until, by: uid }, now),
+          ),
+        ),
+      );
+    } else if (skillId === "multispin") {
+      // Records round it for its length: whoever it may hurt takes a hit
+      // from each that touches them (stepSpins). The app draws them from
+      // the buff.
+      if (!camp) this.unshield(b, now, out);
+      const records = multispinRecords(level);
+      const until = now + skillDurationMs(skillId, level);
+      b.spin = new Spin(now, until, records);
+      out.push(
+        all(
+          buffMsg(
+            b.id,
+            this.buff(b, { id: "multispin", value: records, until }, now),
           ),
         ),
       );
     } else if (skillId === "shuffle") {
-      const until = now + (def.durationMs ?? 0);
+      const until = now + skillDurationMs(skillId, level);
       const bounces = shuffleBounces(level);
       out.push(
         all(
@@ -477,25 +565,75 @@ export class WildsPvpRuntime {
         const half = (BACKSPIN_DISCS - 1) / 2;
         for (let i = 0; i < BACKSPIN_DISCS; i++) {
           const dir = aimDirection(yaw + (i - half) * BACKSPIN_SPREAD, pitch);
-          const hit = firstAlong(pos, dir, foes, true);
+          const hit = firstAlong(pos, dir, foes, DISC_RANGE);
           if (hit)
-            this.queue(b, hit.uid, now + discLandsAfterMs(hit.dist), mult);
+            this.queue(b, hit.uid, now, now + discLandsAfterMs(hit.dist), mult);
         }
       }
-    } else if (skillId === "rimshot") {
+    } else if (skillId === "forbidden-frequency") {
+      // A disc that bleeds the first it meets where it lands
+      // (stepBleeds).
+      if (!camp) {
+        this.unshield(b, now, out);
+        const hit = firstAlong(
+          pos,
+          aimDirection(yaw, pitch),
+          this.foes(uid, now),
+          DISC_RANGE,
+        );
+        if (hit)
+          this.bleeds["forbidden-frequency"].throw({
+            at: now + discLandsAfterMs(hit.dist),
+            by: uid,
+            key: hit.uid,
+            level,
+            stats: focused(b.stats, b.buffs, now),
+          });
+      }
+    } else if (skillId === "cymbal-trap") {
+      // Thrown: a stick's blow on the first it meets when it gets there,
+      // and a hold (see land).
+      if (!camp) {
+        this.unshield(b, now, out);
+        const hit = firstAlong(
+          pos,
+          aimDirection(yaw, pitch),
+          this.foes(uid, now),
+          CYMBAL_TRAP.range,
+        );
+        if (hit)
+          this.queue(
+            b,
+            hit.uid,
+            now,
+            now + cymbalLandsAfterMs(hit.dist),
+            CYMBAL_TRAP.damage * duelAttackShare("melee", STRIKE_DAMAGE),
+            Math.round(value * 1000),
+          );
+      }
+    } else if (skillId === "rimshot" || skillId === "silencio") {
       if (!camp) this.unshield(b, now, out);
       // The wind-up: it lands where it began, when it's done (stepSlams).
-      b.slam = { until: now + (def.castMs ?? 0), x: pos.x, z: pos.z, level };
+      b.slam = {
+        skill: skillId,
+        until: now + (def.castMs ?? 0),
+        x: pos.x,
+        z: pos.z,
+        level,
+      };
     }
     return { result: "used", readyAt: now + def.cooldownMs, out };
   }
 
-  /** Advance to `now`: Rimshots slam, hits land, the downed get up in the
-   * camp, and health comes back to those out of combat. */
+  /** Advance to `now`: Rimshots slam and Silencios burst, hits land, the
+   * downed get up in the camp, and health comes back to those out of
+   * combat. */
   step(now: number): WildsEffects {
     const e = effects();
     this.prune(now);
     this.stepSlams(now, e);
+    this.stepSpins(now, e);
+    this.stepBleeds(now, e);
     this.land(now, e);
     for (const b of this.brawlers.values()) {
       if (b.downUntil !== null) {
@@ -516,24 +654,35 @@ export class WildsPvpRuntime {
     return e;
   }
 
-  /** Rimshots whose wind-up is done slam: everyone it may hurt within
-   * reach of where it began takes the blow, and rolls for a stun. */
+  /** Wind-ups that are done land where they began, on everyone they may
+   * hurt within reach. A Rimshot's slam: the blow, and a roll for a stun.
+   * A Silencio's wave: a bleed (stepBleeds: down, the camp or a dome of
+   * their own spares them); a herzie moves itself, so it isn't flung. */
   private stepSlams(now: number, e: WildsEffects) {
     for (const b of this.brawlers.values()) {
       const s = b.slam;
       if (!s || now < s.until) continue;
       b.slam = null;
       if (inWildsSafeCamp(s.x, s.z)) continue;
+      const reach = s.skill === "silencio" ? SILENCIO.radius : RIMSHOT.radius;
       for (const foe of this.foes(b.uid, now)) {
-        if (
-          Math.hypot(foe.x - s.x, foe.z - s.z) >
-          RIMSHOT.radius + HERZIE_BODY.radius
-        )
+        if (Math.hypot(foe.x - s.x, foe.z - s.z) > reach + HERZIE_BODY.radius)
           continue;
+        if (s.skill === "silencio") {
+          this.bleeds.silencio.throw({
+            at: now,
+            by: b.uid,
+            key: foe.uid,
+            level: s.level,
+            stats: focused(b.stats, b.buffs, now),
+          });
+          continue;
+        }
         // Two blows of a stick.
         this.queue(
           b,
           foe.uid,
+          now,
           now,
           RIMSHOT.damage * duelAttackShare("melee", STRIKE_DAMAGE),
         );
@@ -548,6 +697,120 @@ export class WildsPvpRuntime {
     }
   }
 
+  /** Bleeds that arrived (Forbidden Frequency's discs, Silencio's at once)
+   * take hold on whoever may still be hurt (up, out of the camp, no dome
+   * taking it), and bleeds tick: stacks × its skill's share of a wave at a
+   * disc's share, from its thrower's stats (Sonic Power held to its
+   * victim's band, no crit) as hard as its Rage makes it, landing as a hit
+   * at once. */
+  private stepBleeds(now: number, e: WildsEffects) {
+    for (const skill of BLEED_SKILLS) {
+      const bleeds = this.bleeds[skill];
+      for (const disc of bleeds.landed(now)) {
+        const v = this.brawlers.get(disc.key);
+        const by = this.brawlers.get(disc.by);
+        if (!v || !by || v.downUntil !== null || this.inCamp(v.uid, disc.at))
+          continue;
+        const dome = shelterOf(
+          this.domes.filter((d) => d.by === v.uid),
+          {
+            uid: v.uid,
+            alive: true,
+            maxHp: v.maxHp,
+            posAt: (t) => this.history.at(v.uid, t),
+          },
+          disc.at,
+        );
+        if (dome) continue;
+        const b = bleeds.stack(disc, now);
+        e.out.push(
+          all({
+            t: "bleed",
+            by: by.id,
+            target: v.id,
+            ...bleedTag(skill),
+            stacks: b.stacks,
+            until: b.until,
+          }),
+        );
+      }
+      for (const { key, bleed: b } of bleeds.ticks(now)) {
+        const v = this.brawlers.get(key);
+        const by = this.brawlers.get(b.by);
+        if (!v || !by) continue;
+        const { amount } = hitDamage(
+          {
+            ...b.stats,
+            sonicPower: Math.min(b.stats.sonicPower, wildsSonicCap(v.level)),
+            critChance: 0,
+          },
+          this.rand,
+        );
+        this.pending.push({
+          at: now,
+          by: by.uid,
+          to: v.uid,
+          amount,
+          crit: false,
+          mult:
+            skillValue(skill, b.level) *
+            DUEL.discShare *
+            buffMultiplier(by.buffs, "damage", now),
+          bleed: true,
+        });
+      }
+    }
+  }
+
+  /** The `skill` bleed on `uid` (last thrown by entity `by`) ended early:
+   * it fell, or its thrower left. The room sees it stop. */
+  private bleedOver(
+    uid: string,
+    skill: BleedSkill,
+    by: number,
+    now: number,
+    e: WildsEffects,
+  ) {
+    const v = this.brawlers.get(uid);
+    if (v)
+      e.out.push(
+        all({
+          t: "bleed",
+          by,
+          target: v.id,
+          ...bleedTag(skill),
+          stacks: 0,
+          until: now,
+        }),
+      );
+  }
+
+  /** Multispins' records touch whoever their Slinger may hurt, round
+   * wherever it stands: a hit of MULTISPIN.damage of a wave at a disc's
+   * share (as Backspin's), landing at once. From the camp they touch
+   * nobody; touching someone ends the Slinger's own protection. */
+  private stepSpins(now: number, e: WildsEffects) {
+    for (const b of this.brawlers.values()) {
+      const s = b.spin;
+      if (!s) continue;
+      const pos = this.history.at(b.uid, now);
+      const bodies =
+        pos && !inWildsSafeCamp(pos.x, pos.z)
+          ? this.foes(b.uid, now).map((f) => ({
+              key: f.uid,
+              x: f.x,
+              z: f.z,
+              r: HERZIE_BODY.radius,
+            }))
+          : [];
+      const touches = s.touches(now, (t) => this.history.at(b.uid, t), bodies);
+      if (touches.length) this.unshield(b, now, e.out);
+      for (const touch of touches)
+        this.queue(b, touch.key, now, now, MULTISPIN.damage * DUEL.discShare);
+      if (s.over(now)) b.spin = null;
+    }
+  }
+
   /** Stunned by a Rimshot: held where it stands, its own Rimshot (if
    * winding up) lost, for a mob's stun scaled for a herzie with its
    * diminishing returns. */
@@ -558,6 +821,24 @@ export class WildsPvpRuntime {
     v.heldAt = this.history.at(v.uid, now) ?? v.heldAt;
     this.dropSlam(v, e.out);
     e.out.push(all({ t: "pvpStun", id: v.id, until: v.stunUntil }));
+  }
+
+  /** Caught by a Cymbal Trap thrown by `by`: held where it stands (it may
+   * turn, cast and use its skills, a Rimshot winding up included), for
+   * `base` with its holds' diminishing returns. Not while it already is. */
+  private root(
+    v: Brawler,
+    by: Brawler,
+    now: number,
+    base: number,
+    e: WildsEffects,
+  ) {
+    if (now < v.rootUntil) return;
+    const ms = v.roots.take(now, base);
+    v.rootFrom = now;
+    v.rootUntil = now + ms;
+    v.rootAt = this.history.at(v.uid, now) ?? v.heldAt;
+    e.out.push(all({ t: "trap", by: by.id, target: v.id, until: v.rootUntil }));
   }
 
   /** Hits that have arrived land: on nobody in the camp (now or a moment
@@ -593,6 +874,7 @@ export class WildsPvpRuntime {
             damage: 0,
             crit: h.crit,
             blocked: true,
+            ...(h.bleed ? { bleed: true as const } : {}),
           }),
         );
         continue;
@@ -609,10 +891,19 @@ export class WildsPvpRuntime {
       by.dealtAt = now;
       v.lastHitBy = { uid: by.uid, id: by.id, name: by.name };
       e.out.push(
-        to(by.uid, { t: "pvpHit", target: v.id, damage, crit: h.crit }),
+        to(by.uid, {
+          t: "pvpHit",
+          target: v.id,
+          damage,
+          crit: h.crit,
+          ...(h.bleed ? { bleed: true as const } : {}),
+        }),
       );
       if (v.hp <= 0) this.takeDown(v, by, now, e);
-      else e.out.push(all(this.stateMsg(v, now, by.id)));
+      else {
+        e.out.push(all(this.stateMsg(v, now, by.id)));
+        if (h.hold) this.root(v, by, now, h.hold, e);
+      }
     }
   }
 
@@ -623,7 +914,20 @@ export class WildsPvpRuntime {
     v.heldAt = this.history.at(v.uid, now) ?? v.heldAt;
     v.heldFrom = now;
     v.stunUntil = 0;
+    v.rootUntil = 0;
     this.dropSlam(v, e.out);
+    v.spin = null;
+    for (const skill of BLEED_SKILLS) {
+      const bleed = this.bleeds[skill].end(v.uid);
+      if (bleed)
+        this.bleedOver(
+          v.uid,
+          skill,
+          this.brawlers.get(bleed.by)?.id ?? 0,
+          now,
+          e,
+        );
+    }
     for (const b of activeBuffs(v.buffs, now))
       e.out.push(all({ t: "buffOff", id: v.id, buff: b.id }));
     v.buffs = [];
@@ -646,6 +950,7 @@ export class WildsPvpRuntime {
     b.downUntil = null;
     b.shieldUntil = now + WILDS_PVP.shieldMs;
     b.stunUntil = 0;
+    b.rootUntil = 0;
     b.hurtAt = Number.NEGATIVE_INFINITY;
     b.dealtAt = Number.NEGATIVE_INFINITY;
     b.lastHitBy = null;
@@ -716,17 +1021,38 @@ export class WildsPvpRuntime {
     return false;
   }
 
-  /** A hit from `by` on `victimUid` landing at `at`: rolled now, with
-   * `by`'s Sonic Power held to its victim's level band. */
-  private queue(by: Brawler, victimUid: string, at: number, mult: number) {
+  /** A hit from `by` on `victimUid` landing at `at`: rolled `now`, with
+   * `by`'s Sonic Power held to its victim's level band (its crit chance as
+   * a Focus has it, its share of a wave as hard as a Rage makes it).
+   * `hold`: a Cymbal Trap's (ms). */
+  private queue(
+    by: Brawler,
+    victimUid: string,
+    now: number,
+    at: number,
+    mult: number,
+    hold?: number,
+  ) {
     const v = this.brawlers.get(victimUid);
     if (!v) return;
-    const stats = {
-      ...by.stats,
-      sonicPower: Math.min(by.stats.sonicPower, wildsSonicCap(v.level)),
-    };
+    const stats = focused(
+      {
+        ...by.stats,
+        sonicPower: Math.min(by.stats.sonicPower, wildsSonicCap(v.level)),
+      },
+      by.buffs,
+      now,
+    );
     const { amount, crit } = hitDamage(stats, this.rand);
-    this.pending.push({ at, by: by.uid, to: victimUid, amount, crit, mult });
+    this.pending.push({
+      at,
+      by: by.uid,
+      to: victimUid,
+      amount,
+      crit,
+      mult: mult * buffMultiplier(by.buffs, "damage", now),
+      ...(hold ? { hold } : {}),
+    });
   }
 
   private buff(b: Brawler, next: Buff, now: number): Buff {
@@ -741,7 +1067,7 @@ export class WildsPvpRuntime {
     out.push(all(this.stateMsg(b, now)));
   }
 
-  /** A Rimshot winding up is lost; the room sees it stop. */
+  /** A Rimshot or a Silencio winding up is lost; the room sees it stop. */
   private dropSlam(b: Brawler, out: Outbound[]) {
     if (!b.slam) return;
     b.slam = null;
@@ -792,11 +1118,16 @@ function brawler(p: WildsPeer, now: number): Brawler {
     downUntil: null,
     shieldUntil: now + WILDS_PVP.shieldMs,
     stunUntil: 0,
-    stuns: new StunReturns(),
+    stuns: new StunReturns(RIMSHOT.drWindowMs),
     heldAt: { x: p.x, z: p.z },
     heldFrom: now,
+    rootFrom: 0,
+    rootUntil: 0,
+    rootAt: { x: p.x, z: p.z },
+    roots: new StunReturns(CYMBAL_TRAP.drWindowMs),
     correctedAt: Number.NEGATIVE_INFINITY,
     slam: null,
+    spin: null,
     hurtAt: Number.NEGATIVE_INFINITY,
     dealtAt: Number.NEGATIVE_INFINITY,
     lastHitBy: null,

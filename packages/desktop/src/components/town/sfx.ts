@@ -516,6 +516,74 @@ export function sfxRimshotSlam(): void {
     );
 }
 
+/** A Silencio's wind-up: a long "shhh" of breath swelling over `seconds`,
+ * the lute's low strings humming under it and drawing down as the breath
+ * is held, timed to burst on the sweep. Stop it (the wind-up cut short) and
+ * it falls silent at once. */
+export function sfxSilencioWindup(seconds: number): { stop(): void } {
+  const a = audio();
+  if (!a) return { stop() {} };
+  const { ctx: c } = a;
+  // Its own bus, so it can be cut.
+  const bus = c.createGain();
+  bus.gain.value = 1;
+  bus.connect(a.out);
+  const sub = { ...a, out: bus as AudioNode as GainNode };
+  const k = wobble(0.02);
+  // The breath: bright noise, a gentle band, swelling to the burst.
+  const src = c.createBufferSource();
+  src.buffer = a.noise;
+  src.loop = true;
+  const f = c.createBiquadFilter();
+  f.type = "bandpass";
+  f.frequency.setValueAtTime(3800 * k, c.currentTime);
+  f.frequency.linearRampToValueAtTime(5200 * k, c.currentTime + seconds);
+  f.Q.value = 0.8;
+  const g = c.createGain();
+  const t = c.currentTime;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.11, t + seconds * 0.85);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + seconds + 0.05);
+  src.connect(f).connect(g).connect(bus);
+  src.start(t, Math.random() * 0.4);
+  src.stop(t + seconds + 0.08);
+  // The strings: a low fifth, sinking a touch as it's drawn in.
+  tone(sub, "triangle", 147 * k, 139 * k, 0.07, seconds * 0.4, seconds * 0.6);
+  tone(sub, "triangle", 220 * k, 208 * k, 0.05, seconds * 0.4, seconds * 0.6);
+  return {
+    stop() {
+      const now = c.currentTime;
+      bus.gain.cancelScheduledValues(now);
+      bus.gain.setValueAtTime(bus.gain.value, now);
+      bus.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
+      setTimeout(() => bus.disconnect(), 120);
+    },
+  };
+}
+
+/** A Silencio bursting: a soft whoosh rushing out and down, a muffled
+ * thump under it, and a strum of muted strings falling away to nothing. */
+export function sfxSilencio(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.04);
+  noiseBurst(a, "bandpass", 2600 * k, 280 * k, 1.1, 0.34, 0.5);
+  tone(a, "sine", 96 * k, 44, 0.42, 0.006, 0.4);
+  // The strum, damped at once: low to high, quieter with each string.
+  const strings = [196, 247, 294, 392];
+  for (let i = 0; i < strings.length; i++)
+    tone(
+      a,
+      "triangle",
+      strings[i] * k,
+      strings[i] * k * 0.97,
+      0.09 - i * 0.015,
+      0.002,
+      0.12,
+      i * 0.018,
+    );
+}
+
 /** A stun taking: a dizzy wobble of little bells, round and round. */
 export function sfxStun(): void {
   const a = audio();
@@ -533,6 +601,77 @@ export function sfxStun(): void {
       0.16,
       i * 0.07,
     );
+}
+
+/** A Cymbal Trap thrown: a swish off the hand, then the cymbal's metallic
+ * whirr as it spins away, pulsing with its turns and fading as it goes. */
+export function sfxCymbalThrow(): void {
+  const a = audio();
+  if (!a) return;
+  const { ctx: c } = a;
+  const k = wobble(0.04);
+  noiseBurst(a, "bandpass", 1400 * k, 4200 * k, 2, 0.2, 0.12);
+  // The whirr: bright noise and two clashing partials, chopped by the
+  // spin (an LFO on their gain), slowing a touch as it goes.
+  const t = c.currentTime + 0.03;
+  const seconds = 0.55;
+  const spin = c.createGain();
+  spin.gain.value = 0.5;
+  const lfo = c.createOscillator();
+  lfo.type = "sine";
+  lfo.frequency.setValueAtTime(26 * k, t);
+  lfo.frequency.exponentialRampToValueAtTime(17 * k, t + seconds);
+  const depth = c.createGain();
+  depth.gain.value = 0.5;
+  lfo.connect(depth).connect(spin.gain);
+  const level = c.createGain();
+  level.gain.setValueAtTime(0.0001, t);
+  level.gain.exponentialRampToValueAtTime(0.16, t + 0.04);
+  level.gain.exponentialRampToValueAtTime(0.0001, t + seconds);
+  spin.connect(level).connect(a.out);
+  const src = c.createBufferSource();
+  src.buffer = a.noise;
+  const f = c.createBiquadFilter();
+  f.type = "bandpass";
+  f.Q.value = 3;
+  f.frequency.setValueAtTime(6200 * k, t);
+  f.frequency.exponentialRampToValueAtTime(4200 * k, t + seconds);
+  src.connect(f).connect(spin);
+  src.start(t, Math.random() * 0.5);
+  src.stop(t + seconds + 0.05);
+  for (const p of [1730, 2510]) {
+    const o = c.createOscillator();
+    o.type = "triangle";
+    o.frequency.setValueAtTime(p * k, t);
+    o.frequency.exponentialRampToValueAtTime(p * k * 0.94, t + seconds);
+    const g = c.createGain();
+    g.gain.value = 0.22;
+    o.connect(g).connect(spin);
+    o.start(t);
+    o.stop(t + seconds + 0.05);
+  }
+  lfo.start(t);
+  lfo.stop(t + seconds + 0.05);
+}
+
+/** A Cymbal Trap catching: the stick's crack on the hit, then a cymbal's
+ * crash, its clashing partials ringing on as it spins round. */
+export function sfxCymbalClang(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.03);
+  tone(a, "sine", 180 * k, 90 * k, 0.32, 0.002, 0.12);
+  noiseBurst(a, "highpass", 7000 * k, 3800 * k, 0.8, 0.3, 0.7);
+  // Inharmonic, as a cymbal's are: a bright clang, not a note.
+  for (const [f, peak, seconds] of [
+    [587, 0.07, 0.6],
+    [893, 0.06, 0.8],
+    [1287, 0.05, 0.9],
+    [1871, 0.04, 1.0],
+    [2633, 0.035, 0.9],
+    [3517, 0.025, 0.7],
+  ] as const)
+    tone(a, "square", f * k, f * k * 0.995, peak, 0.002, seconds);
 }
 
 /** A taunt: a struck gong. */
@@ -569,6 +708,79 @@ export function sfxHaste(): void {
       0.45,
       at + i * 0.02,
     );
+}
+
+/** Rage: two war-drum thumps, the second harder, and a gritty low chord
+ * swelling over them. */
+export function sfxRage(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.02);
+  for (const [at, peak] of [
+    [0, 0.45],
+    [0.16, 0.65],
+  ] as const)
+    tone(a, "sine", 120 * k, 48 * k, peak, 0.003, 0.28, at);
+  noiseBurst(a, "lowpass", 900 * k, 200, 0.8, 0.15, 0.3);
+  for (const f of [110, 165, 220])
+    tone(a, "sawtooth", f * k, f * k * 1.02, 0.05, 0.12, 0.6, 0.18);
+}
+
+/** Focus: a glassy chime, its partials rising into one clear high note,
+ * with a breath of air under it. */
+export function sfxFocus(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.015);
+  const notes = [1175, 1568, 2349];
+  for (let i = 0; i < notes.length; i++)
+    tone(a, "sine", notes[i] * k, notes[i] * k, 0.08, 0.004, 0.7, i * 0.06);
+  tone(a, "triangle", 3136 * k, 3136 * k, 0.03, 0.01, 0.9, 0.18);
+  noiseBurst(a, "bandpass", 3000 * k, 6000 * k, 3, 0.06, 0.35);
+}
+
+/** Multispin: records flung out with a soft rising whoosh and the warble
+ * of a vinyl spun up to speed. */
+export function sfxMultispin(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.03);
+  noiseBurst(a, "bandpass", 500 * k, 2600 * k, 1.6, 0.18, 0.32);
+  tone(a, "triangle", 196 * k, 392 * k, 0.06, 0.04, 0.3);
+  tone(a, "sine", 784 * k, 1175 * k, 0.03, 0.03, 0.25, 0.05);
+}
+
+/** Forbidden Frequency thrown: a distorted crackle, a bit-crushed buzz
+ * sliding where no tune goes, and a disc's zip under it. */
+export function sfxForbiddenThrow(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.04);
+  noiseBurst(a, "bandpass", 900 * k, 3600 * k, 2.2, 0.16, 0.13);
+  // The crackle: a burst of tiny square clicks at random pitches.
+  for (let i = 0; i < 9; i++)
+    tone(
+      a,
+      "square",
+      (300 + Math.random() * 2400) * k,
+      200,
+      0.035,
+      0.001,
+      0.025,
+      i * 0.022 + Math.random() * 0.012,
+    );
+  // The buzz: two detuned saws sliding apart, a tritone off.
+  tone(a, "sawtooth", 311 * k, 233 * k, 0.05, 0.01, 0.32);
+  tone(a, "sawtooth", 440 * k, 622 * k, 0.04, 0.01, 0.3);
+}
+
+/** A Forbidden Frequency stack landing: a faint glitched tick. */
+export function sfxBleedStack(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.05);
+  tone(a, "square", 1760 * k, 1100 * k, 0.03, 0.001, 0.04);
+  tone(a, "square", 2490 * k, 1600 * k, 0.02, 0.001, 0.03, 0.03);
 }
 
 /** The lute switching stance: a soft pluck, up to heal, down to attack. */

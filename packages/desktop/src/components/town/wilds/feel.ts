@@ -1,5 +1,6 @@
 import { notify } from "../../../lib/notices";
 import {
+  pushBleedNumber,
   pushBlockedLabel,
   pushDamageNumber,
   pushHealNumber,
@@ -7,6 +8,7 @@ import {
 } from "../combat/DamageNumbers";
 import { entityAt } from "../combat/skills";
 import { combat, shake } from "../combat/state";
+import type { Vec3 } from "../combat/waves";
 import { FX, flashFighter, leanFighter, stopFighter } from "../duel/fx";
 import {
   sfxDuelBlocked,
@@ -62,13 +64,12 @@ function onEvent(e: WildsEvent) {
       }
       if (at) {
         const jitter = () => (Math.random() - 0.5) * 0.6;
-        pushDamageNumber(
-          [at[0] + jitter(), at[1], at[2] + jitter()],
-          e.damage,
-          e.crit,
-          `pvp${e.target}`,
-        );
+        const p: Vec3 = [at[0] + jitter(), at[1], at[2] + jitter()];
+        if (e.bleed) pushBleedNumber(p, e.damage, `pvp${e.target}`);
+        else pushDamageNumber(p, e.damage, e.crit, `pvp${e.target}`);
       }
+      // A bleed hit: the number alone.
+      if (e.bleed) return;
       combat.hitAt = now;
       combat.hitCrit = e.crit;
       if (combat.trauma < 0.3) shake(e.crit ? 0.22 : 0.08);

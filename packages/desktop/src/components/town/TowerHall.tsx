@@ -64,8 +64,8 @@ const SILL = 5.2;
 const HEAD = 10.4;
 const WINDOW_W = 2;
 /** The doorway's and the stair's opening: half its width, and where its
- * round head springs (the portal's disc, 1.08 across from 1.55 up, fits
- * inside). The frame round it: half its width, and its height. */
+ * round head springs. The frame round it: half its width, and its
+ * height. */
 const OPEN_HALF = 1.4;
 const OPEN_SPRING = 2.2;
 const FRAME_HALF = 2.3;

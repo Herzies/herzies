@@ -2,7 +2,10 @@
  * Integration tests for the Tower Guard (00121): he ranks a Tower's
  * climbers by best floor (the earlier one winning a tie, and playing on
  * without climbing doesn't move you), leaves the excluded out of the
- * reward, and pays last month's winner once.
+ * reward, and pays last month's winner once. And climbs (00161, 00162): he
+ * starts yours over (tower_reset), and a batch from an earlier climb, or
+ * with more boons and skips than its floors earned, doesn't move the one
+ * running.
  *
  * Requires: `npx supabase start`
  */
@@ -56,6 +59,11 @@ type Guard = {
   current: {
     top: { rank: number; name: string; floor: number }[];
     you: { rank: number; floor: number } | null;
+  } | null;
+  climb: {
+    floor: number;
+    boons: { id: string; rarity: string }[];
+    skips: number;
   } | null;
   last: { name: string; floor: number } | null;
   reward: { eligible: boolean; itemId: string | null };
@@ -185,5 +193,209 @@ describe("the Tower Guard", () => {
     expect(await at()).toBe(first);
     await grant("c", 6);
     expect(await at()).not.toBe(first);
+  });
+
+  describe("climbs", () => {
+    // Boons as the database holds them: "id:rarity" (towerBoonKey).
+    const grant = (
+      uid: string,
+      event: string,
+      cleared: number,
+      climb: number | null,
+      boons: string[] | null,
+      skips: number | null = null,
+    ) =>
+      admin().rpc("tower_grant", {
+        p_user: uid,
+        p_event: event,
+        p_batch: crypto.randomUUID(),
+        p_xp: 0,
+        p_cleared: cleared,
+        p_item_ids: [],
+        p_xp_cap: 300,
+        p_drop_cap: 12,
+        p_climb: climb,
+        p_boons: boons,
+        p_skips: skips,
+      });
+
+    async function reset(uid: string, event: string) {
+      const { data, error } = await admin().rpc("tower_reset", {
+        p_user: uid,
+        p_event: event,
+      });
+      if (error) throw new Error(error.message);
+      return data as { ok: boolean; reason?: string };
+    }
+
+    async function progress(uid: string, event: string) {
+      const { data } = await admin()
+        .from("tower_progress")
+        .select("best_floor, climb, climb_floor, boons, boon_skips")
+        .eq("user_id", uid)
+        .eq("event_id", event)
+        .single();
+      return data;
+    }
+
+    it("starts a climb over: the next climb, floor 0, no boons or skips, best kept", async () => {
+      const now = await tower(-HOUR, HOUR);
+      const uid = await player();
+      expect((await guard(uid)).climb).toEqual({
+        floor: 0,
+        boons: [],
+        skips: 0,
+      });
+
+      await grant(uid, now, 10, 1, ["damage:rare"], 1);
+      expect((await guard(uid)).climb).toEqual({
+        floor: 10,
+        boons: [{ id: "damage", rarity: "rare" }],
+        skips: 1,
+      });
+
+      expect(await reset(uid, now)).toEqual({ ok: true });
+      expect(await progress(uid, now)).toEqual({
+        best_floor: 10,
+        climb: 2,
+        climb_floor: 0,
+        boons: [],
+        boon_skips: 0,
+      });
+      const g = await guard(uid);
+      expect(g.climb).toEqual({ floor: 0, boons: [], skips: 0 });
+      expect(g.current?.you).toEqual({ rank: 1, floor: 10 });
+
+      expect(await reset(uid, now)).toEqual({ ok: true });
+      expect((await progress(uid, now))?.climb).toBe(3);
+    });
+
+    it("counts a first reset with no climb yet", async () => {
+      const now = await tower(-HOUR, HOUR);
+      const uid = await player();
+      expect(await reset(uid, now)).toEqual({ ok: true });
+      expect(await progress(uid, now)).toMatchObject({
+        best_floor: 0,
+        climb: 2,
+        climb_floor: 0,
+      });
+      expect((await guard(uid)).current?.you).toBeNull();
+    });
+
+    it("refuses with no Tower running", async () => {
+      const ended = await tower(-40 * 24 * HOUR, -HOUR);
+      const uid = await player();
+      expect(await reset(uid, ended)).toEqual({
+        ok: false,
+        reason: "no-tower",
+      });
+      expect((await guard(uid)).climb).toBeNull();
+    });
+
+    it("leaves the climb be for a batch from an earlier one", async () => {
+      const now = await tower(-HOUR, HOUR);
+      const uid = await player();
+      await grant(uid, now, 5, 1, ["speed:common"]);
+      await reset(uid, now);
+      await grant(uid, now, 9, 1, ["speed:common"], 0);
+      expect(await progress(uid, now)).toEqual({
+        best_floor: 9,
+        climb: 2,
+        climb_floor: 0,
+        boons: [],
+        boon_skips: 0,
+      });
+      await grant(uid, now, 3, 2, null);
+      expect((await progress(uid, now))?.climb_floor).toBe(3);
+    });
+
+    it("takes only the boons a climb has earned (a pick a floor at first), and only known ones", async () => {
+      const now = await tower(-HOUR, HOUR);
+      const uid = await player();
+      await grant(uid, now, 1, 1, ["damage:common", "def:common"]);
+      expect((await progress(uid, now))?.boons).toEqual([]);
+      await grant(uid, now, 1, 1, ["fly:common"]);
+      expect((await progress(uid, now))?.boons).toEqual([]);
+      await grant(uid, now, 1, 1, ["def:shiny"]);
+      expect((await progress(uid, now))?.boons).toEqual([]);
+      await grant(uid, now, 1, 1, ["def"]);
+      expect((await progress(uid, now))?.boons).toEqual([]);
+      await grant(uid, now, 1, 1, ["def:mythic"]);
+      expect((await progress(uid, now))?.boons).toEqual(["def:mythic"]);
+      await grant(uid, now, 2, 1, ["def:mythic", "vigor:rare"]);
+      expect(await progress(uid, now)).toMatchObject({
+        climb_floor: 2,
+        boons: ["def:mythic", "vigor:rare"],
+      });
+      // No climb said (a room from before climbs): the floor moves, the
+      // boons don't.
+      await grant(uid, now, 3, null, ["def:mythic", "speed:rare"]);
+      expect(await progress(uid, now)).toMatchObject({
+        climb_floor: 3,
+        boons: ["def:mythic", "vigor:rare"],
+      });
+    });
+
+    it("spaces the picks out higher up: every 2nd floor past 5, every 5th past 30", async () => {
+      const now = await tower(-HOUR, HOUR);
+      const uid = await player();
+      const many = (n: number) => Array.from({ length: n }, () => "crit:common");
+      // Six picks need floor 7, not 6.
+      await grant(uid, now, 6, 1, many(6));
+      expect((await progress(uid, now))?.boons).toEqual([]);
+      await grant(uid, now, 7, 1, many(6));
+      expect((await progress(uid, now))?.boons).toHaveLength(6);
+      // Sixteen need floor 35.
+      await grant(uid, now, 34, 1, many(16));
+      expect((await progress(uid, now))?.boons).toHaveLength(6);
+      await grant(uid, now, 35, 1, many(16));
+      expect((await progress(uid, now))?.boons).toHaveLength(16);
+    });
+
+    it("counts a skip as a pick spent, and never takes one back", async () => {
+      const now = await tower(-HOUR, HOUR);
+      const uid = await player();
+      await grant(uid, now, 1, 1, [], 1);
+      expect(await progress(uid, now)).toMatchObject({
+        boons: [],
+        boon_skips: 1,
+      });
+      // One pick earned, already skipped: no room for a boon.
+      await grant(uid, now, 1, 1, ["crit:rare"], 1);
+      expect(await progress(uid, now)).toMatchObject({
+        boons: [],
+        boon_skips: 1,
+      });
+      // Nor for a skip given back to make room.
+      await grant(uid, now, 1, 1, ["crit:rare"], 0);
+      expect(await progress(uid, now)).toMatchObject({
+        boons: [],
+        boon_skips: 1,
+      });
+      await grant(uid, now, 1, 1, null, -1);
+      expect(await progress(uid, now)).toMatchObject({
+        boons: [],
+        boon_skips: 1,
+      });
+      // A second pick earned: a boon and the skip, together.
+      await grant(uid, now, 2, 1, ["crit:rare"], 1);
+      expect(await progress(uid, now)).toMatchObject({
+        boons: ["crit:rare"],
+        boon_skips: 1,
+      });
+      // A third, skipped, with the boons left out: they stay.
+      await grant(uid, now, 3, 1, null, 2);
+      expect(await progress(uid, now)).toMatchObject({
+        climb_floor: 3,
+        boons: ["crit:rare"],
+        boon_skips: 2,
+      });
+      const g = await guard(uid);
+      expect(g.climb).toEqual({
+        floor: 3,
+        boons: [{ id: "crit", rarity: "rare" }],
+        skips: 2,
+      });
+    });
   });
 });

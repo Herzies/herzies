@@ -37,10 +37,18 @@ export function setRegenFrozen(on: boolean) {
   emit();
 }
 
-/** HP now, from a server value: used when a fight reports an absolute HP. */
-export function setHpNow(hp: number, down = hp <= 0) {
+/** HP now, from a server value: used when a fight reports an absolute HP,
+ * with its max there (a Tower climb's Vigor raises it past your own). */
+export function setHpNow(hp: number, down = hp <= 0, maxHp?: number) {
   if (!current) return;
-  setVitals({ ...current, hp, stored: hp, hpAt: Date.now(), down });
+  setVitals({
+    ...current,
+    hp,
+    stored: hp,
+    hpAt: Date.now(),
+    down,
+    ...(maxHp !== undefined && maxHp > 0 ? { maxHp } : {}),
+  });
 }
 
 /** Ask the server how healthy the herzie is, and take its word. */

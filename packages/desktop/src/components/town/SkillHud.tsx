@@ -17,8 +17,9 @@ export const HUD_LINE =
  * What your buffs are doing right now, beside the hotbar: a Cymbrella's
  * dome you stand in (nothing gets through; the seconds left) and Rattled from
  * the boss's busters (stacks, seconds left: time to hand the boss over),
- * a Haste (how much faster, the seconds left), and a Shuffle (how many
- * bounces, the seconds left).
+ * a Haste (how much faster, the seconds left), a Rage (how much harder),
+ * a Focus (how much Timing), a Shuffle (how many bounces) and a Multispin
+ * (how many records), each with the seconds left.
  * With `stacked` it's a plain list in the style of the music bonus
  * (BossHud's MusicBonus), to sit right under it below the now-playing box.
  * Your skills sit on the hotbar (Hotbar.tsx) with their cooldowns; a skill
@@ -38,6 +39,9 @@ export function SkillHud({
   const rattledBox = useRef<HTMLDivElement>(null);
   const hasteBox = useRef<HTMLDivElement>(null);
   const shuffleBox = useRef<HTMLDivElement>(null);
+  const rageBox = useRef<HTMLDivElement>(null);
+  const focusBox = useRef<HTMLDivElement>(null);
+  const multispinBox = useRef<HTMLDivElement>(null);
 
   // Runs off the frame clock, not renders.
   useEffect(() => {
@@ -71,6 +75,34 @@ export function SkillHud({
           : "";
         if (s && shuffleBox.current.textContent !== text)
           shuffleBox.current.textContent = text;
+      }
+      if (rageBox.current) {
+        const r = buffOn(bossFight.you, "rage", now);
+        rageBox.current.style.display = r ? "" : "none";
+        const text = r
+          ? `Rage +${Math.round(r.value * 100)}% · ${Math.ceil((r.until - now) / 1000)}s`
+          : "";
+        if (r && rageBox.current.textContent !== text)
+          rageBox.current.textContent = text;
+      }
+      if (focusBox.current) {
+        const f = buffOn(bossFight.you, "focus", now);
+        focusBox.current.style.display = f ? "" : "none";
+        const text = f
+          ? `Focus +${Math.round(f.value)} Timing · ${Math.ceil((f.until - now) / 1000)}s`
+          : "";
+        if (f && focusBox.current.textContent !== text)
+          focusBox.current.textContent = text;
+      }
+      if (multispinBox.current) {
+        const s = buffOn(bossFight.you, "multispin", now);
+        multispinBox.current.style.display = s ? "" : "none";
+        const n = s ? Math.round(s.value) : 0;
+        const text = s
+          ? `Multispin ${n} ${n === 1 ? "record" : "records"} · ${Math.ceil((s.until - now) / 1000)}s`
+          : "";
+        if (s && multispinBox.current.textContent !== text)
+          multispinBox.current.textContent = text;
       }
       if (rattledBox.current) {
         const r = buffOn(bossFight.you, "rattled", now);
@@ -110,7 +142,22 @@ export function SkillHud({
         style={{ display: "none" }}
       />
       <div
+        ref={rageBox}
+        className={row("text-[#ff8a3d]")}
+        style={{ display: "none" }}
+      />
+      <div
+        ref={focusBox}
+        className={row("text-[#d8ecff]")}
+        style={{ display: "none" }}
+      />
+      <div
         ref={shuffleBox}
+        className={row("text-[#c9a7ff]")}
+        style={{ display: "none" }}
+      />
+      <div
+        ref={multispinBox}
         className={row("text-[#c9a7ff]")}
         style={{ display: "none" }}
       />
@@ -150,7 +197,7 @@ export function CastBar({ className }: { className?: string }) {
       if (you !== null && !(mine && now < mine.until))
         for (const c of skills.channels.values())
           if (c.target === you && now < c.until) saving = c;
-      // Your Rimshot winding up comes before either.
+      // Your Rimshot or Silencio winding up comes before either.
       const slam = pendingSlam(you ?? -1);
       const wind =
         slam && now < slam.dueAt
@@ -162,8 +209,8 @@ export function CastBar({ className }: { className?: string }) {
       const ch = attune ?? wind ?? (mine && now < mine.until ? mine : saving);
       const kind = attune
         ? "crystal"
-        : wind
-          ? "slam"
+        : wind && slam
+          ? slam.skill
           : ch === mine && ch
             ? "mine"
             : ch
@@ -176,13 +223,15 @@ export function CastBar({ className }: { className?: string }) {
           label.current.textContent =
             kind === "crystal"
               ? "Attuning"
-              : kind === "slam"
+              : kind === "rimshot"
                 ? "Rimshot"
-                : kind === "mine"
-                  ? "Resurrect · hold still"
-                  : kind === "saving"
-                    ? "A Bard is bringing you back…"
-                    : "";
+                : kind === "silencio"
+                  ? "Silencio"
+                  : kind === "mine"
+                    ? "Resurrect · hold still"
+                    : kind === "saving"
+                      ? "A Bard is bringing you back…"
+                      : "";
           box.current.dataset.kind = kind;
         }
         if (ch) fill.current.style.width = `${progress(ch, now) * 100}%`;
@@ -206,12 +255,12 @@ export function CastBar({ className }: { className?: string }) {
     >
       <div
         ref={label}
-        className="leading-4 text-[#ffd84a] group-data-[kind=crystal]:text-[#7fe8ff] group-data-[kind=saving]:text-[#7ee2a8]"
+        className="leading-4 text-[#ffd84a] group-data-[kind=crystal]:text-[#7fe8ff] group-data-[kind=saving]:text-[#7ee2a8] group-data-[kind=silencio]:text-[#c9a8ff]"
       />
       <div className="mt-1 h-1.5 overflow-hidden rounded-sm bg-white/15">
         <div
           ref={fill}
-          className="h-full bg-[#ffd84a] group-data-[kind=crystal]:bg-[#7fe8ff] group-data-[kind=saving]:bg-[#7ee2a8]"
+          className="h-full bg-[#ffd84a] group-data-[kind=crystal]:bg-[#7fe8ff] group-data-[kind=saving]:bg-[#7ee2a8] group-data-[kind=silencio]:bg-[#c9a8ff]"
         />
       </div>
     </div>

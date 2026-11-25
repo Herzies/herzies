@@ -1,10 +1,19 @@
 /**
  * What every fight holds a herzie (or a mob) to, whoever it's fighting: how
- * often it may cast, and how long a stun on it can last. The boss's cave,
- * the Tower and duels share these. Pure.
+ * often it may cast, how strong a Bard's buff on it may get, and how long a
+ * stun (or a hold) on it can last. The boss's cave, the Tower and duels
+ * share these. Pure.
  */
 import { stunMs } from "@herzies/shared/combat";
-import { RIMSHOT } from "@herzies/shared/skills";
+import { FOCUS_MAX, HASTE_MAX, RAGE_MAX } from "@herzies/shared/skills";
+
+/** The ceiling on each of a Bard's buffs (Haste, Rage, Focus), however
+ * much Euphony is behind it. */
+export const BARD_BUFF_MAX = {
+  haste: HASTE_MAX,
+  rage: RAGE_MAX,
+  focus: FOCUS_MAX,
+} as const;
 
 /** Cast tokens per herzie: one back every `everyMs` (sooner when it's
  * quicker), up to a short `burst`, so network jitter never costs a real
@@ -38,15 +47,19 @@ export class CastBudget {
   }
 }
 
-/** One target's recent stuns, for their diminishing returns (WoW-style):
- * each stun in the last {@link RIMSHOT.drWindowMs} halves the next. */
+/** One target's recent stuns (or holds), for their diminishing returns
+ * (WoW-style): each in the last `windowMs` halves the next. A stun's
+ * (RIMSHOT.drWindowMs) and a hold's (CYMBAL_TRAP.drWindowMs) are kept
+ * apart, one of these each: a stun never shortens a hold. */
 export class StunReturns {
   private recent: number[] = [];
 
-  /** How long a stun of `base` landing at `now` lasts; it counts towards
-   * the next one's. */
+  constructor(private readonly windowMs: number) {}
+
+  /** How long a stun (or hold) of `base` landing at `now` lasts; it counts
+   * towards the next one's. */
   take(now: number, base: number): number {
-    this.recent = this.recent.filter((t) => t > now - RIMSHOT.drWindowMs);
+    this.recent = this.recent.filter((t) => t > now - this.windowMs);
     const ms = stunMs(base, this.recent.length);
     this.recent.push(now);
     return ms;

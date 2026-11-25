@@ -1,21 +1,33 @@
 import {
   BACKSPIN_DISCS,
   BACKSPIN_SPREAD,
+  bleedEveryMs,
   CAST_INTERVAL_MS,
+  CYMBAL_TRAP,
+  cymbalLandsAfterMs,
   type HerzieStats,
   hitDamage,
+  MULTISPIN,
+  multispinOffset,
+  multispinRecords,
   RIMSHOT,
   SKILL_DEFS,
+  type SkillId,
   shuffleBounces,
   shuffleScale,
+  skillDurationMs,
   skillValue,
   timingAttackSpeed,
+  timingCritChance,
 } from "@herzies/shared";
 import {
+  aimDirection,
   BOSS_STAND,
+  bodyHitAt,
   bossReaches,
   DISC_DAMAGE,
   DISC_RANGE,
+  discLandsAfterMs,
   HEAL_TARGET_HEIGHT,
   healTarget,
   MELEE_CLEAVE,
@@ -25,6 +37,7 @@ import {
   WAVE_HAND_HEIGHT,
 } from "@herzies/shared/combat";
 import type { HerzieModel } from "@herzies/shared/gl";
+import { towerBoonTotals } from "@herzies/shared/tower";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useRapier } from "@react-three/rapier";
 import { useEffect, useRef } from "react";
@@ -36,26 +49,40 @@ import { groundY, type TownMap } from "../map";
 import { townNet } from "../net/townNet";
 import { townSave, useTownRuntime } from "../runtime";
 import {
+  sfxBleedStack,
   sfxCast,
   sfxCharge,
+  sfxCymbalClang,
+  sfxCymbalThrow,
   sfxDiscCatch,
   sfxDiscClink,
   sfxDiscThrow,
   sfxDiscTurn,
   sfxDomeUp,
+  sfxFocus,
+  sfxForbiddenThrow,
   sfxHaste,
   sfxHealBolt,
   sfxImpact,
   sfxMeleeHit,
+  sfxMultispin,
+  sfxRage,
   sfxRimshotSlam,
   sfxRimshotWindup,
+  sfxSilencio,
+  sfxSilencioWindup,
   sfxStun,
   sfxSwing,
   sfxTaunt,
 } from "../sfx";
 import { getVitals, useVitals } from "../vitals";
 import { myWildsHp, wildsHeld, wildsOn } from "../wilds/store";
-import { pushDamageNumber, pushStunLabel } from "./DamageNumbers";
+import { type BleedSkill, bleedDummy, bleeds } from "./bleeds";
+import {
+  pushBleedNumber,
+  pushDamageNumber,
+  pushStunLabel,
+} from "./DamageNumbers";
 import { liveDummies } from "./Dummies";
 import {
   DISC_ARM,
@@ -69,10 +96,11 @@ import { bossFight, bossNow, useBossFight } from "./fight";
 import { enterMouseLook, exitMouseLook } from "./mouseLook";
 import {
   attackSpeedOf,
+  buffOn,
   entityAt,
+  focusOf,
   instrumentNeeded,
   noteSkillCast,
-  queueSkill,
   setBuff,
   setSelfAt,
   shuffleOf,
@@ -86,11 +114,13 @@ import {
   inSlamReach,
   landSlam,
   pendingSlam,
+  type SlamSkill,
 } from "./slams";
 import { slashField } from "./slashes";
 import { healing, stance, toggleStance, useStanceSender } from "./stance";
 import { CAST_BUFFER_MS, combat, kick, setCombat, shake } from "./state";
 import { stuns } from "./stuns";
+import { catchCymbal, cymbalOut, throwCymbal } from "./traps";
 import { assistTarget, type Vec3, WAVE, waveField } from "./waves";
 
 /** How soon after one cast the next may start, in seconds: the hand is
@@ -113,9 +143,25 @@ const HANDS: readonly DiscHand[] = ["held-l", "held-r"];
 /** A Rimshot's hold on the slam (a plain strike holds 70 ms): the
  * heaviest blow there is, so it holds the longest. */
 const SLAM_HITSTOP_S = 0.12;
-/** How long a Rimshot pressed mid-swing is kept for, waiting out that
- * swing (any other press: CAST_BUFFER_MS). */
-const RIMSHOT_QUEUE_MS = 1_000;
+/** How long a skill with a motion of its own pressed mid-swing is kept
+ * for, waiting out that swing (any other press: CAST_BUFFER_MS). */
+const SWING_QUEUE_MS = 1_000;
+/** Skills whose cast is a motion of their own (a slam, a throw, a
+ * flourish): they wait out a swing under way rather than cut it short. */
+const OWN_MOTION: Partial<Record<SkillId, true>> = {
+  rimshot: true,
+  silencio: true,
+  "cymbal-trap": true,
+  multispin: true,
+  "forbidden-frequency": true,
+};
+/** The skills whose bleeds a practice dummy may take, each ticking. */
+const BLEED_SKILLS: readonly BleedSkill[] = ["forbidden-frequency", "silencio"];
+/** How each wind-up skill moves its caster (see HerzieModel's cast). */
+const WINDUP_STYLE = { rimshot: "slam", silencio: "hush" } as const;
+/** Practice: when each of your Multispin's records last touched each
+ * dummy, by record (the server keeps the same in a fight). */
+const spinTouches = new WeakMap<DummyState, Float64Array>();
 
 const typing = (t: EventTarget | null) => {
   const el = t as HTMLElement | null;
@@ -136,8 +182,9 @@ const typing = (t: EventTarget | null) => {
  *   Esc, or Tab again: out.
  * - Left click or F: cast. Holding it keeps casting; a press mid-cast is
  *   kept for the next.
- * - Q or 1: your class skill, if you have one. In a fight the server runs
- *   it; anywhere else it's practice on the dummies (no XP).
+ * - A hotbar key holding a class skill (1/Q to begin with: hotbarKeys.ts).
+ *   In a fight the server runs it; anywhere else it's practice on the
+ *   dummies (no XP).
  *
  * Aiming is the usual third-person way: a ray from the camera through the
  * crosshair finds what you're pointing at, and the wave flies from the
@@ -220,11 +267,6 @@ export function Combat({
         // A Bard's lute: attack ⇄ heal.
         e.preventDefault();
         toggleStance();
-      } else if (e.code === "KeyQ" && !e.repeat && skills.list.length) {
-        // Q stays a shortcut for your first class skill, wherever it sits
-        // on the hotbar (its number key is the hotbar's: town/input.ts).
-        e.preventDefault();
-        queueSkill(1);
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -265,6 +307,9 @@ export function Combat({
       if (document.hidden) leave();
     };
     if (inTower && !getVitals()?.down) void enter();
+    resume = () => {
+      if (!combat.on && !getVitals()?.down) void enter();
+    };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("pointerup", onPointerUp);
@@ -286,6 +331,7 @@ export function Combat({
       document.removeEventListener("visibilitychange", onHidden);
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("mousedown", onMouseDown, true);
+      resume = null;
       leave();
     };
   }, [canFight, surface, inTower]);
@@ -315,16 +361,31 @@ export function Combat({
     dummy: null as DummyState | null,
     /** The ally the heal bolt under way goes to (an entity id). */
     bolt: null as number | null,
-    /** A Rimshot winding up: its stun chance, when it was pressed, and its
-     * snare roll (cut if the wind-up is). */
-    rimshot: null as null | {
-      chance: number;
+    /** A Rimshot or a Silencio winding up: which, at what level, when it
+     * was pressed, and its wind-up sound (cut if the wind-up is). */
+    windup: null as null | {
+      skill: SlamSkill;
+      level: number;
       at: number;
       roll: { stop(): void };
     },
     /** A heal bolt under way with nobody locked: it flies down the aim,
      * for show (it heals no one). */
     freeHeal: false,
+    /** Practice: your Cymbal Trap on its way to the dummy it'll catch,
+     * which takes its blow as it lands, from `dir`. */
+    trap: null as null | {
+      dummy: DummyState;
+      landsAt: number;
+      dir: Vec3;
+    },
+    /** Practice: your Forbidden Frequency disc on its way to the dummy it
+     * will bleed, at `value` of a wave a stack each tick. */
+    bleed: null as null | {
+      dummy: DummyState;
+      landsAt: number;
+      value: number;
+    },
   });
   const ray = useRef(
     new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: -1 }),
@@ -338,13 +399,15 @@ export function Combat({
   });
 
   /** A hit of yours on a dummy, at `scale` of a wave's: the number, the
-   * meter, the shake (and a crit's hit-stop). */
+   * meter, the shake (and a crit's hit-stop). A bleed's `tick` never
+   * crits, and lands quietly: no shake, no thud. */
   const myHit = (
     dummy: DummyState,
     dir: Readonly<Vec3>,
     point: Vec3,
     scale: number,
     now: number,
+    tick = false,
   ): "crit" | "hit" => {
     // A Tower mob, or a duel's opponent: the server rolls it and says (the
     // number, the sound).
@@ -352,17 +415,38 @@ export function Combat({
       hitDummy(dummy, dir[0], dir[2], 0, false, now, false);
       return "hit";
     }
-    const rolled = hitDamage(statsRef.current);
-    const amount = Math.max(1, Math.round(rolled.amount * scale));
+    // With a Focus your Timing's higher (crits likelier); with a Rage you
+    // hit harder: as the server rolls them.
+    const me = bossFight.you ?? -1;
+    const stats = statsRef.current;
+    const focus = focusOf(me, now);
+    const timing = stats.timing ?? 0;
+    const rolled = hitDamage(
+      tick
+        ? { ...stats, critChance: 0 }
+        : focus > 0
+          ? {
+              ...stats,
+              critChance:
+                stats.critChance +
+                timingCritChance(timing + focus) -
+                timingCritChance(timing),
+            }
+          : stats,
+    );
+    const rage = buffOn(me, "rage", now)?.value ?? 0;
+    const amount = Math.max(1, Math.round(rolled.amount * scale * (1 + rage)));
     const { crit } = rolled;
     hitDummy(dummy, dir[0], dir[2], amount, crit, now);
-    pushDamageNumber(point, amount, crit);
-    combat.hitAt = now;
-    combat.hitCrit = crit;
+    if (tick) pushBleedNumber(point, amount, dummy.key);
+    else pushDamageNumber(point, amount, crit);
     combat.bestDps = Math.max(
       combat.bestDps,
       dummy.meter.hits >= 3 ? meterDps(dummy.meter, now) : 0,
     );
+    if (tick) return "hit";
+    combat.hitAt = now;
+    combat.hitCrit = crit;
     shake(crit ? 0.32 : 0.12);
     if (crit) combat.slowUntil = now + HIT_STOP_MS;
     sfxImpact(crit ? "crit" : "hit");
@@ -380,7 +464,7 @@ export function Combat({
   const slamLands = (herzie: HerzieModel, chance: number, now: number) => {
     const { chest, held } = v.current;
     herzie.root.getWorldPosition(chest);
-    const centre = { x: chest.x, z: chest.z };
+    const centre = { skill: "rimshot" as const, x: chest.x, z: chest.z };
     const hand = herzie.handWorldPosition(held);
     landSlam(bossFight.you ?? -1, [hand.x, hand.y, hand.z], now);
     let stunned = false;
@@ -415,6 +499,41 @@ export function Combat({
     herzie.hitstop(SLAM_HITSTOP_S);
     kick(stunned || struck ? 0.34 : 0.26);
     shake(stunned ? 0.32 : 0.22);
+  };
+
+  /**
+   * A Silencio's burst, as the lute sweeps out: the wave of silence and
+   * the rest of its show (SilencioVFX), its whoosh and a soft jolt. Out of
+   * a fight every dummy within reach starts bleeding (Silencio's own bleed,
+   * beside any Forbidden Frequency's); in a fight the server judges it all
+   * (the bleeds come as `bleed`, the shoves as the mobs' moves).
+   */
+  const silencioLands = (herzie: HerzieModel, level: number, now: number) => {
+    const { chest, held } = v.current;
+    herzie.root.getWorldPosition(chest);
+    const hand = herzie.handWorldPosition(held);
+    const me = bossFight.you ?? -1;
+    landSlam(me, [hand.x, hand.y, hand.z], now);
+    let caught = false;
+    const centre = { skill: "silencio" as const, x: chest.x, z: chest.z };
+    if (!bossFight.on)
+      for (const d of liveDummies) {
+        if (d.mob !== undefined || d.herzie !== undefined) continue;
+        const radius = DUMMY.radius * (d.size ?? 1);
+        if (!inSlamReach(centre, d.x, d.z, radius)) continue;
+        bleedDummy(
+          "silencio",
+          d.key,
+          skillValue("silencio", level),
+          SKILL_DEFS.silencio.durationMs ?? 0,
+          me,
+          now,
+        );
+        caught = true;
+      }
+    sfxSilencio();
+    kick(caught ? 0.14 : 0.1);
+    shake(0.16);
   };
 
   /** What the discs in flight do, whoever threw them. */
@@ -561,17 +680,20 @@ export function Combat({
     const mine = queued
       ? skills.list.find((s) => s.id === queued.id)
       : undefined;
-    // A Rimshot's press is kept a while, so one pressed mid-swing can wait
-    // that swing out; any other press only a moment.
-    const keptFor = mine?.id === "rimshot" ? RIMSHOT_QUEUE_MS : CAST_BUFFER_MS;
+    // A press of a skill with a motion of its own is kept a while, so one
+    // pressed mid-swing can wait that swing out; any other press only a
+    // moment.
+    const keptFor =
+      mine && OWN_MOTION[mine.id] ? SWING_QUEUE_MS : CAST_BUFFER_MS;
     if (queued && now - queued.at >= keptFor) skills.queued = null;
     // In a fight, the server judges what you do: the boss room, a duel
     // once "FIGHT!" is called, or the Wilds' free-for-all. A duel's
     // countdown (and a stun) holds you, and being knocked out (out of
-    // health anywhere, or down in the Wilds) until you're back up.
+    // health anywhere, or down in the Wilds) until you're back up; so does
+    // the Tower's boon window while it's up.
     const brawl = wildsOn();
     const judged = bossFight.on || duelFighting(now) || brawl;
-    const held = duelHeld(now) || wildsHeld(now) || youDown();
+    const held = duelHeld(now) || wildsHeld(now) || youDown() || combat.picking;
     // A taunt does nothing outside a fight, nor a resurrect in a fight
     // that isn't on (the lobby, the Tower): say so rather than spend the
     // press. Outside a fight, a resurrect brings back anyone knocked out.
@@ -625,9 +747,10 @@ export function Combat({
       !held &&
       now - queued.at < keptFor &&
       skillReady(mine.id, now) &&
-      // A Rimshot waits out a swing already going: its stick's landing
-      // must be its own, not that swing's.
-      !(mine.id === "rimshot" && herzie.casting)
+      // A skill with a motion of its own waits out a swing already going:
+      // its stick's landing (its throw, its flourish) must be its own, not
+      // that swing's.
+      !(OWN_MOTION[mine.id] && herzie.casting)
     ) {
       skills.queued = null;
       const seq = startCooldown(mine.id, now);
@@ -660,7 +783,10 @@ export function Combat({
         mine.id === "cymbrella" ||
         mine.id === "taunt" ||
         mine.id === "haste" ||
-        mine.id === "shuffle"
+        mine.id === "shuffle" ||
+        mine.id === "multispin" ||
+        mine.id === "rage" ||
+        mine.id === "focus"
       ) {
         setBuff(bossFight.you ?? -1, {
           buff: mine.id,
@@ -669,36 +795,119 @@ export function Combat({
               ? 1
               : mine.id === "shuffle"
                 ? shuffleBounces(mine.level)
-                : skillValue(mine.id, mine.level),
+                : mine.id === "multispin"
+                  ? multispinRecords(mine.level)
+                  : skillValue(mine.id, mine.level),
           // A Cymbrella's dome stands for its value in seconds.
           until:
             now +
             (mine.id === "cymbrella"
               ? skillValue("cymbrella", mine.level) * 1000
-              : (SKILL_DEFS[mine.id].durationMs ?? 0)),
+              : skillDurationMs(mine.id, mine.level)),
         });
       }
-      if (mine.id === "rimshot") {
-        // The wind-up: planted, the stick going up, the snare rolling. It
-        // lands when the stick strikes the ground (below), on the server's
-        // clock as on ours: sent now, landed there at the wind-up's end.
-        const castMs = SKILL_DEFS.rimshot.castMs ?? 0;
-        a.rimshot = {
-          chance: skillValue("rimshot", mine.level),
+      // A Multispin's flourish: the records flung out to circle you (the
+      // buff draws them; in practice they hit the dummies, below).
+      if (mine.id === "multispin") {
+        a.castAt = now;
+        a.live = false;
+        herzie.cast(pitch, { style: "throw" });
+      }
+      if (mine.id === "rimshot" || mine.id === "silencio") {
+        // The wind-up: planted, the stick going up and the snare rolling
+        // (a Rimshot), or the lute drawn in on a held breath (a Silencio).
+        // It lands as the stick strikes the ground or the lute sweeps out
+        // (below), on the server's clock as on ours: sent now, landed there
+        // at the wind-up's end.
+        const castMs = SKILL_DEFS[mine.id].castMs ?? 0;
+        a.windup = {
+          skill: mine.id,
+          level: mine.level,
           at: now,
-          roll: sfxRimshotWindup(castMs / 1000),
+          roll: (mine.id === "rimshot" ? sfxRimshotWindup : sfxSilencioWindup)(
+            castMs / 1000,
+          ),
         };
         a.castAt = now;
         combat.rootedUntil = now + castMs;
-        herzie.cast(0, { style: "slam" });
-        beginSlam(bossFight.you ?? -1, chest.x, chest.z, now, (out) => {
-          const p = herzie.handWorldPosition(v.current.held);
+        herzie.cast(0, { style: WINDUP_STYLE[mine.id] });
+        beginSlam(
+          bossFight.you ?? -1,
+          mine.id,
+          chest.x,
+          chest.z,
+          now,
+          (out) => {
+            const p = herzie.handWorldPosition(v.current.held);
+            out[0] = p.x;
+            out[1] = p.y;
+            out[2] = p.z;
+            return out;
+          },
+        );
+        if (judged) townNet().sendSkill(mine.id, seq, yaw, pitch);
+      } else if (mine.id === "cymbal-trap") {
+        // The throw: the cymbal off the off hand, along the aim. In a fight
+        // the server finds what it meets and says (`trap`); in practice it
+        // catches the first dummy in its way within its reach, rolling
+        // nothing.
+        const me = bossFight.you ?? -1;
+        a.castAt = now;
+        a.live = false;
+        herzie.cast(pitch, { arm: "arm-r", style: "throw" });
+        throwCymbal(me, chest.x, chest.z, yaw, now, (out) => {
+          const p = herzie.heldWorldPosition("held-r", v.current.held);
           out[0] = p.x;
           out[1] = p.y;
           out[2] = p.z;
           return out;
         });
         if (judged) townNet().sendSkill(mine.id, seq, yaw, pitch);
+        else {
+          const caught = firstDummyAlong(
+            chest,
+            chest.y - herzie.height * 0.55,
+            aimDirection(yaw, pitch),
+            CYMBAL_TRAP.range,
+          );
+          if (caught) {
+            const landsAt = now + cymbalLandsAfterMs(caught.dist);
+            catchCymbal(
+              me,
+              { kind: "dummy", key: caught.dummy.key },
+              landsAt + skillValue("cymbal-trap", mine.level) * 1000,
+              landsAt,
+            );
+            a.trap = {
+              dummy: caught.dummy,
+              landsAt,
+              dir: [Math.sin(yaw), 0, Math.cos(yaw)],
+            };
+          }
+        }
+      } else if (mine.id === "forbidden-frequency") {
+        // One disc off the main hand along the aim (BleedVFX draws it from
+        // the cast). In a fight the server finds what it meets and says
+        // (`bleed`); in practice it bleeds the first dummy in its way,
+        // within a disc's reach, as it lands.
+        a.castAt = now;
+        a.live = false;
+        herzie.cast(pitch, { arm: DISC_ARM["held-l"], style: "throw" });
+        if (judged) townNet().sendSkill(mine.id, seq, yaw, pitch);
+        else {
+          const caught = firstDummyAlong(
+            chest,
+            chest.y - herzie.height * 0.55,
+            aimDirection(yaw, pitch),
+            DISC_RANGE,
+          );
+          if (caught)
+            a.bleed = {
+              dummy: caught.dummy,
+              landsAt: now + discLandsAfterMs(caught.dist),
+              value: skillValue("forbidden-frequency", mine.level),
+            };
+        }
       } else if (judged || mine.id === "resurrect") {
         townNet().sendSkill(mine.id, seq, yaw, pitch);
       } else if (mine.id === "backspin") {
@@ -721,9 +930,119 @@ export function Combat({
       }
       if (mine.id === "taunt") sfxTaunt();
       else if (mine.id === "haste") sfxHaste();
+      else if (mine.id === "rage") sfxRage();
+      else if (mine.id === "focus") sfxFocus();
+      else if (mine.id === "multispin") sfxMultispin();
       else if (mine.id === "cymbrella") sfxDomeUp();
-      else if (mine.id !== "rimshot") sfxCast();
-      if (mine.id !== "rimshot") shake(mine.id === "cymbrella" ? 0.22 : 0.15);
+      else if (mine.id === "cymbal-trap") sfxCymbalThrow();
+      else if (mine.id === "forbidden-frequency") sfxForbiddenThrow();
+      else if (mine.id !== "rimshot" && mine.id !== "silencio") sfxCast();
+      if (mine.id !== "rimshot" && mine.id !== "silencio")
+        shake(mine.id === "cymbrella" ? 0.22 : 0.15);
+    }
+
+    // Practice: your cymbal lands on its dummy, a stick's strike's blow.
+    const trap = a.trap;
+    if (trap && now >= trap.landsAt) {
+      a.trap = null;
+      const d = trap.dummy;
+      if (liveDummies.includes(d)) {
+        const radius = DUMMY.radius * (d.size ?? 1);
+        const point: Vec3 = [
+          d.x - trap.dir[0] * radius,
+          (d.y ?? 0) + DUMMY.chest,
+          d.z - trap.dir[2] * radius,
+        ];
+        const kind = myHit(
+          d,
+          trap.dir,
+          point,
+          CYMBAL_TRAP.damage * STRIKE_DAMAGE,
+          now,
+        );
+        waveField.burst(point, trap.dir, kind);
+        sfxCymbalClang();
+      }
+    }
+
+    // Practice: your Forbidden Frequency disc lands on its dummy, a stack
+    // of bleed more; and every dummy's bleeds (Forbidden Frequency's and
+    // Silencio's) hit, their share of a wave each hit, quicker with each
+    // stack (bleedEveryMs), never a crit.
+    const bleed = a.bleed;
+    if (bleed && now >= bleed.landsAt) {
+      a.bleed = null;
+      if (liveDummies.includes(bleed.dummy)) {
+        bleedDummy(
+          "forbidden-frequency",
+          bleed.dummy.key,
+          bleed.value,
+          SKILL_DEFS["forbidden-frequency"].durationMs ?? 0,
+          bossFight.you ?? -1,
+          now,
+        );
+        sfxBleedStack();
+      }
+    }
+    for (const skill of BLEED_SKILLS)
+      for (const b of bleeds[skill].dummies.values()) {
+        if (b.target.kind !== "dummy" || now < b.nextTick) continue;
+        const key = b.target.key;
+        const d = liveDummies.find((x) => x.key === key);
+        if (!d || b.nextTick > b.until) continue;
+        b.nextTick += bleedEveryMs(b.stacks);
+        const point: Vec3 = [d.x, (d.y ?? 0) + DUMMY.chest + 0.3, d.z];
+        myHit(d, [0, 0, 0], point, b.value, now, true);
+      }
+
+    // Practice: your Multispin's records hit the dummies they touch, each
+    // a share of a wave, a record a dummy at most once every rehitMs: as
+    // the server judges them in a fight. A record touches a dummy its disc
+    // overlaps, or one standing inside its ring as it sweeps past that
+    // dummy's bearing.
+    const spin =
+      herzie && !judged
+        ? buffOn(bossFight.you ?? -1, "multispin", now)
+        : undefined;
+    if (herzie && spin) {
+      herzie.root.getWorldPosition(chest);
+      const n = Math.round(spin.value);
+      const elapsed =
+        now - (spin.until - (SKILL_DEFS.multispin.durationMs ?? 0));
+      const y = chest.y + herzie.height * 0.55;
+      for (let i = 0; i < n; i++) {
+        const o = multispinOffset(i, n, elapsed);
+        const rx = chest.x + o.x;
+        const rz = chest.z + o.z;
+        const angle = Math.atan2(o.z, o.x);
+        for (const d of liveDummies) {
+          if (d.mob !== undefined || d.herzie !== undefined) continue;
+          const reach = MULTISPIN.recordRadius + DUMMY.radius * (d.size ?? 1);
+          const fromMe = Math.hypot(d.x - chest.x, d.z - chest.z);
+          const bearing = Math.atan2(d.z - chest.z, d.x - chest.x) - angle;
+          const off = Math.abs(
+            Math.atan2(Math.sin(bearing), Math.cos(bearing)),
+          );
+          const touches =
+            Math.hypot(d.x - rx, d.z - rz) <= reach ||
+            (fromMe < MULTISPIN.radius &&
+              off <= Math.atan2(reach, MULTISPIN.radius));
+          if (!touches) continue;
+          let last = spinTouches.get(d);
+          if (!last || last.length < n) {
+            last = new Float64Array(Math.max(n, 10)).fill(
+              Number.NEGATIVE_INFINITY,
+            );
+            spinTouches.set(d, last);
+          }
+          if (now - last[i] < MULTISPIN.rehitMs) continue;
+          last[i] = now;
+          const toward = flatToward(chest, d);
+          const point: Vec3 = [rx, y, rz];
+          const kind = myHit(d, toward, point, MULTISPIN.damage, now);
+          waveField.burst(point, toward, kind);
+        }
+      }
     }
 
     // --- Casting: a wave from the hand; a Record Slinger's disc thrown
@@ -759,17 +1078,26 @@ export function Combat({
         healTarget([chest.x, chest.y, chest.z], [dir.x, dir.y, dir.z], allies)
           ?.ally.id ?? null;
     }
-    // Hasted, or with Timing: the pace and the motion quicken together. The
-    // two multiply, as the server's cast budget does.
+    // Hasted, or with Timing (a Focus adds to yours), or the Tower's speed
+    // boons: the pace and the motion quicken together. They multiply, as
+    // the server's cast budget does.
+    const boons = bossFight.tower?.boons;
     const speed =
       attackSpeedOf(bossFight.you ?? -1, now) *
-      (1 + timingAttackSpeed(statsRef.current.timing));
+      (1 +
+        timingAttackSpeed(
+          (statsRef.current.timing ?? 0) + focusOf(bossFight.you ?? -1, now),
+        )) *
+      (boons?.length ? 1 + towerBoonTotals(boons).speed : 1);
     if (herzie) herzie.castRate = speed;
     if (herzie) {
       const queued = now - combat.queuedAt < CAST_BUFFER_MS;
       const free = discs ? nextHand(discField, herzie) : null;
-      // Nothing else starts while a Rimshot winds up and lands.
-      const slamming = herzie.casting && herzie.castMotion === "slam";
+      // Nothing else starts while a Rimshot or a Silencio winds up and
+      // lands.
+      const slamming =
+        herzie.casting &&
+        (herzie.castMotion === "slam" || herzie.castMotion === "hush");
       // Held for a duel's countdown, or stunned in one: nothing goes off.
       const ready =
         !slamming &&
@@ -825,22 +1153,25 @@ export function Combat({
         }
         combat.casts = (combat.casts + 1) & 0xffff;
       }
-      // A Rimshot: the stick strikes the ground and it lands; or the server
-      // cut the wind-up short (knocked out), and it never does.
-      const r = a.rimshot;
-      if (r && herzie.released && herzie.castMotion === "slam") {
-        slamLands(herzie, r.chance, now);
-        a.rimshot = null;
+      // A Rimshot or a Silencio: the stick strikes the ground (the lute
+      // sweeps out) and it lands; or the server cut the wind-up short
+      // (knocked out, refused), and it never does.
+      const w = a.windup;
+      if (w && herzie.released && herzie.castMotion === WINDUP_STYLE[w.skill]) {
+        if (w.skill === "rimshot")
+          slamLands(herzie, skillValue("rimshot", w.level), now);
+        else silencioLands(herzie, w.level, now);
+        a.windup = null;
       } else if (
-        r &&
+        w &&
         (!pendingSlam(bossFight.you ?? -1) ||
-          now - r.at > (SKILL_DEFS.rimshot.castMs ?? 0) + 800)
+          now - w.at > (SKILL_DEFS[w.skill].castMs ?? 0) + 800)
       ) {
         herzie.cancelCast();
         combat.rootedUntil = Number.NEGATIVE_INFINITY;
-        r.roll.stop();
+        w.roll.stop();
         cancelSlam(bossFight.you ?? -1);
-        a.rimshot = null;
+        a.windup = null;
       }
       // The blow lands: whatever's in front of it, in reach, is hit.
       else if (
@@ -1077,7 +1408,11 @@ export function Combat({
     if (herzie) {
       for (const h of HANDS) {
         const out = discField.isOut(herzie, h);
-        herzie.setHeldHidden(h, out);
+        // A Cymbal Trap's cymbal is out of the off hand too.
+        herzie.setHeldHidden(
+          h,
+          out || (h === "held-r" && cymbalOut(bossFight.you ?? -1, now)),
+        );
         combat.discs.in[h] = !out;
       }
     }
@@ -1120,6 +1455,35 @@ function flatToward(
   return [dx / n, 0, dz / n];
 }
 
+/** Practice: the first plain dummy a throw from over `from` (its herzie's
+ * feet at `feet`) going `toward` meets within `range`, and how far along:
+ * by the rule the server judges a thrown disc or cymbal by. */
+function firstDummyAlong(
+  from: { x: number; z: number },
+  feet: number,
+  toward: Readonly<Vec3>,
+  range: number,
+): { dummy: DummyState; dist: number } | null {
+  let best: { dummy: DummyState; dist: number } | null = null;
+  for (const d of liveDummies) {
+    if (d.mob !== undefined || d.herzie !== undefined) continue;
+    const dist = bodyHitAt(
+      [from.x, feet - (d.y ?? 0) + WAVE_HAND_HEIGHT, from.z],
+      toward,
+      {
+        x: d.x,
+        z: d.z,
+        radius: DUMMY.radius * (d.size ?? 1),
+        chest: DUMMY.chest,
+        top: DUMMY.top,
+      },
+      range,
+    );
+    if (dist !== null && (!best || dist < best.dist)) best = { dummy: d, dist };
+  }
+  return best;
+}
+
 /** Out of combat mode, letting the mouse go. */
 function leave() {
   exitMouseLook();
@@ -1128,3 +1492,10 @@ function leave() {
 
 /** Out of combat mode, from outside it (the boss's end screen). */
 export const leaveCombat = leave;
+
+/** Back into combat mode, from outside it, where it can be had (a Tower
+ * buff picked). Nothing when no Combat is up, or it's on already. */
+let resume: (() => void) | null = null;
+export function resumeCombat(): void {
+  resume?.();
+}

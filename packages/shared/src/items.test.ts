@@ -981,6 +981,19 @@ describe("applySell", () => {
     expect(unitsToEquipped(out.units)).toEqual({ color: "prism" });
   });
 
+  // As sell_units: a copy the other loadout holds is put away, not for sale,
+  // and asking for it fails the whole sell rather than selling the rest.
+  it("refuses a copy held by the other loadout", () => {
+    const units = [
+      unit("a", "cd"),
+      { ...unit("held", "cd"), heldBy: 2 as const },
+    ];
+    expect(applySell(units, 0, ["a", "held"], price)).toEqual({
+      ok: false,
+      reason: "not-enough",
+    });
+  });
+
   it("keeps the worn copy while another copy is sold", () => {
     const units = [unit("worn", "cd", 0, "head"), unit("spare", "cd")];
     const out = sold(applySell(units, 0, ["spare"], price));
@@ -1636,6 +1649,9 @@ describe("stats", () => {
     expect(formatStatBonus("critDamage", 10)).toBe("+10%");
     expect(formatStatBonus("sonicPower", 5)).toBe("+5");
     expect(formatStat("sonicPower", 5)).toBe("5");
+    // Float noise from summing and scaling tenths doesn't show.
+    expect(formatStat("def", 125.4 * 1.5)).toBe("188.1");
+    expect(formatStat("def", 0.1 + 0.2)).toBe("0.3");
   });
 });
 

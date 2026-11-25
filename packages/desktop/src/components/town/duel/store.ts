@@ -28,6 +28,9 @@ export type DuelView = Omit<DuelState, "hp"> & {
   health: Map<number, { hp: number; maxHp: number }>;
   /** Stunned until (server ms), by duelist. */
   stuns: Map<number, number>;
+  /** Held by a Cymbal Trap until (server ms), by duelist: it can't walk,
+   * but may still turn, attack and use skills. */
+  roots: Map<number, number>;
   /** A duelist's dropped connection: back by (server ms), or it's left. */
   away: Map<number, number>;
   /** When this client first heard of it, and when it ended here
@@ -95,6 +98,8 @@ export type DuelEvent =
       damage: number;
       crit: boolean;
       blocked: boolean;
+      /** A Forbidden Frequency bleed hit. */
+      bleed: boolean;
     }
   | { k: "stun"; id: number; until: number }
   | { k: "out"; until: number | null }
@@ -326,13 +331,24 @@ export function duelFighting(now = performance.now()): boolean {
   return !!d && fightOn(d, now);
 }
 
-/** Your herzie is held where it stands: the countdown, or a stun. */
+/** Your herzie is held where it stands: the countdown, or a stun. Nothing
+ * goes off either (see {@link duelRooted} for a hold that only stops your
+ * feet). */
 export function duelHeld(now = performance.now()): boolean {
   const d = myDuel();
   if (!d || duel.you === null) return false;
   if (!fightOn(d, now)) return true;
   const stun = d.stuns.get(duel.you);
   return stun !== undefined && now < localOf(stun);
+}
+
+/** Your herzie is held where it stands by a Cymbal Trap: it can't walk
+ * (or jump), but turns, attacks and uses skills as ever. */
+export function duelRooted(now = performance.now()): boolean {
+  const d = myDuel();
+  if (!d || duel.you === null) return false;
+  const root = d.roots.get(duel.you);
+  return root !== undefined && now < localOf(root);
 }
 
 // --- Writing ----------------------------------------------------------------
@@ -343,6 +359,7 @@ function view(s: DuelState, seen: number): DuelView {
     ...rest,
     health: new Map(hp.map((h) => [h.id, { hp: h.hp, maxHp: h.maxHp }])),
     stuns: new Map(),
+    roots: new Map(),
     away: new Map(),
     seenAt: seen,
     endedAt: null,
@@ -549,6 +566,7 @@ export function handleDuelMessage(m: ServerMessage, ctx: DuelContext): boolean {
         damage: m.damage,
         crit: m.crit,
         blocked: !!m.blocked,
+        bleed: !!m.bleed,
       });
       return true;
     case "duelStun": {
@@ -557,6 +575,16 @@ export function handleDuelMessage(m: ServerMessage, ctx: DuelContext): boolean {
       fire({ k: "stun", id: m.id, until: m.until });
       emit();
       return true;
+    }
+    case "trap": {
+      // A Cymbal Trap's hold on a duelist. Also everyone's (the cymbal's
+      // show, its sound: fight.ts), so not the duel's alone.
+      const d = m.mob ? undefined : duelOf(m.target);
+      if (d) {
+        d.roots.set(m.target, m.until);
+        emit();
+      }
+      return false;
     }
     case "duelOut":
       duel.outUntil = m.until;

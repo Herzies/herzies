@@ -40,7 +40,7 @@ import { readFileSync } from "node:fs";
 import { promisify } from "node:util";
 import { BOSS_ONLY_ITEM_IDS, ITEMS, NON_DROPPABLE_ITEM_IDS } from "@herzies/shared/items";
 import { DISC_RANGE, WAVE_RANGE } from "@herzies/shared/combat";
-import { SKILL_DEFS } from "@herzies/shared/skills";
+import { CYMBAL_TRAP, SKILL_DEFS } from "@herzies/shared/skills";
 import {
   decodeSnapshot,
   encodeCastFrame,
@@ -188,6 +188,8 @@ function run() {
   let myHp = 1;
   let down = false;
   let stunnedUntil = 0;
+  /** Caught by a Cymbal Trap until then: it turns and fights, but stands. */
+  let heldUntil = 0;
   let restUntil = 0;
   let target = -1;
   let grudge = { id: -1, until: 0 };
@@ -274,7 +276,7 @@ function run() {
       vz -= (me.z / r) * 1.5;
     }
     const v = Math.hypot(vx, vz);
-    if (v < 0.05) return;
+    if (v < 0.05 || Date.now() < heldUntil) return;
     me.x += (vx / v) * speed * dt;
     me.z += (vz / v) * speed * dt;
     me.heading = Math.atan2(vx, vz);
@@ -316,10 +318,25 @@ function run() {
     );
     const { yaw, pitch, d: dist } = aimAt(p, false);
     me.heading = yaw;
-    if (now < nextCastAt || dist > RANGE || inWildsSafeCamp(me.x, me.z)) return;
+    if (now < nextCastAt || inWildsSafeCamp(me.x, me.z)) return;
+    if (dist > RANGE) {
+      // Out of its stick's reach, a Percussionist throws its cymbal: what
+      // it catches is held while it closes in.
+      if (cls === "percussionist" && dist >= 4 && dist <= CYMBAL_TRAP.range && useSkill("cymbal-trap", yaw, pitch))
+        nextCastAt = now + 470 + Math.random() * 180;
+      return;
+    }
     nextCastAt = now + 470 + Math.random() * 180;
     if (cls === "bard" && myHp < 0.55 && useSkill("soothing-drones", yaw, pitch)) return;
+    // Rage first thing in a fight (and whenever it's ready again).
+    if (cls === "bard" && useSkill("rage", yaw, pitch)) return;
     if (cls === "bard" && useSkill("haste", yaw, pitch)) return;
+    // Close enough for its wave: the foe bleeds.
+    if (cls === "bard" && dist <= 4 && useSkill("silencio", yaw, pitch)) return;
+    // Up close, records round it.
+    if (cls === "record_slinger" && dist <= 3 && useSkill("multispin", yaw, pitch)) return;
+    // Keeps its bleed going whenever the disc reaches.
+    if (cls === "record_slinger" && dist < 14 && useSkill("forbidden-frequency", yaw, pitch)) return;
     if (cls === "record_slinger" && dist < 14 && Math.random() < 0.3 && useSkill("backspin", yaw, pitch)) return;
     if (cls === "record_slinger" && useSkill("shuffle", yaw, pitch)) return;
     if (cls === "percussionist" && dist < 3 && useSkill("rimshot", yaw, pitch)) return;
@@ -452,6 +469,7 @@ function run() {
           target = -1;
           grudge = { id: -1, until: 0 };
           me.speed = 0;
+          heldUntil = 0;
         } else if (!down && wasDown) {
           log(`up in the camp (${m.hp}/${m.maxHp}); setting off again`);
           restUntil = Date.now() + GET_UP_PAUSE_MS;
@@ -463,6 +481,9 @@ function run() {
       }
       case "pvpStun":
         if (m.id === you) stunnedUntil = Date.now() + Math.max(0, m.until - serverNow());
+        break;
+      case "trap":
+        if (!m.mob && m.target === you) heldUntil = Date.now() + Math.max(0, m.until - serverNow());
         break;
       case "pvpFeed":
         log(`"${m.byName}" took down "${m.victimName}"${m.logged ? " (left mid-fight)" : ""}`);

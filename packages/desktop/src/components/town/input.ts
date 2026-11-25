@@ -1,14 +1,8 @@
 import { useEffect, useRef } from "react";
-import { queueSkill } from "./combat/skills";
-import { eat } from "./eat";
 import { emoteInSlot, playEmote, setAltHeld } from "./emotes";
 import { homeMode } from "./homeMode";
-import {
-  HOTBAR_KEYS,
-  type HotbarKey,
-  hotbarItem,
-  skillOfSlot,
-} from "./hotbarSlots";
+import { hotbarSlotOfCode } from "./hotbarKeys";
+import { pressHotbarSlot } from "./hotbarUse";
 
 /** What the player is asking for this frame. Read by the game loop; written
  * only by the listeners below. */
@@ -79,8 +73,9 @@ const idle = (): TownInput => ({
  * stay held. Both are handled here. Listens only while `active`.
  *
  * `onInteract` fires on E; Space raises `jump`, for the game loop to clear;
- * 2, 3 and 4 eat from the hotbar (hotbar.ts). Holding Alt shows the Alt
- * bar, and Alt+1, Alt+2… play the emotes on it (emotes.ts). `surface` is the element mouse buttons count on
+ * the hotbar's keys (1-8 unless rebound: hotbarKeys.ts) use its slots
+ * (hotbarUse.ts). Holding Alt shows the Alt bar, and Alt+1, Alt+2… play the
+ * emotes on it (emotes.ts). `surface` is the element mouse buttons count on
  * (the canvas); button releases are caught anywhere, since the camera
  * captures the pointer mid-drag.
  */
@@ -140,16 +135,12 @@ export function useTownInput(
         interact.current();
         return;
       }
-      // 1-4: what's on that hotbar slot — one of your class skills, or a
-      // consumable to eat.
-      const slot = e.code.startsWith("Digit") ? e.code.slice(5) : "";
-      if (HOTBAR_KEYS.includes(slot as HotbarKey)) {
+      // A hotbar key: what's on that slot — a class skill, a consumable to
+      // eat, a card to put on or take off, a loadout to switch to.
+      const slot = hotbarSlotOfCode(e.code);
+      if (slot !== -1) {
         e.preventDefault();
-        const held = hotbarItem(slot as HotbarKey);
-        if (!held || e.repeat) return;
-        const skill = skillOfSlot(held);
-        if (skill !== null) queueSkill(skill);
-        else void eat(held);
+        if (!e.repeat) pressHotbarSlot(slot);
         return;
       }
       // Space would click whatever button has focus (or scroll): it's the

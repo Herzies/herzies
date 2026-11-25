@@ -48,6 +48,7 @@ import { DuelHud } from "./town/duel/DuelHud";
 import { drawn, useFpsShown } from "./town/fps";
 import { Hotbar } from "./town/Hotbar";
 import { homeMode, markWorldSettled } from "./town/homeMode";
+import { useHotbarDrag } from "./town/hotbarDrop";
 import { Key } from "./town/Key";
 import { LocationTitle } from "./town/LocationTitle";
 import type { TownMap } from "./town/map";
@@ -172,6 +173,7 @@ export function TownWorld({
   const [bench, setBench] = useState<BenchPrompt | null>(null);
   const [portalTo, setPortalTo] = useState<TownMap | null>(null);
   const fighting = useCombat();
+  const hotbarDrag = useHotbarDrag();
   const fpsShown = useFpsShown();
   // Everyone else with the Town open, on the same island.
   const net = useTownNet(!paused);
@@ -316,12 +318,14 @@ export function TownWorld({
         : "bottom-[calc(var(--dock-height,0px)+4.5rem+42px)]"
       : "bottom-[54px]";
   // The key for aim mode (anywhere in the Town): sat right on top of the
-  // bars (or in the corner, without them).
+  // bars (or in the corner, without them), left of the hotbar — or over its
+  // left end where the window's too narrow for both side by side (the
+  // hotbar's 36px tall, 6px under it).
   const combatHint = !hudHidden ? (
     <div
       className={cn(
         // No box: the key chip, and the word over the world with a shadow.
-        "pointer-events-none absolute z-30 flex items-center gap-2 text-[10px] text-white/80",
+        "pointer-events-none absolute z-30 flex items-center gap-2 text-[10px] text-white/80 max-[32rem]:mb-[42px]",
         profile
           ? "bottom-full left-0"
           : chatOverlay
@@ -412,7 +416,10 @@ export function TownWorld({
                 // in from each side, as the chat is: the aim
                 // hint, the hotbar and the skills stand on it, flush with
                 // its ends and centred.
-                "pointer-events-none absolute inset-x-3 z-30 h-0",
+                "pointer-events-none absolute inset-x-3 h-0",
+                // Over open windows while something's carried to the
+                // hotbar (hotbarDrop).
+                hotbarDrag ? "z-[61]" : "z-30",
                 chatOverlay
                   ? "bottom-[calc(var(--dock-height,0px)+6px)]"
                   : "bottom-3",
@@ -559,7 +566,9 @@ export function TownWorld({
           )}
         >
           {typeof bench === "object"
-            ? `Pick up ${bench.name}`
+            ? "herzie" in bench
+              ? `Interact with ${bench.name}`
+              : `Pick up ${bench.name}`
             : bench === "sit"
               ? "Sit down"
               : bench === "read"
@@ -572,7 +581,9 @@ export function TownWorld({
                       ? "Crafting Station"
                       : bench === "hunt"
                         ? "Talk to the Hunt Crystal"
-                        : "Stand up"}{" "}
+                        : bench === "chest"
+                          ? "Open the chest"
+                          : "Stand up"}{" "}
           <span className="text-text-dim">[E]</span>
         </button>
       ) : null}

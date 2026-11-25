@@ -3,9 +3,10 @@
  *
  * Mirrored in SQL by 00106_classes.sql — the class check on herzies.class
  * and items.required_class — and by choose_class's skills per class
- * (00137_shuffle.sql). A new class needs both.
+ * (00160_skill_unlocks.sql). A new class needs both.
  */
-import type { SkillId } from "./skills.js";
+import { levelForStage } from "./leveling.js";
+import { SKILL_DEFS, type SkillId } from "./skills.js";
 import { WILDS_RECIPES } from "./wilds-loot.js";
 
 export const CLASS_IDS = ["bard", "record_slinger", "percussionist"] as const;
@@ -29,7 +30,7 @@ export interface ClassDef {
   /** The skill every herzie of this class starts with. */
   starterSkill: SkillId;
   /** Every skill the class has, the starter first (hotbar order). Mirrored
-   * by choose_class (00137_shuffle.sql). */
+   * by choose_class and grant_earned_skills (00160_skill_unlocks.sql). */
   skills: readonly SkillId[];
   /** Its basic attack, with its instrument in hand. */
   attack: AttackStyle;
@@ -37,6 +38,12 @@ export interface ClassDef {
 
 /** The stage at which a herzie picks its class. */
 export const CLASS_STAGE = 2;
+
+/** The herzie level a class skill is learned at: its own `minLevel`, or,
+ * for those a class starts with, the level its class is chosen at. */
+export function skillLearnedAt(id: SkillId): number {
+  return SKILL_DEFS[id].minLevel ?? levelForStage(CLASS_STAGE);
+}
 
 export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
   bard: {
@@ -46,7 +53,14 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
     role: "support",
     equipment: ["lute"],
     starterSkill: "soothing-drones",
-    skills: ["soothing-drones", "resurrect", "haste"],
+    skills: [
+      "soothing-drones",
+      "resurrect",
+      "haste",
+      "rage",
+      "silencio",
+      "focus",
+    ],
     attack: "wave",
   },
   record_slinger: {
@@ -56,7 +70,7 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
     role: "dps",
     equipment: ["compact-discs"],
     starterSkill: "backspin",
-    skills: ["backspin", "shuffle"],
+    skills: ["backspin", "shuffle", "multispin", "forbidden-frequency"],
     attack: "disc",
   },
   percussionist: {
@@ -66,7 +80,7 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
     role: "tank",
     equipment: ["worn-stick", "old-cymbal"],
     starterSkill: "cymbrella",
-    skills: ["cymbrella", "taunt", "rimshot"],
+    skills: ["cymbrella", "taunt", "rimshot", "cymbal-trap"],
     attack: "melee",
   },
 };

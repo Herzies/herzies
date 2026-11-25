@@ -1,16 +1,24 @@
+import type { LoadoutIndex } from "@herzies/shared";
 import { useSyncExternalStore } from "react";
 
-// The Town hotbar: four slots on keys 1-4, each holding a consumable by
-// item id (a stack, not a copy), eaten by pressing its key, or one of your
-// class skills (skillSlot(n): the class's nth, whichever it is), used by
-// pressing it. Filled from the slot itself or the bank's right-click menu.
-// Kept in localStorage, per device, like the "!"s (met.ts): a slot that
-// comes back empty on a new machine is harmless.
+// The Town hotbar: eight slots, each on keys of your choosing (hotbarKeys.ts),
+// holding one of:
+//  - an item by id (a stack, not a copy): a consumable is eaten, a card you
+//    can wear is put on or taken off in the loadout you're on;
+//  - one of your class skills (skillSlot(n): the class's nth, whichever it
+//    is), used;
+//  - a loadout (loadoutSlot(n)), switched to, or the swap between the two
+//    (loadoutSlot("swap")), switching to whichever isn't on.
+// Filled from the slot itself, the bank's right-click menu, or by dragging a
+// card, a loadout tab or a skill's badge onto it; dragged between slots, two
+// swap, and dragged off the bar, a slot empties. Kept in localStorage, per
+// device, like the "!"s (met.ts): a slot that comes back empty on a new
+// machine is harmless.
 
-/** The keys, in order: one slot each. */
-export const HOTBAR_KEYS = ["1", "2", "3", "4"] as const;
-export type HotbarKey = (typeof HOTBAR_KEYS)[number];
-export type Hotbar = Record<HotbarKey, string | null>;
+/** How many slots the bar has. */
+export const HOTBAR_SIZE = 8;
+/** What's in each slot, by index. */
+export type HotbarSlots = readonly (string | null)[];
 
 /** A slot's value for your class's `n`th skill (1-based). */
 export function skillSlot(n: number): string {
@@ -25,67 +33,85 @@ export function skillOfSlot(value: string | null): number | null {
   return m ? Number(m[1]) : null;
 }
 
+/** Where a loadout slot switches to: loadout 1 or 2, or whichever isn't on. */
+export type LoadoutTarget = LoadoutIndex | "swap";
+
+/** A slot's value for switching to `target`. */
+export function loadoutSlot(target: LoadoutTarget): string {
+  return `loadout:${target}`;
+}
+
+/** Where a slot switches loadouts to, or null if it holds something else. */
+export function loadoutOfSlot(value: string | null): LoadoutTarget | null {
+  if (value === "loadout:1") return 1;
+  if (value === "loadout:2") return 2;
+  if (value === "loadout:swap") return "swap";
+  return null;
+}
+
 /** How the one class skill was saved before classes had two. */
 const LEGACY_SKILL_SLOT = "skill";
-/** How many skills a class may have (a Bard's third, Haste, at level 15). */
-export const MAX_CLASS_SKILLS = 3;
 
 const STORAGE_KEY = "herzies.town.hotbar";
-/** The first skill starts on 1, where it always was; the second beside it. */
-const DEFAULT: Hotbar = {
-  "1": skillSlot(1),
-  "2": skillSlot(2),
-  "3": null,
-  "4": null,
-};
+/** The first skill starts on the first slot, the second beside it. */
+const DEFAULT: HotbarSlots = [
+  skillSlot(1),
+  skillSlot(2),
+  ...Array<null>(HOTBAR_SIZE - 2).fill(null),
+];
 
 const listeners = new Set<() => void>();
 
-function load(): Hotbar {
+/** The four-slot bar as it was saved before it had eight: by key "1"-"4". A
+ * slot saved before it existed (1, from the three-slot bar) keeps its
+ * default; one saved empty stays empty. Saved before classes had a second
+ * skill (no `v2`), that one goes in the first empty slot. */
+function fromFourSlots(raw: Record<string, unknown>): (string | null)[] {
+  const out = [...DEFAULT];
+  for (let i = 0; i < 4; i++) {
+    const k = String(i + 1);
+    const v = raw[k];
+    if (k in raw) out[i] = typeof v === "string" ? v : null;
+    if (out[i] === LEGACY_SKILL_SLOT) out[i] = skillSlot(1);
+  }
+  if (!raw.v2 && !out.includes(skillSlot(2))) {
+    const free = out.indexOf(null);
+    if (free !== -1) out[free] = skillSlot(2);
+  }
+  return out;
+}
+
+function load(): { slots: HotbarSlots; offered: Set<number> } {
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
-    const out = { ...DEFAULT };
-    for (const k of HOTBAR_KEYS) {
-      // A slot saved before it existed (1, from the three-slot bar) keeps
-      // its default; one saved empty stays empty.
-      if (raw && k in raw) out[k] = typeof raw[k] === "string" ? raw[k] : null;
-      if (out[k] === LEGACY_SKILL_SLOT) out[k] = skillSlot(1);
-    }
-    // Saved before classes had a second skill: it goes in the first empty
-    // slot (once; moved or cleared after that, it stays as it's put).
-    if (raw && !raw.v2) {
-      const free = HOTBAR_KEYS.find((k) => out[k] === null);
-      if (!HOTBAR_KEYS.some((k) => out[k] === skillSlot(2)) && free)
-        out[free] = skillSlot(2);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...out, v2: true }));
-    }
-    return out;
+    const offered = new Set<number>(
+      Array.isArray(raw?.offered) ? raw.offered : [],
+    );
+    if (!raw || typeof raw !== "object") return { slots: DEFAULT, offered };
+    if (!Array.isArray(raw.slots))
+      return { slots: fromFourSlots(raw), offered };
+    const slots = Array.from({ length: HOTBAR_SIZE }, (_, i) =>
+      typeof raw.slots[i] === "string" ? (raw.slots[i] as string) : null,
+    );
+    return { slots, offered };
   } catch {
-    return { ...DEFAULT };
+    return { slots: DEFAULT, offered: new Set() };
   }
 }
 
-let slots = load();
-
-/** Skills already put on the bar once on being learned (see
- * offerSkillSlot), so one moved off it isn't put back. */
-let offered = (() => {
-  try {
-    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
-    return new Set<number>(Array.isArray(raw?.offered) ? raw.offered : []);
-  } catch {
-    return new Set<number>();
-  }
-})();
+let { slots, offered } = load();
 
 /** A skill just learned (your class's `n`th, past the first two): onto the
- * first empty slot, once. */
+ * first empty slot, once, so one moved off it isn't put back. */
 export function offerSkillSlot(n: number): void {
   if (n <= 2 || offered.has(n)) return;
   offered = new Set([...offered, n]);
-  const free = HOTBAR_KEYS.find((k) => slots[k] === null);
-  if (free && !HOTBAR_KEYS.some((k) => slots[k] === skillSlot(n)))
-    slots = { ...slots, [free]: skillSlot(n) };
+  const free = slots.indexOf(null);
+  if (free !== -1 && !slots.includes(skillSlot(n))) {
+    const next = [...slots];
+    next[free] = skillSlot(n);
+    slots = next;
+  }
   save();
 }
 
@@ -93,7 +119,7 @@ function save() {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ ...slots, v2: true, offered: [...offered] }),
+      JSON.stringify({ slots, offered: [...offered] }),
     );
   } catch {
     // Private mode or full: the slots last until the app closes.
@@ -101,29 +127,49 @@ function save() {
   for (const l of listeners) l();
 }
 
-/** Put `itemId` (or a skillSlot) on `key`. One thing sits in one slot:
- * assigning it again moves it there. */
-export function assignHotbar(key: HotbarKey, itemId: string): void {
-  const next = { ...slots };
-  for (const k of HOTBAR_KEYS) if (next[k] === itemId) next[k] = null;
-  next[key] = itemId;
+/** Put `value` (an item id, a skillSlot or a loadoutSlot) on slot `i`. One
+ * thing sits in one slot: assigning it again moves it there. */
+export function assignHotbar(i: number, value: string): void {
+  const next = slots.map((v) => (v === value ? null : v));
+  next[i] = value;
   slots = next;
   save();
 }
 
-/** Empty `key`. */
-export function clearHotbar(key: HotbarKey): void {
-  if (slots[key] === null) return;
-  slots = { ...slots, [key]: null };
+/** Put `value` on the first empty slot (staying where it is if it's on the
+ * bar already). Returns whether it's on the bar: false when the bar's full. */
+export function addToHotbar(value: string): boolean {
+  if (slots.includes(value)) return true;
+  const free = slots.indexOf(null);
+  if (free === -1) return false;
+  assignHotbar(free, value);
+  return true;
+}
+
+/** Empty slot `i`. */
+export function clearHotbar(i: number): void {
+  if (slots[i] === null) return;
+  const next = [...slots];
+  next[i] = null;
+  slots = next;
   save();
 }
 
-/** What's on `key` now. */
-export function hotbarItem(key: HotbarKey): string | null {
-  return slots[key];
+/** Swap slots `a` and `b` (one may be empty: a move). */
+export function swapHotbar(a: number, b: number): void {
+  if (a === b) return;
+  const next = [...slots];
+  [next[a], next[b]] = [next[b], next[a]];
+  slots = next;
+  save();
 }
 
-export function useHotbar(): Hotbar {
+/** What's on slot `i` now. */
+export function hotbarItem(i: number): string | null {
+  return slots[i] ?? null;
+}
+
+export function useHotbar(): HotbarSlots {
   return useSyncExternalStore(
     (l) => {
       listeners.add(l);

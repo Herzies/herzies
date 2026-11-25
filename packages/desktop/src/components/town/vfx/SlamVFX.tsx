@@ -57,11 +57,12 @@ const RING_SEGS = 96;
 const ROWS = [-1, -0.18, 0.18, 1] as const;
 const ROW_GLOW = [0, 1, 1, 0] as const;
 
-/** A bright ring lying on the ground, any radius and width. */
-class GroundRing {
+/** A bright ring lying on the ground, any radius and width: `color`, going
+ * `hot` at its brightest. */
+export class GroundRing {
   readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
 
-  constructor() {
+  constructor(color: THREE.Color = GOLD, hot: THREE.Color = HOT) {
     const g = new THREE.BufferGeometry();
     const n = ROWS.length * (RING_SEGS + 1);
     g.setAttribute(
@@ -87,8 +88,8 @@ class GroundRing {
         vertexShader: RING_VERT,
         fragmentShader: RING_FRAG,
         uniforms: {
-          uColor: { value: GOLD.clone() },
-          uHot: { value: HOT.clone() },
+          uColor: { value: color.clone() },
+          uHot: { value: hot.clone() },
           uAlpha: { value: 0 },
         },
         transparent: true,
@@ -472,6 +473,8 @@ export function SlamVFX({ map }: { map: TownMap }) {
     const R = RIMSHOT.radius;
     let i = 0;
     for (const s of slams) {
+      // A Silencio is SilencioVFX's.
+      if (s.skill !== "rimshot") continue;
       if (i >= MAX) break;
       const k = i++;
       const gy = groundY(map, s.x, s.z);

@@ -39,6 +39,7 @@ export function NakataPanel({
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
           <HerzieView
             onStage={onStage}
+            bleed
             userId={NAKATA_SEED}
             stage={NAKATA_STAGE}
             zoom={0.8}

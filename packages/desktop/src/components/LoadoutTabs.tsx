@@ -8,15 +8,37 @@ import {
   RARITY_COLORS,
   STAT_KEYS,
 } from "@herzies/shared";
+import {
+  LOADOUT_COOLDOWN_MS,
+  loadoutCooldownLeft,
+  useLoadoutCooldownSecs,
+} from "../lib/loadoutState";
 import { predictLoadoutSwitch } from "../lib/loadouts";
 import { cn } from "../lib/utils";
+import { SwapIcon } from "./icons/SwapIcon";
 import { StatChanges } from "./StatChanges";
 import { HoverPreview, Tooltip } from "./Tooltip";
+import { useCooldownShade } from "./town/cooldownShade";
+import { HotbarGhost } from "./town/HotbarGhost";
+import { useDragToHotbar } from "./town/hotbarDrop";
+import { loadoutSlot } from "./town/hotbarSlots";
+
+/** The switching cooldown over the other tab: greyed from the top. */
+function CooldownShade() {
+  return useCooldownShade(
+    (now) => ({ ms: loadoutCooldownLeft(now), span: LOADOUT_COOLDOWN_MS }),
+    { seconds: false },
+  );
+}
 
 /**
  * The Deck's two loadouts, as tabs: the one worn filled, the other outlined.
  * Clicking the other one switches (see useLoadoutSwitch); hovering it shows
- * what it would put on and what that does to the stats.
+ * what it would put on and what that does to the stats. Left of them, the
+ * swap (two arrows) switches to whichever isn't on. For LOADOUT_COOLDOWN_MS
+ * after a switch (here or on a hotbar key) the other tab and the swap are
+ * off, greyed from the top with the seconds left beside them. The swap and
+ * either tab can be dragged onto a hotbar slot, to do the same with a key.
  */
 export function LoadoutTabs({
   loadouts,
@@ -41,63 +63,131 @@ export function LoadoutTabs({
   onSwitch: (to: LoadoutIndex) => void;
   className?: string;
 }) {
+  const drag = useDragToHotbar();
+  const cooldown = useLoadoutCooldownSecs();
+  const other = active === 1 ? 2 : 1;
+  // Not `disabled`, here or on the tabs: a disabled button takes no pointer
+  // events, and it can still be dragged to the hotbar.
+  const swapOff = !!blocked || switching || cooldown > 0;
   return (
-    <div
-      role="tablist"
-      aria-label="Loadouts"
-      className={cn("flex items-center gap-1", className)}
-    >
-      {([1, 2] as const).map((n) => {
-        const on = n === active;
-        const tab = (
-          <button
-            type="button"
-            role="tab"
-            aria-selected={on}
-            disabled={!on && (!!blocked || switching)}
-            onClick={() => onSwitch(n)}
-            className={cn(
-              "flex h-4 w-5 items-center justify-center border text-ui-sm leading-none font-bold transition-colors duration-150",
-              on
-                ? "cursor-default border-cyan bg-cyan/20 text-cyan"
-                : "cursor-pointer border-white/20 bg-transparent text-text-dim hover:border-white/50 hover:text-text disabled:cursor-default disabled:opacity-40 disabled:hover:border-white/20 disabled:hover:text-text-dim",
-            )}
-          >
-            {n}
-          </button>
-        );
-        if (on) return <span key={n}>{tab}</span>;
-        if (blocked) {
-          return (
-            <Tooltip key={n} label={blocked}>
-              {tab}
-            </Tooltip>
-          );
+    <div className={cn("relative flex items-center gap-1", className)}>
+      <Tooltip
+        label={
+          blocked ??
+          (cooldown > 0
+            ? `Loadouts switch again in ${cooldown}s`
+            : `Swap to loadout ${other} — drag onto the hotbar to give it a key`)
         }
-        // Anchored under the tab rather than chasing the cursor: it's a
-        // card's worth, and the tabs sit at the top of their window.
-        return (
-          <HoverPreview
-            key={n}
-            alwaysAbove={false}
-            estWidth={200}
-            estHeight={170}
-            content={
-              <div className="w-[200px] rounded border border-white/15 bg-bg-panel px-2 py-1 text-ui-sm text-text">
-                <LoadoutPreview
-                  n={n}
-                  loadouts={loadouts}
-                  units={units}
-                  stage={stage}
-                  herzieClass={herzieClass}
-                />
-              </div>
-            }
-          >
-            {tab}
-          </HoverPreview>
-        );
-      })}
+      >
+        <button
+          type="button"
+          aria-label={`Swap to loadout ${other}`}
+          aria-disabled={swapOff}
+          onPointerDown={(e) => drag.start(loadoutSlot("swap"), e)}
+          onClick={() => {
+            if (drag.endedDrag() || swapOff) return;
+            onSwitch(other);
+          }}
+          className={cn(
+            "relative flex h-4 w-5 touch-none items-center justify-center overflow-hidden border border-white/20 bg-transparent text-text-dim transition-colors duration-150",
+            swapOff
+              ? "cursor-default opacity-40"
+              : "cursor-pointer hover:border-white/50 hover:text-text",
+          )}
+        >
+          <SwapIcon className="size-3" />
+          <CooldownShade />
+        </button>
+      </Tooltip>
+      <div
+        role="tablist"
+        aria-label="Loadouts"
+        className="flex items-center gap-1"
+      >
+        {([1, 2] as const).map((n) => {
+          const on = n === active;
+          const off = !on && swapOff;
+          const tab = (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={on}
+              aria-disabled={off}
+              onPointerDown={(e) => drag.start(loadoutSlot(n), e)}
+              onClick={() => {
+                if (drag.endedDrag() || on || off) return;
+                onSwitch(n);
+              }}
+              className={cn(
+                "relative flex h-4 w-5 touch-none items-center justify-center overflow-hidden border text-ui-sm leading-none font-bold transition-colors duration-150",
+                on
+                  ? "cursor-default border-cyan bg-cyan/20 text-cyan"
+                  : off
+                    ? "cursor-default border-white/20 bg-transparent text-text-dim opacity-40"
+                    : "cursor-pointer border-white/20 bg-transparent text-text-dim hover:border-white/50 hover:text-text",
+              )}
+            >
+              {n}
+              {on ? null : <CooldownShade />}
+            </button>
+          );
+          if (on)
+            return (
+              <Tooltip
+                key={n}
+                label={`Loadout ${n} — drag onto the hotbar to give it a key`}
+              >
+                {tab}
+              </Tooltip>
+            );
+          if (blocked || cooldown > 0) {
+            return (
+              <Tooltip
+                key={n}
+                label={blocked ?? `Loadouts switch again in ${cooldown}s`}
+              >
+                {tab}
+              </Tooltip>
+            );
+          }
+          // Anchored under the tab rather than chasing the cursor: it's a
+          // card's worth, and the tabs sit at the top of their window.
+          return (
+            <HoverPreview
+              key={n}
+              alwaysAbove={false}
+              estWidth={200}
+              estHeight={170}
+              content={
+                <div className="w-[200px] rounded border border-white/15 bg-bg-panel px-2 py-1 text-ui-sm text-text">
+                  <LoadoutPreview
+                    n={n}
+                    loadouts={loadouts}
+                    units={units}
+                    stage={stage}
+                    herzieClass={herzieClass}
+                  />
+                </div>
+              }
+            >
+              {tab}
+            </HoverPreview>
+          );
+        })}
+      </div>
+      {/* Out of the row's flow, just left of the swap: the buttons stay put
+          as it comes and goes. Left, not right: in the small window the row
+          is flush with the window's right edge. */}
+      {cooldown > 0 ? (
+        <span className="absolute top-1/2 right-full mr-1.5 -translate-y-1/2">
+          <Tooltip label={`Loadouts switch again in ${cooldown}s`}>
+            <span className="text-ui-sm text-text-dim tabular-nums">
+              {cooldown}s
+            </span>
+          </Tooltip>
+        </span>
+      ) : null}
+      <HotbarGhost ghost={drag.ghost} />
     </div>
   );
 }

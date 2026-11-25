@@ -31,6 +31,7 @@ import {
   WAVE_HAND_HEIGHT,
   WAVE_RANGE,
 } from "./combat.js";
+import { SILENCIO } from "./skills.js";
 
 describe("melee", () => {
   const target = { x: 0, z: 0, radius: 1 };
@@ -276,6 +277,22 @@ describe("the Cymbrella's dome", () => {
     expect(p.x).toBeGreaterThanOrEqual(DOME.radius + 0.5);
     // Already outside: left alone.
     expect(pushOutOfDomes([dome], 9, 0, 0.5, 2_000)).toEqual({ x: 9, z: 0 });
+  });
+
+  it("a Silencio wave shoves further than a dome, then is gone", () => {
+    const wave = {
+      x: 0,
+      z: 0,
+      from: 1_000,
+      until: 1_000 + SILENCIO.standMs,
+      radius: SILENCIO.radius,
+    };
+    const t = 1_000 + DOME.growMs;
+    expect(SILENCIO.radius).toBeGreaterThan(DOME.radius);
+    const p = pushOutOfDomes([wave], 0, -1, 0.5, t);
+    expect(Math.hypot(p.x, p.z)).toBeGreaterThanOrEqual(SILENCIO.radius + 0.5);
+    expect(p.z).toBeLessThan(0);
+    expect(domeRadiusAt(wave, 1_000 + SILENCIO.standMs)).toBe(0);
   });
 
   it("pushes out of overlapping domes, out of both", () => {

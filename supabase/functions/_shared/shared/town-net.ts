@@ -18,6 +18,7 @@
  */
 import type { CreatureParams } from "./creature-params.ts";
 import type { Equipped } from "./items.ts";
+import type { TowerBoon } from "./tower.ts";
 import type {
   WildsCacheHold,
   WildsCacheView,
@@ -212,9 +213,21 @@ export type TownTicketPayload = {
    * tickets without it. */
   boss?: BossClaim;
   /** Set only while a Tower event is on: the event, when it ends (unix
-   * seconds), and the floor this herzie starts on (one past their best).
-   * The Tower turns away tickets without it. */
-  tower?: { event: string; until: number; floor: number };
+   * seconds), the floor this herzie starts on (one past the floor its
+   * climb has reached: tower_reset starts a climb over, so this can be
+   * below its best), the boons its climb has picked (TOWER_BOONS), and
+   * the climb's number (tower_reset counts it up; the room's tower batches
+   * carry it back, so a batch from before a reset can't undo it). The
+   * Tower turns away tickets without it. */
+  tower?: {
+    event: string;
+    until: number;
+    floor: number;
+    boons?: TowerBoon[];
+    /** Picks the climb has skipped (each counts as a pick spent). */
+    skips?: number;
+    climb?: number;
+  };
   /** Set only while a "wilds" event is on (on a ticket for the Wilds): the
    * event and its window (ms since the epoch). The Wilds room keys its
    * caches, dropped cards and listening bonus on it; without it, none of
@@ -762,7 +775,15 @@ export type ClientMessage =
   /** On the Wilds: take dropped card `id` (in reach, and only once its
    * first claim is yours or over). (A cache isn't asked for: the room
    * opens it for whoever holds it; see `wildsHold`.) */
-  | { t: "wildsTake"; id: string };
+  | { t: "wildsTake"; id: string }
+  /** In the Tower: open the cleared floor's chest (within TOWER_CHEST.reach,
+   * once it's settled). The room answers with the floor (no chest) and
+   * its `loot`. */
+  | { t: "chestOpen" }
+  /** In the Tower: spend the climb's next earned pick on offer `offer` of
+   * the floor's `offers` (its index), or skip it (null). The room answers
+   * with the floor (its boons, picks and the next offers). */
+  | { t: "towerPick"; offer: number | null };
 
 /** Why a skill was refused, when the player can do something about it:
  * nobody downed near enough, no revives left, not until the fight, or not
@@ -908,10 +929,18 @@ export type TowerFloor = {
   /** Ms until the mobs enrage, as of sending (0: they have). Missing from
    * older servers. */
   enrageIn?: number;
-  /** A cleared Warden's floor's chest, where it stands, until you walk up
-   * to it (the room opens it, and its loot follows as a `loot` from here:
-   * see TOWER_CHEST). Absent: no chest (any other floor, or opened). */
+  /** A cleared Warden's floor's chest, where it stands, shut until you
+   * press E by it (a `chestOpen`; the room opens it, and its loot follows
+   * as a `loot` from here: see TOWER_CHEST). Absent: no chest (any other
+   * floor, or opened). */
   chest?: { x: number; z: number };
+  /** The climb's boons so far (TOWER_BOONS), how many picks it has earned
+   * and not spent (taken or skipped) yet, and the next pick's three
+   * offers (towerBoonOffers; while `picks` > 0). Missing from older
+   * servers. */
+  boons?: TowerBoon[];
+  picks?: number;
+  offers?: TowerBoon[];
 };
 
 /** One piece of boss loot: a pending drop's id and its item id. */
@@ -960,8 +989,9 @@ export type ServerMessage =
   /** A herzie's health (yours too), after damage. */
   | { t: "hp"; id: number; hp: number; maxHp: number }
   /** Your cast hit the boss — or, in the Tower, mob `mob` — for this much
-   * (sent to you alone). */
-  | { t: "hit"; damage: number; crit: boolean; mob?: number }
+   * (sent to you alone). `bleed`: one of your Forbidden Frequency's bleed
+   * hits. */
+  | { t: "hit"; damage: number; crit: boolean; mob?: number; bleed?: true }
   /** The Tower's mobs (or the boss's minions), where they are now (every
    * tick while any are up). */
   /** Mobs that changed since the last (all of them in `welcome`/`floor`);
@@ -1049,6 +1079,30 @@ export type ServerMessage =
       z: number;
       yaw: number;
     }
+  /** A Cymbal Trap's cymbal (thrown by `by`, an entity id) caught herzie
+   * `target` (a mob's id when `mob`), and holds it where it stands until
+   * `until` (server ms): it may turn and attack, not walk. Sent when the
+   * cymbal gets there (the throw itself is a `skill`), to everyone who
+   * can see it; a blow a dome took, or one on the boss, sends none. Older
+   * apps ignore it. */
+  | { t: "trap"; by: number; target: number; mob?: true; until: number }
+  /** A bleed on herzie `target` (a mob's id when `mob`; the boss when
+   * `boss`, `target` 0): `stacks` of it until `until` (server ms), thrown
+   * by `by` (its newest thrower's entity id). Forbidden Frequency's, or
+   * Silencio's when `skill` says so (its own, beside the other: one of
+   * each on a target). Sent when a hit adds a stack or starts it over, and
+   * with `stacks` 0 when it ends early (the target fell). Its ticks'
+   * damage comes as ordinary hits. Older apps ignore it. */
+  | {
+      t: "bleed";
+      by: number;
+      target: number;
+      mob?: true;
+      boss?: true;
+      skill?: "silencio";
+      stacks: number;
+      until: number;
+    }
   /** A buff went on a herzie (or was refreshed). */
   | ({ t: "buff" } & TownBuff)
   /** Your skill was refused: it's ready again at `readyAt` (server clock),
@@ -1104,6 +1158,8 @@ export type ServerMessage =
       damage: number;
       crit: boolean;
       blocked?: true;
+      /** One of your Forbidden Frequency's bleed hits. */
+      bleed?: true;
     }
   /** A duelist is stunned until `until` (server ms; to the whole room). */
   | { t: "duelStun"; id: number; until: number }
@@ -1141,6 +1197,8 @@ export type ServerMessage =
       damage: number;
       crit: boolean;
       blocked?: true;
+      /** One of your Forbidden Frequency's bleed hits. */
+      bleed?: true;
     }
   /** A herzie in the Wilds is stunned until `until` (server ms; to the
    * whole room). */

@@ -42,6 +42,7 @@ export function OrphiezStage({ paused }: { paused: boolean }) {
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
           <HerzieView
             onStage={onStage}
+            bleed
             userId={orphiez.seed ?? "npc:orphiez"}
             stage={2}
             size={5}

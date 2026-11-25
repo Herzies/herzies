@@ -1,12 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/utils";
 
 const CURSOR_GAP_X = 10;
 const CURSOR_GAP_Y = 6;
 const EDGE_PADDING = 8;
-const EST_WIDTH = 160;
-const EST_HEIGHT = 24;
+
+/** `value` kept within `min`–`max`; `min` wins when they cross (a bubble
+ * wider than the window starts at its left edge). */
+const clamp = (value: number, min: number, max: number) =>
+  Math.max(min, Math.min(value, max));
 
 /**
  * Hover tooltip that tracks the cursor rather than anchoring to the
@@ -14,13 +17,10 @@ const EST_HEIGHT = 24;
  * immune to ancestor stacking contexts (no z-index fights) and ancestor
  * containing-block sizing quirks (no width collapse).
  *
- * Sits with its bottom edge just above the cursor tip — `top`/`left` are the
- * cursor position and a `translate()` shifts by the bubble's own (actual,
- * unmeasured) size, so this is exact regardless of how wide the label ends
- * up (flips to whichever side/edge has room, using EST_WIDTH/EST_HEIGHT for
- * that decision only, since real size isn't known yet — a decision, not a
- * cap, matters here because positioning off the *estimate* instead of this
- * transform would leave a gap for any label narrower than the estimate).
+ * Sits with its bottom edge just above the cursor tip, to its right — or
+ * flipped below and/or to the left where there's no room, then kept inside
+ * the window. Placed from the bubble's own measured size, before it's
+ * painted, so a long label near an edge isn't cut off.
  * Meant for a short `nowrap` text label; for content too big to comfortably
  * chase the cursor (e.g. a full item preview card), use `HoverPreview`
  * instead, which anchors to the trigger itself rather than the cursor.
@@ -41,6 +41,7 @@ export function Tooltip({
 }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const frame = useRef<number | null>(null);
+  const bubble = useRef<HTMLDivElement>(null);
 
   const cancelFrame = () => {
     if (frame.current !== null) cancelAnimationFrame(frame.current);
@@ -76,16 +77,25 @@ export function Tooltip({
     });
   };
 
-  const bubbleStyle = (x: number, y: number): React.CSSProperties => {
-    const fitsRight =
-      x + CURSOR_GAP_X + EST_WIDTH <= window.innerWidth - EDGE_PADDING;
-    const fitsAbove = y - CURSOR_GAP_Y - EST_HEIGHT >= EDGE_PADDING;
-    return {
-      left: fitsRight ? x + CURSOR_GAP_X : x - CURSOR_GAP_X,
-      top: fitsAbove ? y - CURSOR_GAP_Y : y + CURSOR_GAP_Y,
-      transform: `translate(${fitsRight ? "0" : "-100%"}, ${fitsAbove ? "-100%" : "0"})`,
-    };
-  };
+  // Placed once it's laid out (its real size known) and before it's
+  // painted, after every render (a label can change while it's up, a
+  // cooldown counting down): set on the element, so a re-render doesn't
+  // undo it.
+  useLayoutEffect(() => {
+    const el = bubble.current;
+    if (!pos || !el) return;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const right = pos.x + CURSOR_GAP_X;
+    const left =
+      right + w <= window.innerWidth - EDGE_PADDING
+        ? right
+        : pos.x - CURSOR_GAP_X - w;
+    const above = pos.y - CURSOR_GAP_Y - h;
+    const top = above >= EDGE_PADDING ? above : pos.y + CURSOR_GAP_Y;
+    el.style.left = `${clamp(left, EDGE_PADDING, window.innerWidth - EDGE_PADDING - w)}px`;
+    el.style.top = `${clamp(top, EDGE_PADDING, window.innerHeight - EDGE_PADDING - h)}px`;
+  });
 
   return (
     <span
@@ -98,8 +108,8 @@ export function Tooltip({
       {pos &&
         createPortal(
           <div
-            className="pointer-events-none fixed z-100 rounded border border-white/15 bg-bg-panel px-1.5 py-0.5 text-left text-ui-sm whitespace-nowrap text-text"
-            style={bubbleStyle(pos.x, pos.y)}
+            ref={bubble}
+            className="pointer-events-none fixed top-0 left-0 z-100 rounded border border-white/15 bg-bg-panel px-1.5 py-0.5 text-left text-ui-sm whitespace-nowrap text-text"
           >
             {label}
           </div>,

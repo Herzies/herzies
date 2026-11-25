@@ -45,11 +45,13 @@ import {
   danceHopLift,
   dangledAxis,
   HELD_ARM,
+  HUSH,
   hasDangleEquipped,
   hasTranslucentSkin,
   hasTweedSkin,
   heldPoses,
   heldSwing,
+  hushBody,
   LAY_ANGLE,
   MIC_DROP_RELEASE,
   type PoseEmote,
@@ -425,6 +427,10 @@ export const CAST_RELEASE_SECONDS = CAST_SECONDS * CAST.release;
  * blow at SLAM.release, and the herzie back up after. */
 export const SLAM_SECONDS = 1.15;
 export const SLAM_RELEASE_SECONDS = SLAM_SECONDS * SLAM.release;
+/** A hush (Silencio): its lute drawn in and swept out, bursting at
+ * HUSH.release, the end of its wind-up. */
+export const HUSH_SECONDS = 0.85;
+export const HUSH_RELEASE_SECONDS = HUSH_SECONDS * HUSH.release;
 /** How long a blow that lands holds still (see hitstop), in seconds: long
  * enough for the eye to catch the contact, short enough not to drag. */
 export const HITSTOP_SECONDS = 0.07;
@@ -1721,7 +1727,9 @@ export class HerzieModel {
    * `arm` casts with another arm than CAST_ARM; `style` "throw" throws
    * what's in its hand (a disc) rather than thrusting a palm, "strike"
    * strikes with it (a stick), and "bump" lunges the whole herzie into
-   * what's ahead — `released` is then the moment it hits. */
+   * what's ahead — `released` is then the moment it hits. "slam" (a
+   * Rimshot) and "hush" (a Silencio) take longer, on timelines of their
+   * own: `released` is their landing, at the end of their wind-ups. */
   cast(
     pitch = 0,
     opts: { arm?: "arm-l" | "arm-r"; style?: CastStyle } = {},
@@ -1731,9 +1739,18 @@ export class HerzieModel {
     this.castArmPart =
       opts.arm && this.armAt[opts.arm] >= 0 ? opts.arm : CAST_ARM;
     this.castStyle = opts.style ?? "cast";
-    const slam = this.castStyle === "slam";
-    this.castLength = slam ? SLAM_SECONDS : CAST_SECONDS;
-    this.castRelease = slam ? SLAM_RELEASE_SECONDS : CAST_RELEASE_SECONDS;
+    this.castLength =
+      this.castStyle === "slam"
+        ? SLAM_SECONDS
+        : this.castStyle === "hush"
+          ? HUSH_SECONDS
+          : CAST_SECONDS;
+    this.castRelease =
+      this.castStyle === "slam"
+        ? SLAM_RELEASE_SECONDS
+        : this.castStyle === "hush"
+          ? HUSH_RELEASE_SECONDS
+          : CAST_RELEASE_SECONDS;
     this.released = false;
     this.stopFor = 0;
     // Casting with its gear still on its back: it's drawn on the way, in
@@ -3477,9 +3494,14 @@ export class HerzieModel {
       this.jumpHeight,
       su === undefined ? 0 : SPIN_HOP_HEIGHT * 4 * su * (1 - su),
     );
-    // A slam: down into a crouch, up on its toes, and the blow's squash.
-    if (this.castTime !== undefined && this.castStyle === "slam") {
-      const h = slamBody(this.castTime / this.castLength);
+    // A slam: down into a crouch, up on its toes, and the blow's squash. A
+    // hush: hunched in, then stretched open on its burst.
+    if (
+      this.castTime !== undefined &&
+      (this.castStyle === "slam" || this.castStyle === "hush")
+    ) {
+      const phase = this.castTime / this.castLength;
+      const h = this.castStyle === "slam" ? slamBody(phase) : hushBody(phase);
       hop = Math.max(hop, h.lift * (1 - this.sitWeight));
       squash += h.squash;
     }

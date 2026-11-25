@@ -132,6 +132,8 @@ export function spotsOf(map: TownMap): {
 export const TALK_RANGE = 5;
 /** …and for them to turn and look at you. */
 export const NOTICE_RANGE = 8;
+/** How close another herzie has to be for E to open its menu. */
+export const HERZIE_REACH = 2.5;
 
 /** A visitor's place in the world, and how they're doing. */
 export type TownSpot = {

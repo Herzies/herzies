@@ -5,6 +5,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { NAME_SHADOW } from "../nameFade";
+import { bleedStacks } from "./bleeds";
 import { liveDummies } from "./Dummies";
 import { drawDelayMs } from "./drawDelay";
 import { type DummyState, newTarget } from "./dummy";
@@ -190,8 +191,12 @@ const GEOMETRY = {
 const scaleOf = (m: MobView) =>
   m.rank === 2 ? WARDEN.scale : m.rank === 1 ? ELITE.scale : 1;
 
-const TAG_W = 128;
+/** The tag's canvas: the bar's 100 px in the middle, room for the bleed's
+ * drop to its right. */
+const TAG_W = 160;
 const TAG_H = 40;
+/** The tag's width in the world (the bar's is 100 / TAG_W of it). */
+const TAG_WORLD_W = 1.625;
 const GAP_COLOURS = {
   grey: "#9a9aa0",
   white: "#f2f2f2",
@@ -199,9 +204,16 @@ const GAP_COLOURS = {
   red: "#ff5a4f",
 } as const;
 
-/** The health bar over a mob, drawn on a canvas. (Its level is a label
- * over it: text this small doesn't survive the Town's pixelation.) */
-function drawTag(ctx: CanvasRenderingContext2D, hp: number, maxHp: number) {
+/** The health bar over a mob, drawn on a canvas, with a dark red drop by
+ * it while it bleeds (Forbidden Frequency), its stacks beside the drop
+ * past one. (Its level is a label over it: text this small doesn't
+ * survive the Town's pixelation.) */
+function drawTag(
+  ctx: CanvasRenderingContext2D,
+  hp: number,
+  maxHp: number,
+  bleeding: number,
+) {
   ctx.clearRect(0, 0, TAG_W, TAG_H);
   const w = 100;
   const x = (TAG_W - w) / 2;
@@ -209,6 +221,37 @@ function drawTag(ctx: CanvasRenderingContext2D, hp: number, maxHp: number) {
   ctx.fillRect(x - 2, 26, w + 4, 10);
   ctx.fillStyle = "#e0453a";
   ctx.fillRect(x, 28, w * Math.max(0, Math.min(1, hp / maxHp)), 6);
+  if (bleeding > 0) drawDrop(ctx, x + w + 9, 31, bleeding);
+}
+
+/** A blood drop centred at (cx, cy), its point up; `stacks` past one
+ * beside it. */
+function drawDrop(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  stacks: number,
+) {
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - 8);
+  ctx.bezierCurveTo(cx + 2, cy - 4, cx + 5, cy - 1, cx + 5, cy + 2);
+  ctx.arc(cx, cy + 2, 5, 0, Math.PI);
+  ctx.bezierCurveTo(cx - 5, cy - 1, cx - 2, cy - 4, cx, cy - 8);
+  ctx.fillStyle = "#8b0f18";
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "rgba(0,0,0,0.75)";
+  ctx.stroke();
+  ctx.fillStyle = "rgba(255,170,170,0.7)";
+  ctx.fillRect(cx - 3, cy + 1, 2, 2);
+  if (stacks > 1) {
+    ctx.font = "bold 11px sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.lineWidth = 3;
+    ctx.strokeText(String(stacks), cx + 7, cy + 1);
+    ctx.fillStyle = "#e86a6a";
+    ctx.fillText(String(stacks), cx + 7, cy + 1);
+  }
 }
 
 /** Where each mob is this frame (see mobAt): one, reused by them all. */
@@ -279,7 +322,7 @@ const Mob = memo(function Mob({ id }: { id: number }) {
   const kind = view?.kind ?? "brute";
   const rank = view?.rank ?? 0;
   const size = view ? scaleOf(view) : 1;
-  const drawn = useRef({ hp: -1 });
+  const drawn = useRef({ hp: -1, bleeding: -1 });
   const label = useRef<HTMLDivElement>(null);
   const crouch = useRef(0);
   useFrame((_, frameDt) => {
@@ -337,14 +380,16 @@ const Mob = memo(function Mob({ id }: { id: number }) {
       material.emissiveIntensity = glow;
     }
 
-    // The health bar, in the Tower and the cave alike.
+    // The health bar, in the Tower and the cave alike, and its bleed.
     if (tag.current) {
       const d = drawn.current;
-      if (d.hp !== m.hp) {
+      const bleeding = bleedStacks("mob", id, now);
+      if (d.hp !== m.hp || d.bleeding !== bleeding) {
         const ctx = canvas.getContext("2d");
-        if (ctx) drawTag(ctx, m.hp, m.maxHp);
+        if (ctx) drawTag(ctx, m.hp, m.maxHp, bleeding);
         texture.needsUpdate = true;
         d.hp = m.hp;
+        d.bleeding = bleeding;
       }
     }
   });
@@ -362,7 +407,7 @@ const Mob = memo(function Mob({ id }: { id: number }) {
         ref={tag}
         material={tagMaterial}
         position-y={MOB.top * size + 0.45}
-        scale={[1.3, (1.3 * TAG_H) / TAG_W, 1]}
+        scale={[TAG_WORLD_W, (TAG_WORLD_W * TAG_H) / TAG_W, 1]}
         renderOrder={10}
       />
       {tower ? (

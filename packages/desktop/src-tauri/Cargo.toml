@@ -1,6 +1,6 @@
 [package]
 name = "herzies-desktop"
-version = "0.1.0-beta.73"
+version = "0.1.0-beta.76"
 edition = "2021"
 
 [dependencies]

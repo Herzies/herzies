@@ -6,7 +6,16 @@ import {
   duelDamage,
   duelMaxHp,
 } from "@herzies/shared/duel";
-import { RIMSHOT, SKILL_DEFS } from "@herzies/shared/skills";
+import {
+  cymbalLandsAfterMs,
+  MULTISPIN,
+  multispinRecords,
+  RAGE_MAX,
+  RIMSHOT,
+  SKILL_DEFS,
+  skillValue,
+} from "@herzies/shared/skills";
+import { buffMult } from "@herzies/shared/stats";
 import type { ServerMessage } from "@herzies/shared/town-net";
 import { describe, expect, it } from "vitest";
 import { rng, TUNING } from "../src/boss";
@@ -115,6 +124,19 @@ function run(rt: DuelRuntime, from: number, until: number): DuelEffects {
     e.results.push(...s.results);
   }
   return e;
+}
+
+/** Step 50 ms at a time until a Cymbal Trap's hold is said: it, when, and
+ * everything said till then. */
+function trapLands(rt: DuelRuntime, from: number, until: number) {
+  const e: DuelEffects = { out: [], place: [], results: [] };
+  for (let t = from; t <= until; t += 50) {
+    const s = rt.step(t);
+    e.out.push(...s.out);
+    const [msg] = said(s, "trap");
+    if (msg) return { msg, at: t, e };
+  }
+  throw new Error("no trap");
 }
 
 /** A cast's yaw and pitch from `from` at a herzie standing at `to`. */
@@ -482,6 +504,184 @@ describe("the fight", () => {
     expect(said(second, "duelStun")).toEqual([
       { t: "duelStun", id: 2, until: again + castMs + base / 2 },
     ]);
+  });
+
+  it("a Cymbal Trap holds the opponent where it stands once it gets there; it may still cast", () => {
+    const { rt } = dueling(["percussionist", "bard"]);
+    rt.step(FIGHT);
+    const base = Math.round(skillValue("cymbal-trap", 5) * 1000);
+    const { yaw, pitch } = aim(A, B);
+    const thrown = rt.skill("a", "cymbal-trap", yaw, pitch, FIGHT + 50);
+    expect(thrown.result).toBe("used");
+    // The throw is a skill; the hold is said when the cymbal gets there.
+    expect(said(thrown.out, "skill")).toHaveLength(1);
+    expect(said(thrown.out, "trap")).toEqual([]);
+    const { msg, at, e } = trapLands(rt, FIGHT + 100, FIGHT + 2_000);
+    expect(at).toBeGreaterThanOrEqual(FIGHT + 50 + cymbalLandsAfterMs(10));
+    expect(msg).toEqual({ t: "trap", by: 1, target: 2, until: at + base });
+    expect(said(e, "duelHp").map((h) => h.id)).toEqual([2]);
+    // Held where the cymbal caught it, but its casts and skills are its own.
+    const now = at + HOLD_EASE_MS;
+    expect(rt.hold("b", B.x + 3, 0, now)).toEqual({ ...B, correct: true });
+    const back = aim(B, A);
+    expect(rt.cast("b", back.yaw, back.pitch, now)).toBe("hit");
+    expect(rt.skill("b", "haste", 0, 0, now).result).toBe("used");
+    expect(rt.hold("b", B.x + 3, 0, msg.until)).toBeNull();
+  });
+
+  it("a dome takes a Cymbal Trap: no blow, no hold", () => {
+    const { rt } = dueling(["percussionist", "percussionist"]);
+    rt.step(FIGHT);
+    expect(rt.skill("b", "cymbrella", 0, 0, FIGHT + 10).result).toBe("used");
+    const { yaw, pitch } = aim(A, B);
+    expect(rt.skill("a", "cymbal-trap", yaw, pitch, FIGHT + 500).result).toBe("used");
+    const e = run(rt, FIGHT + 550, FIGHT + 2_000);
+    const hits = said(e, "duelHit", "a");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ target: 2, damage: 0, blocked: true });
+    expect(said(e, "trap")).toEqual([]);
+    expect(said(e, "duelHp")).toEqual([]);
+    expect(rt.hold("b", B.x + 3, 0, FIGHT + 1_500)).toBeNull();
+  });
+
+  it("held outside the ring, its timer stops, and runs on once it's let go", () => {
+    const { rt, move } = dueling(["percussionist", "bard"]);
+    rt.step(FIGHT);
+    const edge = { x: 2 + DUEL.ringRadius - 4, z: 0 };
+    const outside = { x: 2 + DUEL.ringRadius + 1, z: 0 };
+    move("a", edge.x, edge.z, FIGHT);
+    move("b", outside.x, outside.z, FIGHT);
+    const outUntil = FIGHT + 50 + DUEL.outOfBoundsMs;
+    expect(said(rt.step(FIGHT + 50), "duelOut", "b")).toEqual([
+      { t: "duelOut", until: outUntil },
+    ]);
+    const { yaw, pitch } = aim(edge, outside);
+    expect(rt.skill("a", "cymbal-trap", yaw, pitch, FIGHT + 500).result).toBe("used");
+    const { msg, at, e } = trapLands(rt, FIGHT + 550, FIGHT + 2_000);
+    expect(said(e, "duelOut", "b")).toEqual([{ t: "duelOut", until: null }]);
+    const left = outUntil - at;
+    expect(said(run(rt, at + 50, msg.until - 50), "duelEnd")).toEqual([]);
+    expect(said(rt.step(msg.until), "duelOut", "b")).toEqual([
+      { t: "duelOut", until: msg.until + left },
+    ]);
+  });
+
+  /** Where a Slinger stands for its records to sweep over B: B a record's
+   * orbit off, halfway between two of five records at the start, so each
+   * passes over it once a turn. */
+  const beside = {
+    x: B.x - MULTISPIN.radius * Math.cos(Math.PI / 5),
+    z: B.z - MULTISPIN.radius * Math.sin(Math.PI / 5),
+  };
+
+  it("a Multispin's records each hit the opponent once a turn, and nobody out of reach", () => {
+    const { rt, move } = dueling(["record_slinger", "bard"]);
+    rt.step(FIGHT);
+    move("a", beside.x, beside.z, FIGHT);
+    const records = multispinRecords(5);
+    expect(records).toBe(5);
+    const cast = rt.skill("a", "multispin", 0, 0, FIGHT + 50);
+    expect(cast.result).toBe("used");
+    expect(said(cast.out, "buff")[0]).toMatchObject({
+      id: 1,
+      buff: "multispin",
+      value: records,
+      until: FIGHT + 50 + (SKILL_DEFS.multispin.durationMs ?? 0),
+    });
+    const turn = run(rt, FIGHT + 100, FIGHT + 50 + MULTISPIN.turnMs);
+    const hits = said(turn, "duelHit", "a");
+    expect(hits).toHaveLength(records);
+    expect(hits.every((h) => h.target === 2 && h.damage > 0)).toBe(true);
+    // Stepped back out of their reach: nothing more.
+    move("a", B.x - 6, 0, FIGHT + 50 + MULTISPIN.turnMs);
+    const after = run(rt, FIGHT + 100 + MULTISPIN.turnMs, FIGHT + 3_000);
+    expect(said(after, "duelHit", "a")).toEqual([]);
+  });
+
+  it("Forbidden Frequency bleeds the opponent; a dome turns ticks and discs away", () => {
+    const { rt } = dueling(["record_slinger", "percussionist"]);
+    rt.step(FIGHT);
+    const { yaw, pitch } = aim(A, B);
+    expect(rt.skill("a", "forbidden-frequency", yaw, pitch, FIGHT + 50).result).toBe("used");
+    const took = run(rt, FIGHT + 100, FIGHT + 1_000);
+    expect(said(took, "bleed")).toEqual([
+      expect.objectContaining({ by: 1, target: 2, stacks: 1 }),
+    ]);
+    // No hit of its own; its ticks hit, never a crit.
+    const ticks = said(run(rt, FIGHT + 1_050, FIGHT + 2_500), "duelHit", "a");
+    expect(ticks.length).toBeGreaterThan(0);
+    expect(ticks.every((h) => h.damage > 0 && !h.crit)).toBe(true);
+    // Under a dome: its ticks are turned away, the bleed runs on.
+    expect(rt.skill("b", "cymbrella", 0, 0, FIGHT + 2_600).result).toBe("used");
+    const domed = said(run(rt, FIGHT + 3_200, FIGHT + 4_000), "duelHit", "a");
+    expect(domed.length).toBeGreaterThan(0);
+    expect(domed.every((h) => h.damage === 0 && h.blocked)).toBe(true);
+  });
+
+  it("a Silencio bursts after its wind-up: the opponent in reach bleeds, but isn't moved", () => {
+    const { rt, move } = dueling(["bard", "percussionist"], undefined, 25);
+    rt.step(FIGHT);
+    move("a", B.x - 2, 0, FIGHT);
+    const castMs = SKILL_DEFS.silencio.castMs ?? 0;
+    expect(rt.skill("a", "silencio", 0, 0, FIGHT + 50).result).toBe("used");
+    // Its hands are busy winding up, and nothing has burst yet.
+    expect(rt.cast("a", 0, 0, FIGHT + 60)).toBe("ignored");
+    expect(said(run(rt, FIGHT + 100, FIGHT + castMs), "bleed")).toEqual([]);
+    const burst = run(rt, FIGHT + 50 + castMs, FIGHT + 100 + castMs);
+    expect(said(burst, "bleed")).toEqual([
+      expect.objectContaining({ by: 1, target: 2, skill: "silencio", stacks: 1 }),
+    ]);
+    const ticks = said(run(rt, FIGHT + 150 + castMs, FIGHT + 2_500), "duelHit", "a");
+    expect(ticks.length).toBeGreaterThan(0);
+    expect(ticks.every((h) => h.damage > 0 && !h.crit && h.bleed)).toBe(true);
+    // A herzie moves itself: it's free to walk anywhere.
+    expect(rt.hold("b", B.x + 3, 0, FIGHT + 2_600)).toBeNull();
+  });
+
+  it("a Silencio out of reach bleeds nobody", () => {
+    const { rt } = dueling(["bard", "percussionist"], undefined, 25);
+    rt.step(FIGHT);
+    expect(rt.skill("a", "silencio", 0, 0, FIGHT + 50).result).toBe("used");
+    expect(said(run(rt, FIGHT + 100, FIGHT + 2_000), "bleed")).toEqual([]);
+  });
+
+  it("a Forbidden Frequency disc into a dome takes no hold", () => {
+    const { rt } = dueling(["record_slinger", "percussionist"]);
+    rt.step(FIGHT);
+    expect(rt.skill("b", "cymbrella", 0, 0, FIGHT + 10).result).toBe("used");
+    const { yaw, pitch } = aim(A, B);
+    expect(rt.skill("a", "forbidden-frequency", yaw, pitch, FIGHT + 50).result).toBe("used");
+    expect(said(run(rt, FIGHT + 100, FIGHT + 1_000), "bleed")).toEqual([]);
+  });
+
+  it("a dome takes a Multispin's hits", () => {
+    const { rt, move } = dueling(["record_slinger", "percussionist"]);
+    rt.step(FIGHT);
+    expect(rt.skill("b", "cymbrella", 0, 0, FIGHT + 10).result).toBe("used");
+    move("a", beside.x, beside.z, FIGHT);
+    expect(rt.skill("a", "multispin", 0, 0, FIGHT + 50).result).toBe("used");
+    const e = run(rt, FIGHT + 100, FIGHT + 50 + MULTISPIN.turnMs);
+    const hits = said(e, "duelHit", "a");
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits.every((h) => h.damage === 0 && h.blocked)).toBe(true);
+    expect(said(e, "duelHp")).toEqual([]);
+  });
+
+  it("a Rage makes its Bard's hits land harder", () => {
+    const hitWith = (rage: boolean) => {
+      const { rt } = dueling(["bard", "bard"], () => 0.5);
+      rt.step(FIGHT);
+      if (rage) expect(rt.skill("a", "rage", 0, 0, FIGHT + 10).result).toBe("used");
+      const { yaw, pitch } = aim(A, B);
+      expect(rt.cast("a", yaw, pitch, FIGHT + 100)).toBe("hit");
+      return said(run(rt, FIGHT + 150, FIGHT + 1_500), "duelHit", "a")[0].damage;
+    };
+    const { euphony } = statsOf(realTicket("x", "bard", 20).st);
+    const share = Math.min(RAGE_MAX, skillValue("rage", 5) * buffMult(euphony));
+    const plain = hitWith(false);
+    const raged = hitWith(true);
+    expect(raged).toBeGreaterThan(plain);
+    expect(Math.abs(raged - plain * (1 + share))).toBeLessThanOrEqual(1);
   });
 
   it("outside the ring too long is a loss; back in, the timer stops", () => {

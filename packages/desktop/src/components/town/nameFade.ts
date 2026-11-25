@@ -25,7 +25,7 @@ export function nameOpacity(d: number): number {
 
 /**
  * Other players' labels reach further than visitors' (you want to see
- * who's about), the title over a name a little less far, and both shrink
+ * who's about), the title under a name a little less far, and both shrink
  * a touch with distance. A duel's two are read from across the field.
  */
 export const REMOTE_LABEL = {

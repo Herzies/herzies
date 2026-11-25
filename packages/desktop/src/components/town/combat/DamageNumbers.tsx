@@ -57,7 +57,7 @@ const queue: {
   key?: string;
   amount: number;
   crit: boolean;
-  kind: "hit" | "hurt" | "heal" | "stun" | "blocked";
+  kind: "hit" | "hurt" | "heal" | "stun" | "blocked" | "bleed";
   /** A word instead of a number ("Stunned"). */
   text?: string;
 }[] = [];
@@ -85,6 +85,32 @@ export function pushDamageNumber(
       crit,
       kind: "hit",
       ...(key ? { key } : {}),
+    });
+}
+
+/** A Forbidden Frequency bleed hit, popping off `at`: smaller, in a dark
+ * blood red (not the brighter red of what you take). Hits of a bleed on
+ * the same thing close together add up, apart from ordinary hits. */
+export function pushBleedNumber(
+  at: Readonly<Vec3>,
+  amount: number,
+  key?: string,
+): void {
+  const bleedKey = key ? `bleed:${key}` : undefined;
+  if (bleedKey) {
+    const same = queue.find((q) => q.kind === "bleed" && q.key === bleedKey);
+    if (same) {
+      same.amount += amount;
+      return;
+    }
+  }
+  if (queue.length < QUEUE_MAX)
+    queue.push({
+      at: [at[0], at[1], at[2]],
+      amount,
+      crit: false,
+      kind: "bleed",
+      ...(bleedKey ? { key: bleedKey } : {}),
     });
 }
 
@@ -142,6 +168,8 @@ const STYLE = `
   text-shadow: 0 2px 0 #1a1c22, 1px 0 0 #1a1c22, -1px 0 0 #1a1c22, 0 -1px 0 #1a1c22; }
 .town-fx .dmg.hurt { color: #ff6b6b;
   text-shadow: 0 0 8px rgba(255, 60, 60, 0.6), 0 2px 0 #3a0808, 1px 0 0 #3a0808, -1px 0 0 #3a0808, 0 -1px 0 #3a0808; }
+.town-fx .dmg.bleed { color: #b3202a; font-size: 12px;
+  text-shadow: 0 0 6px rgba(120, 0, 10, 0.7), 0 2px 0 #1c0204, 1px 0 0 #1c0204, -1px 0 0 #1c0204, 0 -1px 0 #1c0204; }
 .town-fx .dmg.stun { color: #ffd36b; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase;
   text-shadow: 0 0 8px rgba(255, 190, 60, 0.65), 0 2px 0 #3a2200, 1px 0 0 #3a2200, -1px 0 0 #3a2200, 0 -1px 0 #3a2200; }
 .town-fx .dmg.heal { color: #7dff8a;
@@ -309,7 +337,11 @@ export function CombatOverlay() {
           same.crit ||= n.crit;
           same.age = 0;
           same.el.textContent = Math.round(same.amount).toLocaleString();
-          same.el.className = same.crit ? "dmg crit" : "dmg";
+          same.el.className = same.key?.startsWith("bleed:")
+            ? "dmg bleed"
+            : same.crit
+              ? "dmg crit"
+              : "dmg";
           continue;
         }
       }
@@ -345,9 +377,11 @@ export function CombatOverlay() {
               ? "dmg stun"
               : n.kind === "blocked"
                 ? "dmg blocked"
-                : n.crit
-                  ? "dmg crit"
-                  : "dmg";
+                : n.kind === "bleed"
+                  ? "dmg bleed"
+                  : n.crit
+                    ? "dmg crit"
+                    : "dmg";
     }
 
     for (const f of ui.floaters) {

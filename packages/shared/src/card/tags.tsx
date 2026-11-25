@@ -2,7 +2,6 @@ import type { ReactElement, ReactNode } from "react";
 import { CLASS_DEFS } from "../classes.js";
 import {
   formatStatBonus,
-  getItemSet,
   getItemType,
   ITEM_TYPE_LABELS,
   type ItemDef,
@@ -92,32 +91,6 @@ export function ItemTypeTag({
       {ITEM_TYPE_LABELS[type]}
     </span>
   );
-}
-
-/** Names the set an item belongs to (e.g. "Prismatic"); hover for what
- * equipping the full set does. Renders nothing for items not in a set. */
-export function SetTag({
-  itemId,
-  className,
-  tooltip,
-}: {
-  itemId: string;
-  className?: string;
-  tooltip?: TagTooltip;
-}) {
-  const set = getItemSet(itemId);
-  if (!set) return null;
-  const tag = (
-    <span
-      className={cn(
-        "rounded-full border border-border bg-bg px-1.5 py-px text-ui-sm text-text-dim",
-        className,
-      )}
-    >
-      {set.name}
-    </span>
-  );
-  return tooltip ? tooltip(set.effect, tag) : tag;
 }
 
 /** The stats an item adds to its wearer, one per line (e.g. "Sonic power:

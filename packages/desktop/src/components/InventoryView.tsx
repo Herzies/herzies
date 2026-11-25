@@ -27,6 +27,7 @@ import {
   levelForStage,
   MAX_MODIFIERS,
   meetsMinStage,
+  RARITIES,
   RARITY_COLORS,
   RARITY_LABELS,
   RARITY_RANK,
@@ -48,6 +49,7 @@ import { overlayHerzieStage } from "../lib/overlayStage";
 import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { BagTilePreview } from "./BagTilePreview";
+import { Checkbox } from "./Checkbox";
 import { Coin, CoinBalance } from "./Coin";
 import { ContextMenu } from "./ContextMenu";
 import {
@@ -70,11 +72,17 @@ import { List } from "./List";
 import { LoadoutTabs } from "./LoadoutTabs";
 import { NumberTicker } from "./NumberTicker";
 import { PromptOverlay } from "./PromptOverlay";
+import {
+  loadSellDuplicateRarities,
+  saveSellDuplicateRarities,
+} from "./sellDuplicateRarities";
 import { TabButton } from "./TabButton";
 import { HoverPreview, Tooltip } from "./Tooltip";
 import { useCrystal } from "./town/crystalState";
 import { eat } from "./town/eat";
-import { assignHotbar, HOTBAR_KEYS } from "./town/hotbarSlots";
+import { hotbarSlotAt, hotbarTakes, setHotbarDrag } from "./town/hotbarDrop";
+import { addToHotbar, assignHotbar } from "./town/hotbarSlots";
+import { type HotbarHandlers, provideHotbarHandlers } from "./town/hotbarUse";
 
 /** Rarities worth a second look before they're sold for coin. */
 const CONFIRM_SELL_RARITIES: ReadonlySet<Rarity> = new Set([
@@ -809,6 +817,16 @@ function InventoryViewImpl({
   /** Open when the Sell duplicates button is awaiting confirmation. The
    * batch it will sell is recomputed at confirm time from `duplicates`. */
   const [sellDupesConfirm, setSellDupesConfirm] = useState(false);
+  /** The rarities Sell duplicates may sell, ticked in its dialog and
+   * remembered (see sellDuplicateRarities). */
+  const [dupeRarities, setDupeRarities] = useState(loadSellDuplicateRarities);
+  const toggleDupeRarity = (rarity: Rarity, on: boolean) => {
+    const next = new Set(dupeRarities);
+    if (on) next.add(rarity);
+    else next.delete(rarity);
+    setDupeRarities(next);
+    saveSellDuplicateRarities(next);
+  };
   /** The empty deck slot whose picker is open (see DeckSlotPicker). */
   const [slotPicker, setSlotPicker] = useState<EmptySlotTarget | null>(null);
   const [slotOrder, setSlotOrder] = useState<(string | null)[]>(() =>
@@ -998,6 +1016,9 @@ function InventoryViewImpl({
         x: e.clientX,
         y: e.clientY,
       });
+      // Something for the hotbar: it rises to be reached (hotbarDrop).
+      if (hotbarTakes(sourceItemId(state.source)))
+        setHotbarDrag({ over: hotbarSlotAt(e.clientX, e.clientY) });
     };
 
     // Scrolls the grid while a drag is held near its top or bottom edge, so a
@@ -1052,6 +1073,7 @@ function InventoryViewImpl({
       const state = dragRef.current;
       dragRef.current = null;
       setDragVisual(null);
+      setHotbarDrag(null);
       if (!state?.dragging) return;
       // Any drag that got this far ends in a click the item must not act on —
       // including one let go over the slot it started on, which is "picked it
@@ -1060,6 +1082,15 @@ function InventoryViewImpl({
       // never becomes a drag at all.
       const { source, overIndex } = state;
       suppressClickRef.current = true;
+      // Let go over a hotbar slot: the item goes there, and stays where it
+      // was (worn or in the bag).
+      const slot = hotbarSlotAt(e.clientX, e.clientY);
+      const itemId = sourceItemId(source);
+      if (slot !== null) {
+        if (hotbarTakes(itemId)) assignHotbar(slot, itemId);
+        else notify("Only things to eat or wear go on the hotbar");
+        return;
+      }
       if (source.kind === "deck") {
         // Let go over the herzie, it stays on — moving sides if it's an
         // Accessory dropped on the other one; anywhere else, it comes off.
@@ -1478,6 +1509,63 @@ function InventoryViewImpl({
   };
   returnDropRef.current = handleReturnDrop;
 
+  /** A card's hotbar key pressed: off if a copy is worn, else on — from the
+   * bag, or a copy only the other loadout holds — in the loadout you're on.
+   * Through handleEquip, as a click in the deck would. */
+  const toggleCardFromHotbar = (
+    itemId: string,
+    from?: { x: number; y: number },
+  ) => {
+    const worn = units.find(
+      (u) => u.itemId === itemId && u.equippedSlot !== null,
+    );
+    const copy =
+      worn?.id ??
+      tiles.find((t) => t.itemId === itemId)?.unitIds[0] ??
+      units.find((u) => u.itemId === itemId)?.id;
+    if (!copy) {
+      notify(`No "${getItem(itemId)?.name ?? itemId}" left`);
+      return;
+    }
+    void handleEquip(copy, undefined, from);
+  };
+  const hotbarRef = useRef<HotbarHandlers>({
+    toggleCard: () => {},
+    switchLoadout: () => {},
+    activeLoadout: () => null,
+  });
+  hotbarRef.current = {
+    toggleCard: toggleCardFromHotbar,
+    switchLoadout: loadout.switchTo,
+    activeLoadout: () => (loadouts ? loadout.active : null),
+  };
+  // Mounted for the app's whole life: the hotbar's way to the deck.
+  useEffect(
+    () =>
+      provideHotbarHandlers({
+        toggleCard: (itemId, from) =>
+          hotbarRef.current.toggleCard(itemId, from),
+        switchLoadout: (to) => hotbarRef.current.switchLoadout(to),
+        activeLoadout: () => hotbarRef.current.activeLoadout(),
+      }),
+    [],
+  );
+
+  /** The right-click menus' "Add to hotbar": onto its first empty slot. */
+  const hotbarMenuItems = (itemId: string, close: () => void) =>
+    hotbarTakes(itemId)
+      ? [
+          {
+            label: "Add to hotbar",
+            onClick: () => {
+              if (!addToHotbar(itemId))
+                notify("The hotbar's full: drag it onto a slot instead");
+              close();
+            },
+          },
+        ]
+      : [];
+
   /** The side a worn Accessory would move to if let go over `over` — the other
    * Accessory box, or nothing. It's the only move there is within the deck:
    * every other box takes a slot of its own, and Modifiers have no order to
@@ -1592,16 +1680,15 @@ function InventoryViewImpl({
    * duplicates button offers. For each item the best copy is kept — the worn
    * one, else the most upgraded — and the rest are the spares. So the one you'd
    * miss is never the one that goes, and since a worn copy is always the one
-   * kept, nothing can be sold out from under the deck.
+   * kept, nothing can be sold out from under the deck. Copies the other
+   * loadout holds are never spares: they're put away, and sell_units refuses
+   * them (one in the batch failed the whole sell).
    *
-   * Anything in CONFIRM_SELL_RARITIES — rare and legendary — is left out
-   * however many you own, so this only ever clears common and uncommon
-   * clutter. Spares of the good stuff are the likeliest to be wanted for a
-   * trade, and are exactly the items that already demand a per-item "are you
-   * sure" before they can be sold; a one-click bulk action has no business
-   * turning them into coin. Reusing that same set rather than listing the
-   * rarities again is what keeps the two from drifting apart: whatever is
-   * worth a second look is, by definition, not bulk-sellable.
+   * Only the rarities ticked in its dialog are sold (`dupeRarities`): common
+   * and uncommon unless the player has chosen otherwise. Spares of the good
+   * stuff are the likeliest to be wanted for a trade, so a one-click bulk
+   * action leaves them be until asked; the dialog lists every rare one it
+   * would sell before anything goes.
    *
    * Stackable items are left out too, which is what keeps this a decluttering
    * action rather than a payout. A stack occupies one grid cell however many
@@ -1610,22 +1697,18 @@ function InventoryViewImpl({
    * Only non-stackable spares cost a slot each, and they are the whole reason
    * this button exists. Anything with no sellPrice is skipped too — applySell
    * would refuse it. */
-  const duplicates = [...new Set(tiles.map((t) => t.itemId))].flatMap(
+  const allDuplicates = [...new Set(tiles.map((t) => t.itemId))].flatMap(
     (itemId) => {
       const def = getItem(itemId);
-      if (
-        !def ||
-        def.stackable ||
-        !def.sellPrice ||
-        CONFIRM_SELL_RARITIES.has(def.rarity)
-      ) {
-        return [];
-      }
-      const spares = unitsBestFirst(units, itemId).slice(1);
+      if (!def || def.stackable || !def.sellPrice) return [];
+      const spares = unitsBestFirst(units, itemId)
+        .slice(1)
+        .filter((u) => u.heldBy === undefined);
       return spares.length > 0
         ? [
             {
               itemId,
+              rarity: def.rarity,
               unitIds: spares.map((u) => u.id),
               qty: spares.length,
               price: def.sellPrice,
@@ -1634,11 +1717,15 @@ function InventoryViewImpl({
         : [];
     },
   );
+  const duplicates = allDuplicates.filter((d) => dupeRarities.has(d.rarity));
   const duplicatesTotal = duplicates.reduce(
     (sum, d) => sum + d.qty * d.price,
     0,
   );
   const duplicatesCount = duplicates.reduce((sum, d) => sum + d.qty, 0);
+  /** Spares of each rarity, ticked or not, for the dialog's checkboxes. */
+  const sparesOf = (rarity: Rarity) =>
+    allDuplicates.reduce((n, d) => (d.rarity === rarity ? n + d.qty : n), 0);
 
   /** Sells the whole duplicate batch in one request. It used to go one item id
    * at a time, sequentially, because the sell route was a read-modify-write
@@ -1909,13 +1996,17 @@ function InventoryViewImpl({
         label={
           duplicatesCount > 0
             ? `Sell ${duplicatesCount} duplicate${duplicatesCount === 1 ? "" : "s"}, keeping the best of each`
-            : "No duplicates to sell"
+            : allDuplicates.length > 0
+              ? "Sell duplicates: choose which rarities"
+              : "No duplicates to sell"
         }
       >
         <button
           type="button"
           aria-label="Sell duplicates"
-          disabled={duplicatesCount === 0}
+          // Open whenever there are spares at all, so rarities left out can
+          // be ticked from its dialog.
+          disabled={allDuplicates.length === 0}
           onClick={() => setSellDupesConfirm(true)}
           className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan disabled:cursor-default disabled:opacity-40 disabled:hover:text-text-dim"
         >
@@ -2227,6 +2318,7 @@ function InventoryViewImpl({
                     setDeckMenu(null);
                   },
                 },
+                ...hotbarMenuItems(unit.itemId, () => setDeckMenu(null)),
                 // Sells exactly the worn copy — a box holds one, so there's no
                 // quantity to pick. Selling it takes it off; rare and up still
                 // ask first (see requestSell). A copy the other loadout also
@@ -2267,8 +2359,7 @@ function InventoryViewImpl({
                     setTileMenu(null);
                   },
                 },
-                // A consumable: eat one now, or put the stack on a Town
-                // hotbar key.
+                // A consumable: eat one now.
                 ...(def?.consumable
                   ? [
                       {
@@ -2281,15 +2372,9 @@ function InventoryViewImpl({
                           setTileMenu(null);
                         },
                       },
-                      ...HOTBAR_KEYS.map((key) => ({
-                        label: `Hotbar ${key}`,
-                        onClick: () => {
-                          assignHotbar(key, tile.itemId);
-                          setTileMenu(null);
-                        },
-                      })),
                     ]
                   : []),
+                ...hotbarMenuItems(tile.itemId, () => setTileMenu(null)),
                 ...(def?.sellPrice
                   ? [
                       {
@@ -2332,6 +2417,7 @@ function InventoryViewImpl({
             {
               label: "Sell",
               colour: "text-red",
+              disabled: duplicatesCount === 0,
               onClick: () => {
                 setSellDupesConfirm(false);
                 sellDuplicates();
@@ -2341,17 +2427,44 @@ function InventoryViewImpl({
         >
           <div className="flex flex-col gap-2">
             <div>
-              Sell {duplicatesCount} duplicate
-              {duplicatesCount === 1 ? "" : "s"} for{" "}
-              <Coin amount={duplicatesTotal} />? The best copy of each is kept,
-              and rare and legendary items are never sold.
+              {duplicatesCount > 0 ? (
+                <>
+                  Sell {duplicatesCount} duplicate
+                  {duplicatesCount === 1 ? "" : "s"} for{" "}
+                  <Coin amount={duplicatesTotal} />? The best copy of each is
+                  kept.
+                </>
+              ) : (
+                "Nothing to sell of the rarities ticked. The best copy of each is always kept."
+              )}
+            </div>
+            {/* Which rarities go: remembered on this machine. */}
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-ui-sm">
+              {RARITIES.map((rarity) => {
+                const spares = sparesOf(rarity);
+                return (
+                  <Checkbox
+                    key={rarity}
+                    checked={dupeRarities.has(rarity)}
+                    onChange={(on) => toggleDupeRarity(rarity, on)}
+                    accent={RARITY_COLORS[rarity]}
+                  >
+                    <span style={{ color: RARITY_COLORS[rarity] }}>
+                      {RARITY_LABELS[rarity]}
+                    </span>
+                    {spares > 0 && (
+                      <span className="text-text-dim">{spares}</span>
+                    )}
+                  </Checkbox>
+                );
+              })}
             </div>
             {/* The breakdown, since this is the one sell action where what
                 goes is not the thing that was clicked. Capped so a bank full
-                of odds and ends can't outgrow the dialog. Nothing valuable
-                can hide behind "+N more": the batch is common and uncommon
-                only (see `duplicates`), and the tiles sort rarity-first (see
-                RARITY_RANK) so the uncommons are the rows that do show. */}
+                of odds and ends can't outgrow the dialog. The tiles sort
+                rarity-first, rarest first (see RARITY_RANK), so whatever
+                rare ones are ticked are the rows that show, never hidden
+                behind "+N more". */}
             <div className="flex flex-col gap-0.5 text-ui-sm text-text-dim">
               {duplicates.slice(0, 6).map((d) => {
                 const def = getItem(d.itemId);
@@ -2359,11 +2472,7 @@ function InventoryViewImpl({
                   <div key={d.itemId} className="flex justify-between gap-3">
                     <span className="truncate">
                       {d.qty}x{" "}
-                      <span
-                        style={{
-                          color: def ? RARITY_COLORS[def.rarity] : undefined,
-                        }}
-                      >
+                      <span style={{ color: RARITY_COLORS[d.rarity] }}>
                         {def?.name ?? d.itemId}
                       </span>
                     </span>

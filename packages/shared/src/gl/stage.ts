@@ -15,6 +15,10 @@ export type StageView = {
   /** Nothing about it is moving (paused, settled): if every view is idle
    * and none moved on the page, the stage skips drawing the frame. */
   idle(): boolean;
+  /** Draw past its own box, out to the stage's bleed box (see setBleed),
+   * when it's inside that: what reaches out of the frame (smoke, wings)
+   * isn't cut off at its edge. Framed just the same. Read every frame. */
+  readonly bleed?: boolean;
 };
 
 /** The longest frame step animations are allowed to take: coming back to a
@@ -23,7 +27,13 @@ const MAX_DT = 0.1;
 /** How often (in frames) to look again for the elements that clip a view. */
 const CLIP_REFRESH_FRAMES = 60;
 
-type Entry = { view: StageView; clips: HTMLElement[]; clipAge: number };
+type Entry = {
+  view: StageView;
+  clips: HTMLElement[];
+  /** The element `clips` were found for: the view's, or the bleed box. */
+  clipsOf: HTMLElement | null;
+  clipAge: number;
+};
 
 /**
  * One WebGL canvas for every herzie on the page.
@@ -49,6 +59,8 @@ export class HerzieStage {
   private pass: SupersamplePass | null = null;
   private renderer: THREE.WebGLRenderer | null = null;
   private host: HTMLElement | null = null;
+  /** What bleeding views draw out to (see setBleed). */
+  private bleedBox: HTMLElement | null = null;
   /** The canvas fills `host`'s box, in the page (see setHost). */
   private fills = false;
   private entries = new Set<Entry>();
@@ -74,6 +86,16 @@ export class HerzieStage {
       this.place(c);
       (host ?? document.body).prepend(c);
     }
+    this.lastLayout = "";
+  }
+
+  /**
+   * The box a view that bleeds (StageView.bleed) draws out to, instead of
+   * stopping at its own: an NPC window's edges, say. Only views inside it
+   * bleed; null, none do.
+   */
+  setBleed(box: HTMLElement | null) {
+    this.bleedBox = box;
     this.lastLayout = "";
   }
 
@@ -125,7 +147,12 @@ export class HerzieStage {
 
   /** Draw `view` from now on; returns the function that stops it. */
   add(view: StageView): () => void {
-    const entry: Entry = { view, clips: [], clipAge: CLIP_REFRESH_FRAMES };
+    const entry: Entry = {
+      view,
+      clips: [],
+      clipsOf: null,
+      clipAge: CLIP_REFRESH_FRAMES,
+    };
     this.entries.add(entry);
     this.lastLayout = "";
     this.start();
@@ -221,11 +248,14 @@ export class HerzieStage {
     const drawn: {
       view: StageView;
       rect: DOMRect;
+      /** Where it's drawn: its own box, or the bleed box it reaches to. */
+      area: DOMRect;
       clip: [number, number, number, number];
       alpha: number;
     }[] = [];
     let layout = `${width}x${height}`;
     let idle = true;
+    const bleedBox = this.bleedBox?.isConnected ? this.bleedBox : null;
     for (const entry of this.entries) {
       const { view } = entry;
       const el = view.element;
@@ -239,14 +269,28 @@ export class HerzieStage {
         page.width,
         page.height,
       );
-      if (++entry.clipAge >= CLIP_REFRESH_FRAMES) {
-        entry.clipAge = 0;
-        entry.clips = clippingAncestors(el);
+      // Bleeding: the bleed box stands in for its own, and what clips it is
+      // what clips the bleed box (not the boxes in between).
+      const bleeds =
+        !!view.bleed &&
+        bleedBox !== null &&
+        bleedBox.contains(el) &&
+        canOffset(view.camera);
+      const from = bleeds ? bleedBox : el;
+      let area = rect;
+      if (bleeds) {
+        const b = bleedBox.getBoundingClientRect();
+        area = new DOMRect(b.left - ox, b.top - oy, b.width, b.height);
       }
-      let left = Math.max(0, rect.left);
-      let top = Math.max(0, rect.top);
-      let right = Math.min(width, rect.right);
-      let bottom = Math.min(height, rect.bottom);
+      if (++entry.clipAge >= CLIP_REFRESH_FRAMES || entry.clipsOf !== from) {
+        entry.clipAge = 0;
+        entry.clips = clippingAncestors(from);
+        entry.clipsOf = from;
+      }
+      let left = Math.max(0, area.left);
+      let top = Math.max(0, area.top);
+      let right = Math.min(width, area.right);
+      let bottom = Math.min(height, area.bottom);
       // In its host's box, the box itself is the only edge.
       if (!box)
         for (const clip of entry.clips) {
@@ -259,8 +303,14 @@ export class HerzieStage {
       if (right <= left || bottom <= top) continue;
       const alpha = pageOpacity(el);
       if (alpha <= 0.001) continue;
-      drawn.push({ view, rect, clip: [left, top, right, bottom], alpha });
-      layout += `|${rect.left},${rect.top},${rect.width},${rect.height},${left},${top},${right},${bottom},${alpha}`;
+      drawn.push({
+        view,
+        rect,
+        area,
+        clip: [left, top, right, bottom],
+        alpha,
+      });
+      layout += `|${rect.left},${rect.top},${rect.width},${rect.height},${area.left},${area.top},${area.width},${area.height},${left},${top},${right},${bottom},${alpha}`;
       if (!view.idle()) idle = false;
     }
     // Nothing animating and nothing moved: what's on the canvas is still
@@ -282,18 +332,53 @@ export class HerzieStage {
     renderer.setScissorTest(false);
     renderer.clear();
     renderer.setScissorTest(true);
-    for (const { view, rect, clip, alpha } of drawn) {
+    for (const { view, rect, area, clip, alpha } of drawn) {
       view.update(dt, rect.width, rect.height, alpha);
       const [left, top, right, bottom] = clip;
       // GL's origin is the bottom left.
       renderer.setViewport(
-        rect.left,
-        height - rect.bottom,
-        rect.width,
-        rect.height,
+        area.left,
+        height - area.bottom,
+        area.width,
+        area.height,
       );
       renderer.setScissor(left, height - bottom, right - left, bottom - top);
-      renderer.render(view.scene, view.camera);
+      if (area === rect) {
+        renderer.render(view.scene, view.camera);
+        continue;
+      }
+      // Bleeding: the camera sees as much more round its own frame as the
+      // bleed box is bigger than its box, so it's framed just as it was.
+      // It's drawn over, not cleared under: a view it reaches over stays.
+      const cam = view.camera as
+        | THREE.PerspectiveCamera
+        | THREE.OrthographicCamera;
+      const own = cam.view?.enabled ? { ...cam.view } : null;
+      const fullW = own ? own.fullWidth : rect.width;
+      const fullH = own ? own.fullHeight : rect.height;
+      const kx = own ? own.width / rect.width : 1;
+      const ky = own ? own.height / rect.height : 1;
+      cam.setViewOffset(
+        fullW,
+        fullH,
+        (own?.offsetX ?? 0) + (area.left - rect.left) * kx,
+        (own?.offsetY ?? 0) + (area.top - rect.top) * ky,
+        area.width * kx,
+        area.height * ky,
+      );
+      renderer.autoClearColor = false;
+      renderer.render(view.scene, cam);
+      renderer.autoClearColor = true;
+      if (own)
+        cam.setViewOffset(
+          own.fullWidth,
+          own.fullHeight,
+          own.offsetX,
+          own.offsetY,
+          own.width,
+          own.height,
+        );
+      else cam.clearViewOffset();
     }
     if (this.supersampled && drawn.length > 0) {
       renderer.setScissorTest(false);
@@ -303,6 +388,14 @@ export class HerzieStage {
       renderer.setScissorTest(true);
     }
   }
+}
+
+/** Whether a camera can be shown more round its frame (a view offset). */
+function canOffset(camera: THREE.Camera): boolean {
+  return (
+    camera instanceof THREE.PerspectiveCamera ||
+    camera instanceof THREE.OrthographicCamera
+  );
 }
 
 /** The boxes that cut off an element's overflow, nearest first. */
