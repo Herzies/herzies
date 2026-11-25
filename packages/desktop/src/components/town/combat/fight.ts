@@ -629,7 +629,7 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       if (was !== undefined && m.hp > was)
         pushHealNumber(mine ? null : m.id, m.hp - was);
       bossFight.health.set(m.id, { hp: m.hp, maxHp: m.maxHp });
-      if (m.id === clock.you()) setHpNow(m.hp);
+      if (m.id === clock.you()) setHpNow(m.hp, m.hp <= 0, m.maxHp);
       emitHp();
       return;
     }
@@ -979,7 +979,7 @@ function applyFight(f: FightState, clock: Clock, you: number) {
   // In the room the server's value is the truth, and health doesn't regen.
   setRegenFrozen(true);
   const me = f.health.find((h) => h.id === you);
-  if (me) setHpNow(me.hp);
+  if (me) setHpNow(me.hp, me.hp <= 0, me.maxHp);
   bossFight.event = f.event;
   bossFight.hp = f.hp;
   bossFight.maxHp = f.maxHp;

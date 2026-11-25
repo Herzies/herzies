@@ -307,6 +307,9 @@ export function Combat({
       if (document.hidden) leave();
     };
     if (inTower && !getVitals()?.down) void enter();
+    resume = () => {
+      if (!combat.on && !getVitals()?.down) void enter();
+    };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("pointerup", onPointerUp);
@@ -328,6 +331,7 @@ export function Combat({
       document.removeEventListener("visibilitychange", onHidden);
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("mousedown", onMouseDown, true);
+      resume = null;
       leave();
     };
   }, [canFight, surface, inTower]);
@@ -1488,3 +1492,10 @@ function leave() {
 
 /** Out of combat mode, from outside it (the boss's end screen). */
 export const leaveCombat = leave;
+
+/** Back into combat mode, from outside it, where it can be had (a Tower
+ * buff picked). Nothing when no Combat is up, or it's on already. */
+let resume: (() => void) | null = null;
+export function resumeCombat(): void {
+  resume?.();
+}

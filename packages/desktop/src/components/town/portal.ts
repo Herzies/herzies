@@ -14,8 +14,9 @@ import { towerDoorSpot } from "./towerPlan";
  * Portals: a swirling disc of light floating in the air, standing on one
  * island and leading to another. Walk through it (or press E beside it) and you're
  * there, stepping out of the portal on the far side that leads back.
- * A building's door can lead somewhere too (the Tower's): no disc, no
- * walking through it, just E at the door, and you go in as through a door.
+ * A building's door can lead somewhere too (the Tower's), and so do the
+ * Tower hall's doorway and stair: no disc, no walking through them, just
+ * E beside them, and you go through as through a door.
  */
 
 export type Portal = {
@@ -76,6 +77,9 @@ export function portalsOf(
         yaw,
         to,
         ...(link.next ? { next: true } : {}),
+        // In the Tower's hall every way is a doorway or a stair (TowerHall
+        // builds one at each), gone through with E.
+        ...(map.room === "tower" ? { door: true as const } : {}),
       });
     }
   }

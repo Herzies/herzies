@@ -603,7 +603,7 @@ function Systems({
     townLive.seat = null;
     // The Tower's way on: the same island, its next floor.
     if (p.next) {
-      startWarp(to, true);
+      startWarp(to, true, !!p.door);
       townNet().sendNext();
     } else startWarp(to, false, !!p.door);
     if (p.door) sfxDoor();

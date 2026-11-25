@@ -11,7 +11,7 @@ import {
   type TowerBoon,
 } from "@herzies/shared/tower";
 import { type CSSProperties, useEffect, useRef, useState } from "react";
-import { leaveCombat } from "./combat/Combat";
+import { leaveCombat, resumeCombat } from "./combat/Combat";
 import { combat } from "./combat/state";
 import { townNet } from "./net/townNet";
 
@@ -41,7 +41,7 @@ const OFFER_KEYS: Record<string, number> = {
  * "Skip" takes none (either way the room answers with the floor and the
  * next offers). While it's up the herzie stands still and holds its fire
  * (`combat.picking`: Player and Combat), and the mouse is yours (aiming's
- * let go, as at a duel's end).
+ * let go); once it's gone, aiming comes back if it was on.
  */
 export function BoonPick({
   offers,
@@ -53,10 +53,12 @@ export function BoonPick({
   onClose: () => void;
 }) {
   useEffect(() => {
+    const aiming = combat.on;
     leaveCombat();
     combat.picking = true;
     return () => {
       combat.picking = false;
+      if (aiming) resumeCombat();
     };
   }, []);
   // Asked, for the picks it was asked on: no second pick spent by a quick
