@@ -392,6 +392,7 @@ function RemoteHerzie({
         s.z,
         seasonNow.look.snow,
         ambient.uTime.value,
+        herzie.anim.walkPhase,
       );
     }
     herzie.sitting = seated;
