@@ -272,6 +272,14 @@ impl ManagedState {
         self.bank_expansions = 0;
         self.emotes.clear();
         self.loadouts = None;
+        // Another account's Crystal would outrank the next one's: accept_crystal
+        // drops any picture with fewer attunes than it holds, so a fresh
+        // account (0 attunes) never showed its resonance. The epoch bump makes
+        // a sync still in flight for the old account land without it.
+        self.crystal = None;
+        self.crystal_epoch = self.crystal_epoch.wrapping_add(1);
+        self.xp_floor = None;
+        self.skills.clear();
         self.new_titles.clear();
         self.friends.clear();
         self.pending_trade_request = None;
