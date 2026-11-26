@@ -57,6 +57,10 @@ const LAMP_BANDS = 1.6;
  * fragment shader's GLASS output). */
 const GLASS_GLOW = 0.28;
 
+/** A statue's stone (see HerzieModel.petrify), linear: every colour turns
+ * this, as light as it was. */
+const STONE = new THREE.Color("#b6b1a7");
+
 /** Most bands a scheme can have (its ramp is uploaded as 3 shades each). */
 const MAX_BANDS = 8;
 
@@ -625,6 +629,12 @@ void main() {
   #endif
   #ifdef GLOSS
   color = glossy(color, n, shadow);
+  #endif
+  #ifdef STONE
+  // Carved: whatever it's painted and however it's finished (a pearl's
+  // sheen, marble's veins, a metal's sky), stone as light as it was.
+  color = vec3(${STONE.r.toFixed(4)}, ${STONE.g.toFixed(4)}, ${STONE.b.toFixed(4)})
+    * (0.4 + 0.75 * sqrt(dot(color, vec3(0.2126, 0.7152, 0.0722))));
   #endif
   color *= uLight + uLampColor * lamps;
   color = mix(color, vec3(dot(color, vec3(0.2126, 0.7152, 0.0722))), uGrey);

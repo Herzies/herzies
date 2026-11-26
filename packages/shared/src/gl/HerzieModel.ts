@@ -1042,7 +1042,7 @@ export class HerzieModel {
   /** Turns with the heading. */
   private readonly turn = new THREE.Group();
   /** The Evasive Pair's sparkles (shoeSparkles.ts); null without them. */
-  private readonly sparkles: ShoeSparkles | null = null;
+  private sparkles: ShoeSparkles | null = null;
   /** A full set's shimmer (setShimmer.ts); null without one. */
   private shimmer: SetShimmer | null = null;
   /** Its pipe's smoke (pipeSmoke.ts); null without one. */
@@ -3675,17 +3675,21 @@ export class HerzieModel {
   }
 
   /**
-   * Turn it to stone: every shade greyed by how bright it was, so a statue
-   * keeps the herzie's bands and markings, just carved. For good — call it
-   * once, before it's drawn.
+   * Turn it to stone: every colour greyed by how bright it was, after its
+   * finish (see herzieMaterial's STONE), so a statue keeps the herzie's
+   * bands and markings, just carved, and nothing worn keeps its colour.
+   * For good — call it once, before it's drawn.
    */
   petrify(): void {
-    // A statue doesn't shimmer, nor smoke.
+    // A statue doesn't shimmer, nor smoke, nor sparkle.
     this.shimmer?.dispose();
     this.shimmer = null;
     this.smoke?.points.removeFromParent();
     this.smoke?.dispose();
     this.smoke = null;
+    this.sparkles?.points.removeFromParent();
+    this.sparkles?.dispose();
+    this.sparkles = null;
     // Stone isn't see-through: glass goes solid.
     for (const m of this.glassMaterials) {
       delete m.defines.GLASS;
@@ -3710,21 +3714,10 @@ export class HerzieModel {
       d.removeFromParent();
     }
     this.glassDepthMeshes.length = 0;
-    const stone = new THREE.Color("#b6b1a7");
     for (const m of this.materials) {
-      for (const name of [
-        "uShades",
-        "uRamp",
-        "uLining",
-        "uTrim",
-        "uPatch",
-      ] as const) {
-        if (!m.uniforms[name]) continue;
-        for (const c of m.uniforms[name].value as THREE.Color[]) {
-          const l = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
-          c.copy(stone).multiplyScalar(0.4 + 0.75 * Math.sqrt(l));
-        }
-      }
+      if (!m.uniforms.uShades) continue;
+      m.defines.STONE = "";
+      m.needsUpdate = true;
     }
   }
 
