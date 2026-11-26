@@ -4,13 +4,9 @@
  * what's lost is a few seconds of bench regen, and a fight's HP re-sends on
  * the next report.
  */
-import {
-  type BossPlace,
-  type LootDrop,
-  signVitalsRequest,
-} from "@herzies/shared/town-net";
+import { type LootDrop, signVitalsRequest } from "@herzies/shared/town-net";
 import type { DuelResult } from "./duel";
-import type { FightReport, RaidReply } from "./fight";
+import type { FightReport, RaidReply, ResultsTable } from "./fight";
 import type { Env } from "./room";
 
 /** A report: a fight's (see FightReport: HP, boss damage, skill XP, the
@@ -37,9 +33,10 @@ export type VitalsReply = {
   skills?: {
     levels: { uid: string; skill: string; level: number }[];
   } | null;
-  /** The end screen's table, if it was asked for: the top ten, and each
-   * asked-about herzie's place by user id (none if they dealt nothing). */
-  results?: { top: BossPlace[]; you: Record<string, BossPlace> } | null;
+  /** The end screen's table, if it was asked for: the three awards, and
+   * each asked-about herzie's own result by user id (none if it did
+   * nothing). */
+  results?: ResultsTable | null;
   /** What the Tower batch's kills dropped, and its chest held (both empty
    * on a replay: they were handed out the first time). */
   tower?: { drops: LootDrop[]; chest?: LootDrop[] } | null;

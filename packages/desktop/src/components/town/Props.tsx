@@ -39,7 +39,7 @@ import { Portals } from "./Portals";
 import { type Copy, type Part, PartMesh, type Placed, painted } from "./parts";
 import type { SeasonLook } from "./Seasons";
 import { StandColliders, Stands } from "./Stands";
-import { type Champion, StatueColliders, Statues } from "./Statues";
+import { type Champions, StatueColliders, Statues } from "./Statues";
 import { Tower } from "./Tower";
 import {
   SPECIES,
@@ -512,12 +512,12 @@ const CASTS = new Set<Kind>(["R", "S", "B", "L", "b", "p"]);
  */
 export function Props({
   map,
-  champion,
+  champions,
   backdrop = false,
 }: {
   map: TownMap;
   /** Who the statues show. */
-  champion: Champion;
+  champions: Champions;
   /** Another island, seen across the sky: no lamps lighting this one, and
    * no statues (their plaques would float over it). */
   backdrop?: boolean;
@@ -561,7 +561,7 @@ export function Props({
       <Stands map={map} />
       <Boards map={map} />
       {!backdrop && <Crystals map={map} />}
-      {!backdrop && <Statues map={map} champion={champion} />}
+      {!backdrop && <Statues map={map} champions={champions} />}
       <Dummies map={map} live={!backdrop} />
       <Portals map={map} live={!backdrop} />
     </>

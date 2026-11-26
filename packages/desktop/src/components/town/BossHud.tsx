@@ -1,6 +1,7 @@
 import { BOSS_PHASE_AT, IN_TUNE, MINION_THRESHOLDS } from "@herzies/shared";
+import { AWARD_NAMES } from "@herzies/shared/combat";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { cn } from "../../lib/utils";
+import { cn, ordinal } from "../../lib/utils";
 import { clock } from "./cave";
 import { useBleedStacks } from "./combat/bleeds";
 import {
@@ -377,6 +378,11 @@ function RaidLine({ raid, now }: { raid: RaidView; now: number }) {
   const taunt = buffOn(bossFight.you, "taunt", now);
   const enrage = raid.enrageAt;
   const hard = raid.hardAt;
+  // Your place in your own role's award, in words: "2nd for Lifesaver".
+  const standing = bossFight.standing;
+  const place = standing
+    ? `${ordinal(standing.rank)} for ${AWARD_NAMES[standing.role]}`
+    : "";
   const rage =
     hard !== null && now >= hard
       ? { text: "It's ending the fight!", tone: "text-red" }
@@ -401,13 +407,12 @@ function RaidLine({ raid, now }: { raid: RaidView; now: number }) {
       {rage ? (
         <span className={cn("font-medium", rage.tone)}>{rage.text}</span>
       ) : null}
-      {bossFight.tally && raid.you === "in" ? (
+      {standing && raid.you === "in" ? (
         <span
-          className="tabular-nums text-white/70"
-          title="Your damage, plus healing and blocking (×10), so far"
+          className="text-white/70"
+          title={`${place}, of ${standing.of}, so far`}
         >
-          You: {bossFight.tally.score.toLocaleString()} · #
-          {bossFight.tally.rank}
+          You: {place}
         </span>
       ) : null}
       {raid.you !== "in" ? (

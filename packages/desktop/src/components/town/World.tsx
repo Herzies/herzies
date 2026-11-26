@@ -5,7 +5,7 @@ import { Dock } from "./airship/Dock";
 import { Birds } from "./Birds";
 import { Bunting } from "./Bunting";
 import { Clouds } from "./Clouds";
-import { type Champion, useChampion } from "./champion";
+import { type Champions, useChampions } from "./champion";
 import type { Hour } from "./DayCycle";
 import { DayLight, type ShadowFocus } from "./DayLight";
 import { HAZE_START } from "./depth";
@@ -57,7 +57,7 @@ export function mapId(map: TownMap): number {
 export function World({
   map = HOME_MAP,
   others,
-  champion: given,
+  champions: given,
   hour,
   season,
   shadows,
@@ -70,15 +70,15 @@ export function World({
   /** The other islands in the sky (default: every map there is; the map
    * editor passes its own). */
   others?: TownMap[];
-  /** Who the statues show (default: the last boss fight's, as the
+  /** Who the statues show (default: each award's last winner, as the
    * server last said; see champion.ts). */
-  champion?: Champion;
+  champions?: Champions;
   /** Where the sun's shadows fall, frame by frame (default: all of the
    * island; see DayLight). Given, the light isn't remounted per island. */
   shadows?: ShadowFocus;
 }) {
-  const live = useChampion();
-  const champion = given ?? live;
+  const live = useChampions();
+  const champions = given ?? live;
   // Rooms (the boss's cave, the Tower's hall) aren't islands in anyone's
   // sky, nor are decks.
   const rest = (others ?? [...TOWN_MAPS_LOCAL.values()]).filter(
@@ -106,7 +106,7 @@ export function World({
             <Ground map={map} />
           </>
         )}
-        <Props map={map} champion={champion} />
+        <Props map={map} champions={champions} />
         <Particles map={map} />
       </>
     );
@@ -140,7 +140,7 @@ export function World({
             key={m.id}
             map={m}
             full={m.id === map.id}
-            champion={champion}
+            champions={champions}
           />
         ))}
       </group>
@@ -182,17 +182,17 @@ const OFFSCREEN = new THREE.WebGLRenderTarget(1, 1);
 function Island({
   map,
   full,
-  champion,
+  champions,
 }: {
   map: TownMap;
   full: boolean;
-  champion: Champion;
+  champions: Champions;
 }) {
   return (
     <group position={map.origin}>
       <HomeIsland radius={islandRadius(map)} />
       <Ground map={map} />
-      <Props map={map} champion={champion} backdrop={!full} />
+      <Props map={map} champions={champions} backdrop={!full} />
       <Dock map={map} />
       {full && (
         <>

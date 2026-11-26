@@ -12,7 +12,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ambient } from "../components/town/ambient";
-import type { Champion } from "../components/town/champion";
+import type { Champions } from "../components/town/champion";
 import { driftClouds } from "../components/town/depth";
 import { groundY, SPOT_NAMES, type TownMap } from "../components/town/map";
 import { Post } from "../components/town/Post";
@@ -34,7 +34,7 @@ import { WatchedHerzies } from "./WatchedHerzies";
 
 export type ShowcaseProps = {
   net: WatchConnection | null;
-  champion?: Champion;
+  champions?: Champions;
   /** Hold the camera still (prefers-reduced-motion). */
   still?: boolean;
   /** Skip ambient occlusion (small or slow screens). */
@@ -62,7 +62,7 @@ const LOOK_HEIGHT = 1.5;
  */
 export function Showcase({
   net,
-  champion,
+  champions,
   still,
   lite,
   onReady,
@@ -101,7 +101,7 @@ export function Showcase({
             it's a stand-in that holds nothing (see rapier-stub.tsx). */}
         <Suspense fallback={null}>
           <Physics paused>
-            <World map={HOME_MAP} champion={champion} />
+            <World map={HOME_MAP} champions={champions} />
             {residentSpots(HOME_MAP).map((s) => (
               <Visitor
                 key={s.key}

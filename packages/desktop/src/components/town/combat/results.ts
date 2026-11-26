@@ -1,4 +1,9 @@
-import type { BossPlace } from "@herzies/shared";
+import type {
+  AwardBoard,
+  AwardMine,
+  AwardPlace,
+  TownLook,
+} from "@herzies/shared";
 import { useSyncExternalStore } from "react";
 
 /** Fallen, the boss stands as stone this long (s), then crumbles into the
@@ -10,12 +15,13 @@ export const CRUMBLE = 1.1;
 const SHOW_AFTER_FALL_MS = 600;
 
 /** The end screen of the last boss fight you were in for the end of: how it
- * went and who dealt the most. Outlives the room (you're sent back to town
+ * went, its three awards (in AWARD_ROLES order), and your own result
+ * (null if you did nothing). Outlives the room (you're sent back to town
  * with it up) until you close it, or another fight starts. */
 export type BossResults = {
   outcome: "victory" | "defeat";
-  top: BossPlace[];
-  you: BossPlace | null;
+  awards: AwardBoard[];
+  mine: AwardMine | null;
   /** When to show it (performance.now() ms): on a kill, just after. */
   showAt: number;
 };
@@ -74,41 +80,86 @@ export function useBossResultsShown(): BossResults | null {
 }
 
 /**
- * A made-up end screen, to look at without a fight: the top three one of
- * each class with their gear, and you at `rank` (past 3 shows under the
- * "…"; 0 for no place). For the town sandbox's `?results=` and Settings >
- * Debug.
+ * A made-up end screen, to look at without a fight: a Big Hitter, a
+ * Soundproof and a Lifesaver with their gear, and you a Bard at `rank` for
+ * Lifesaver (1 wins it; past 3 shows under the best three in Details; 0
+ * for no result). For the town sandbox's `?results=` and Settings > Debug.
  */
 export function sampleBossResults(
   outcome: BossResults["outcome"],
-  rank = 7,
+  rank = 4,
 ): Omit<BossResults, "showAt"> {
-  const looks = [
-    {
+  const looks: Record<string, TownLook> = {
+    eddie: {
       seed: "HERZ-2CCV",
       stage: 3,
       equipped: { main_hand: "compact-discs", head: "headphones" },
     },
-    { seed: "HERZ-HOBG", stage: 2, equipped: { main_hand: "lute" } },
-    {
+    rimshot: {
       seed: "HERZ-RIMS",
       stage: 3,
       equipped: { main_hand: "worn-stick", off_hand: "old-cymbal" },
     },
-  ];
-  const names = ["eddie", "hobgoblin", "rimshot", "Mathias", "lutey"];
-  const table: BossPlace[] = names.map((name, i) => ({
-    rank: i + 1,
+    hobgoblin: { seed: "HERZ-HOBG", stage: 2, equipped: { main_hand: "lute" } },
+    Mathias: { seed: "HERZ-MATH", stage: 3, equipped: { main_hand: "lute" } },
+  };
+  const place = (
+    rank: number,
+    name: string,
+    share: number,
+    stats: Partial<Omit<AwardPlace, "rank" | "name" | "share">>,
+  ): AwardPlace => ({
+    rank,
     name,
-    damage: Math.round(48_000 / (i + 1.4)),
-    heal: i === 1 ? 1_240 : i === 2 ? 310 : 0,
-    look: looks[i],
-  }));
-  const you =
-    rank > 0
-      ? (table[rank - 1] ?? { rank, name: "you", damage: 812, heal: 96 })
-      : null;
-  return { outcome, top: table.slice(0, 3), you };
+    share,
+    damage: 0,
+    healed: 0,
+    blocked: 0,
+    tanked: 0,
+    ...stats,
+  });
+  const hitters = [
+    place(1, "eddie", 0.31, { damage: 330_000 }),
+    place(2, "Vinyl Vex", 0.27, { damage: 290_000 }),
+    place(3, "Lo-Fi Lou", 0.22, { damage: 236_000 }),
+  ];
+  const tanks = [
+    place(1, "rimshot", 0.84, { damage: 157_000, tanked: 255, blocked: 4_100 }),
+    place(2, "Snare", 0.16, { damage: 121_000, tanked: 20, blocked: 800 }),
+  ];
+  // The healers, best first, you among them at `rank`.
+  const heals = [13_800, 9_500, 5_200, 3_100, 2_400, 1_600, 900, 400, 150];
+  const at = Math.min(Math.max(0, Math.floor(rank)), heals.length);
+  const names = [
+    "hobgoblin",
+    "Lullaby",
+    "Mossy",
+    "Hymn",
+    "Wren",
+    "Carol",
+    "Psalm",
+    "Coda",
+  ];
+  if (at) names.splice(at - 1, 0, "Mathias");
+  const total = names.reduce((n, _, i) => n + heals[i], 0);
+  const healers = names.map((name, i) =>
+    place(i + 1, name, heals[i] / total, {
+      damage: 74_000 - i * 6_000,
+      healed: heals[i],
+    }),
+  );
+  const winner = (p: AwardPlace) => ({ ...p, look: looks[p.name] });
+  return {
+    outcome,
+    awards: [
+      { role: "dps", winner: winner(hitters[0]), top: hitters },
+      { role: "tank", winner: winner(tanks[0]), top: tanks },
+      { role: "support", winner: winner(healers[0]), top: healers.slice(0, 3) },
+    ],
+    mine: at
+      ? { role: "support", place: healers[at - 1], won: at === 1 }
+      : null,
+  };
 }
 
 let lastSample: BossResults["outcome"] = "defeat";

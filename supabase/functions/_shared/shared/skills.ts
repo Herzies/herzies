@@ -273,7 +273,7 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     name: "Silencio",
     kind: "attack",
     describe:
-      "Hushes the air for 0.5 s (you can't move), then a wave of silence bursts out of you: every enemy within 5 m is flung out before it, a little further than a Cymbrella's dome, and bleeds {v} of a wave a second for 8 s. The boss is too big to fling and herzies hold their ground: they only bleed.",
+      "Hushes the air for 0.5 s, then a wave of silence flings every enemy within 5 m away, bleeding {v} of a wave a second for {d}.",
     // A bleed hit's share of a wave: see SILENCIO for the wave. The Bard's
     // answer to a pack on its healers: room to breathe, and a bleed on
     // everything it moved. Its wind-up holds the Bard still and swings

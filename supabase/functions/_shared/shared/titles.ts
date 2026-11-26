@@ -38,8 +38,13 @@ export interface TitleMetrics {
   genres: number;
   /** Boss fights taken part in. */
   bossFights: number;
-  /** Fallen bosses where this herzie was the top contributor. */
+  /** Awards won at fallen bosses, any of the three (combat.ts AWARD_ROLES;
+   * 00168 boss_awards). */
   bossTops: number;
+  /** ...each award on its own: Big Hitter, Soundproof, Lifesaver. */
+  bossBigHitter: number;
+  bossSoundproof: number;
+  bossLifesaver: number;
   /** Duels won, counting each opponent once a day (see 00152 record_duel). */
   duelWins: number;
   /** The longest run of counted duel wins without a loss. */
@@ -322,10 +327,38 @@ export const TITLES = [
   {
     id: "boss-top",
     name: "Showstopper",
-    description: "Be the top contributor when a boss falls.",
+    description: "Win an award when a boss falls.",
     rarity: "legendary",
     category: "boss",
     metric: "bossTops",
+    goal: 1,
+  },
+  {
+    id: "boss-big-hitter",
+    name: "Big Hitter",
+    description: "Win Big Hitter (most damage) when a boss falls.",
+    rarity: "legendary",
+    category: "boss",
+    metric: "bossBigHitter",
+    goal: 1,
+  },
+  {
+    id: "boss-soundproof",
+    name: "Soundproof",
+    description:
+      "Win Soundproof (held the boss and blocked its hits) when a boss falls.",
+    rarity: "legendary",
+    category: "boss",
+    metric: "bossSoundproof",
+    goal: 1,
+  },
+  {
+    id: "boss-lifesaver",
+    name: "Lifesaver",
+    description: "Win Lifesaver (most healing) when a boss falls.",
+    rarity: "legendary",
+    category: "boss",
+    metric: "bossLifesaver",
     goal: 1,
   },
 

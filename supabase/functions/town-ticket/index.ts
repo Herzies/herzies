@@ -26,7 +26,11 @@ import {
   type TownTicketPayload,
 } from "../_shared/shared/town-net.ts";
 import { vitalsOf } from "../_shared/shared/vitals.ts";
-import { CLASS_DEFS, isHerzieClass } from "../_shared/shared/classes.ts";
+import {
+  CLASS_DEFS,
+  type ClassRole,
+  isHerzieClass,
+} from "../_shared/shared/classes.ts";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -247,42 +251,52 @@ Deno.serve(async (request) => {
     url: TOWN_SERVER_URL,
     exp,
     vitals,
-    champion: await championOf(admin),
+    champions: await championsOf(admin),
     ...(tower ? { instance: user.id } : {}),
   });
 });
 
-/**
- * Who the Town's statue shows: the top damage dealer of the last boss fight
- * that's over, with their look as others see it out walking (no ground
- * accessories). Null if there's none yet, or if looking fails: the statue
- * keeps its stand-in, and the ticket still goes out.
- */
-async function championOf(
-  admin: SupabaseClient,
-): Promise<{
+/** A herzie on the Town's statue, with its look as others see it out
+ * walking (no ground accessories). */
+type Champion = {
   name: string;
   look: { seed: string; stage: number; equipped: Record<string, unknown> };
-} | null> {
+};
+
+/**
+ * Who the Town's statue shows: each award's winner at the latest fallen
+ * boss that had one (00168 boss_champion_json). A role nobody's won yet is
+ * null, and so is every role if looking fails: the statue keeps its
+ * stand-ins, and the ticket still goes out.
+ */
+async function championsOf(
+  admin: SupabaseClient,
+): Promise<Record<ClassRole, Champion | null>> {
+  const none = { dps: null, tank: null, support: null };
   let data: unknown;
   try {
     const res = await admin.rpc("boss_champion_json", {
       p_skip: CHAMPION_SKIP,
     });
-    if (res.error) return null;
+    if (res.error) return none;
     data = res.data;
   } catch {
-    return null;
+    return none;
   }
-  if (!data) return null;
-  const c = data as {
-    name: string;
-    seed: string;
-    stage: number;
-    equipped: unknown;
+  if (!data) return none;
+  const champions = data as Record<
+    ClassRole,
+    { name: string; seed: string; stage: number; equipped: unknown } | null
+  >;
+  const look = (c: (typeof champions)[ClassRole]): Champion | null => {
+    if (!c) return null;
+    const { ground_left: _l, ground_right: _r, ...equipped } =
+      normalizeEquipped(c.equipped);
+    return { name: c.name, look: { seed: c.seed, stage: c.stage, equipped } };
   };
-  const { ground_left: _l, ground_right: _r, ...equipped } = normalizeEquipped(
-    c.equipped,
-  );
-  return { name: c.name, look: { seed: c.seed, stage: c.stage, equipped } };
+  return {
+    dps: look(champions.dps),
+    tank: look(champions.tank),
+    support: look(champions.support),
+  };
 }

@@ -5,7 +5,7 @@
  * it loads, cached for good.
  *
  *   const { mountTownShowcase } = await import("/town/showcase.js");
- *   const unmount = await mountTownShowcase(el, { server, champion, onReady });
+ *   const unmount = await mountTownShowcase(el, { server, champions, onReady });
  */
 import type { ShowcaseOptions } from "./mount";
 

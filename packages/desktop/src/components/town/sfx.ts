@@ -1084,6 +1084,20 @@ export function sfxTitle(big: boolean): void {
     tone(a, "triangle", f, f, 0.07, 0.005, 0.9, 0.07 * i);
 }
 
+/** A raid award revealed on the end screen (AwardsCard), `step` 0 to
+ * 2: a bright note and its fifth, a step higher each time; the last one
+ * fuller, the octave on top and a shimmer. */
+export function sfxAward(step: number): void {
+  const a = audio();
+  if (!a) return;
+  const root = [523, 587, 659][step] ?? 659;
+  tone(a, "triangle", root, root, 0.08, 0.004, 0.3);
+  tone(a, "triangle", root * 1.5, root * 1.5, 0.08, 0.004, 0.5, 0.09);
+  if (step < 2) return;
+  tone(a, "triangle", root * 2, root * 2, 0.06, 0.004, 0.8, 0.18);
+  noiseBurst(a, "highpass", 6000, 2500, 0.8, 0.05, 0.5);
+}
+
 // --- Duels -----------------------------------------------------------------
 
 /** Someone challenges you: a bright call, up a fourth, with a shimmer. */

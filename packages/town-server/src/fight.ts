@@ -33,19 +33,25 @@ import {
 import {
   type AttackStyle,
   basicAttack,
+  CLASS_DEFS,
+  type ClassRole,
   hasInstrument,
   isHerzieClass,
 } from "@herzies/shared/classes";
 import {
+  AWARD_ROLES,
+  type AwardEntry,
   aimDirection,
   type Contribution,
-  contributionOf,
   HEAL_BOLT,
   HEAL_LOCK_ANGLE,
   HEAL_LOCK_SLACK,
   type HitStats,
   healTarget,
   meleeDamage,
+  pickAwardWinners,
+  rankAwards,
+  tankedSeconds,
   tauntPointsPerSecond,
   WAVE_HAND_HEIGHT,
   WAVE_SPEED,
@@ -76,8 +82,10 @@ import {
   towerBoonTotals,
 } from "@herzies/shared/tower";
 import type {
+  AwardBoard,
+  AwardMine,
+  AwardPlace,
   BossClaim,
-  BossPlace,
   BossTelegraph,
   EatRefusal,
   FightState,
@@ -134,8 +142,8 @@ const SAY_GAP_MS = 6_000;
 export const SAY_READ_MS = 2_500;
 /** An in-tune buff is open-ended; it's taken off with `buffOff`. */
 const OPEN_ENDED_MS = 6 * 3_600_000;
-/** How often each fighter hears their own contribution and rank. */
-const TALLY_EVERY_MS = 2_000;
+/** How often each fighter hears their own place in their own role. */
+const STANDING_EVERY_MS = 2_000;
 /** How long a roster member who dropped stays "standing" for the wipe
  * check: long enough to ride out a reconnect, short enough that a raid
  * that's all down isn't kept waiting on someone who's gone. */
@@ -394,7 +402,7 @@ export class FightRuntime {
   private devDealt = new Map<string, Contribution>();
   /** Everyone's contribution this fight, for their own live line. */
   private dealt = new Map<string, Contribution>();
-  private nextTallyAt = 0;
+  private nextStandingAt = 0;
   /** HP skills (and eaten candy) restored, by player, not yet taken by the
    * database. */
   private healed = new Map<string, number>();
@@ -1805,31 +1813,36 @@ export class FightRuntime {
       if (boss.taunter(now)) this.log.tauntMs += now - this.log.lastAt;
     }
     this.stepTunes(now, out);
-    if (this.stage === "fight" && now >= this.nextTallyAt) {
-      this.nextTallyAt = now + TALLY_EVERY_MS;
-      out.push(...this.tallies());
+    if (this.stage === "fight" && now >= this.nextStandingAt) {
+      this.nextStandingAt = now + STANDING_EVERY_MS;
+      out.push(...this.standings());
     }
     if (this.stage === "fight" && now - this.lastSayAt >= SAY_EVERY_MS)
       this.speak("remind", now, out);
     this.log.lastAt = now;
   }
 
-  /** Each fighter's own contribution and where it ranks, to them alone. */
-  private tallies(): Outbound[] {
-    const scores = [...this.dealt].map(
-      ([uid, c]) => [uid, contributionOf(c)] as const,
-    );
-    if (!scores.length) return [];
-    scores.sort((a, b) => b[1] - a[1]);
-    const of = this.roster?.size ?? scores.length;
+  /** Each fighter's place so far in their own role (see ownAward), to them
+   * alone. */
+  private standings(): Outbound[] {
+    const ranks = rankAwards(this.dealt);
+    const winners = pickAwardWinners(ranks);
     const out: Outbound[] = [];
-    scores.forEach(([uid, score], i) => {
-      if (!this.players.get(uid)?.present) return;
+    for (const uid of this.dealt.keys()) {
+      const p = this.players.get(uid);
+      if (!p?.present) continue;
+      const own = ownAward(uid, p.cls, ranks, winners);
+      if (!own) continue;
       out.push({
         to: { uid },
-        msg: { t: "tally", score: Math.round(score), rank: i + 1, of },
+        msg: {
+          t: "standing",
+          role: own.role,
+          rank: own.entry.rank,
+          of: ranks[own.role].length,
+        },
       });
-    });
+    }
     return out;
   }
 
@@ -2758,13 +2771,10 @@ export class FightRuntime {
 
   /**
    * The fight is over and `town-vitals` sent its table: the end screen, once,
-   * to each herzie still here, with the top three and their own place.
+   * to each herzie still here, with the three awards and their own result.
    * Victory if the boss fell, defeat if it got away or won.
    */
-  results(table: {
-    top: BossPlace[];
-    you: Record<string, BossPlace>;
-  }): Outbound[] {
+  results(table: ResultsTable): Outbound[] {
     if (this.resultsSent || !this.closeWhy) return [];
     this.resultsSent = true;
     const outcome = this.closeWhy === "victory" ? "victory" : "defeat";
@@ -2776,8 +2786,8 @@ export class FightRuntime {
         msg: {
           t: "results",
           outcome,
-          top: table.top.slice(0, 3),
-          you: table.you[p.uid] ?? null,
+          awards: table.awards,
+          mine: table.you[p.uid] ?? null,
         },
       });
     }
@@ -2785,28 +2795,48 @@ export class FightRuntime {
   }
 
   /** The dev boss's table, from what the room saw land (it's never
-   * reported). */
-  private devTable(): { top: BossPlace[]; you: Record<string, BossPlace> } {
-    const ranked = [...this.devDealt]
-      .map(([uid, c]) => ({ uid, c, score: contributionOf(c) }))
-      .filter((r) => r.score > 0)
-      .sort((a, b) => b.score - a.score || (a.uid < b.uid ? -1 : 1))
-      .map(({ uid, c }, i) => ({
-        uid,
-        place: {
-          rank: i + 1,
-          name: this.players.get(uid)?.name ?? "?",
-          damage: Math.round(c.damage + (c.adds ?? 0)),
-          heal: Math.round(c.healing + c.blocked),
-        },
-      }));
-    return {
-      top: ranked.slice(0, 3).map((r) => ({
-        ...r.place,
-        look: this.players.get(r.uid)?.look,
-      })),
-      you: Object.fromEntries(ranked.map((r) => [r.uid, r.place])),
+   * reported): built as boss_results_json builds the real one. */
+  private devTable(): ResultsTable {
+    const ranks = rankAwards(this.devDealt);
+    const winners = pickAwardWinners(ranks);
+    // The same roster creditTaunt paid the Taunt by.
+    const roster = this.roster?.size ?? this.players.size;
+    const place = (e: AwardEntry<string>): AwardPlace => {
+      const c = this.devDealt.get(e.key) as Contribution;
+      return {
+        rank: e.rank,
+        name: this.players.get(e.key)?.name ?? "?",
+        share: e.share,
+        damage: Math.round(c.damage + (c.adds ?? 0)),
+        healed: Math.round(c.healing),
+        blocked: Math.round(c.blocked),
+        tanked: Math.round(
+          tankedSeconds(c.taunt ?? 0, this.engine.maxHp, roster),
+        ),
+      };
     };
+    const awards = AWARD_ROLES.map((role): AwardBoard => {
+      const winner = winners[role];
+      return {
+        role,
+        winner: winner
+          ? { ...place(winner), look: this.players.get(winner.key)?.look }
+          : null,
+        top: ranks[role].slice(0, 3).map(place),
+      };
+    });
+    const you: Record<string, AwardMine> = {};
+    for (const uid of this.devDealt.keys()) {
+      const own = ownAward(
+        uid,
+        this.players.get(uid)?.cls ?? null,
+        ranks,
+        winners,
+      );
+      if (own)
+        you[uid] = { role: own.role, won: own.won, place: place(own.entry) };
+    }
+    return { awards, you };
   }
 
   /** A telegraph as the wire carries it: a buster's target as an entity id. */
@@ -2900,6 +2930,39 @@ export class FightRuntime {
 
 /** The event id used by the local-dev bypass; never reported. */
 export const DEV_EVENT = "dev";
+
+/** The end screen's table as `town-vitals` relays it (boss_results_json):
+ * the three awards in AWARD_ROLES order, and each asked-about herzie's own
+ * result by user id (none if it did nothing). */
+export type ResultsTable = {
+  awards: AwardBoard[];
+  you: Record<string, AwardMine>;
+};
+
+/** A herzie's own role in a fight's awards: the one it won; else its
+ * class's, if it did any of that; else the one it has the biggest share
+ * of. Null if it did nothing at all. */
+function ownAward<K>(
+  key: K,
+  cls: string | null,
+  ranks: Record<ClassRole, AwardEntry<K>[]>,
+  winners: Record<ClassRole, AwardEntry<K> | null>,
+): { role: ClassRole; entry: AwardEntry<K>; won: boolean } | null {
+  for (const role of AWARD_ROLES) {
+    const winner = winners[role];
+    if (winner?.key === key) return { role, entry: winner, won: true };
+  }
+  const mine = AWARD_ROLES.flatMap((role) => {
+    const entry = ranks[role].find((e) => e.key === key);
+    return entry ? [{ role, entry, won: false }] : [];
+  });
+  const classRole = isHerzieClass(cls) ? CLASS_DEFS[cls].role : null;
+  const inClass = mine.find((m) => m.role === classRole);
+  if (inClass) return inClass;
+  let best: (typeof mine)[number] | null = null;
+  for (const m of mine) if (!best || m.entry.share > best.entry.share) best = m;
+  return best;
+}
 
 /** What a fight reads off a player's stats: a cast's damage, their Def, and
  * what Euphony does to their skills. */

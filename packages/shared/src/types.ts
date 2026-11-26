@@ -1,4 +1,4 @@
-import type { HerzieClass } from "./classes.js";
+import type { ClassRole, HerzieClass } from "./classes.js";
 import type { CrystalState } from "./crystal.js";
 import type { Equipped, HerzieStats, ItemUnit } from "./items.js";
 import type { LoadoutState } from "./loadouts.js";
@@ -340,14 +340,23 @@ export interface BossFightConfig {
  */
 export const BOSS_DAMAGE_PER_MINUTE = 1;
 
-/** A place on a boss's board, ranked by contribution (damage, plus ten
- * times what was healed or blocked; see contributionOf). */
+/** For apps from before awards: a place on a boss's old board. Always
+ * sent empty now (BossFightView.topDealers), so their board says nobody's
+ * hurt it rather than breaking. */
 export interface BossDamageDealer {
   name: string;
   damage: number;
-  /** HP healed or blocked (older servers omit it). */
   heal?: number;
   rank: number;
+}
+
+/** Who's leading one award on a boss's card (pickAwardWinners, as the
+ * fight stands): the herzie's name and its share of the role's points. */
+export interface BossAwardLeader {
+  role: ClassRole;
+  name: string;
+  /** 0–1. */
+  share: number;
 }
 
 /**
@@ -368,10 +377,15 @@ export interface BossFightView {
   maxHp: number;
   killed: boolean;
   escaped: boolean;
+  /** Each award's leader, in AWARD_ROLES order; a role nobody's played
+   * yet is left out (older servers omit it). */
+  awards?: BossAwardLeader[];
+  /** The requesting user's own place (see AwardMine): its role, rank, and
+   * how many are in that role's ranking; null if they've done nothing. */
+  yourAward?: { role: ClassRole; rank: number; of: number } | null;
+  /** For apps from before awards: always empty, 0 and null. */
   topDealers: BossDamageDealer[];
-  /** The requesting user's own contribution, so the UI can show "you". */
   yourDamage: number;
-  /** ...and what they healed or blocked (older servers omit it). */
   yourHeal?: number;
   yourRank: number | null;
 }

@@ -7,10 +7,11 @@ import {
   SpeechBubble,
   useChatter,
 } from "@herzies/shared";
+import { AWARD_NAMES } from "@herzies/shared/combat";
 import { HerzieView } from "@herzies/shared/gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useHerzieStage } from "../lib/overlayStage";
-import { cn } from "../lib/utils";
+import { cn, ordinal } from "../lib/utils";
 import { SegmentBar } from "./SegmentBar";
 import { VisitorHelp, type VisitorReward } from "./VisitorHelp";
 import { VISITOR_THEMES } from "./VisitorRowTheme";
@@ -269,54 +270,59 @@ export function BossFightPanel({
         </>
       ) : null}
 
-      {/* shrink-0, not flex-1: the leaderboard is a fixed four rows at most,
+      {/* shrink-0, not flex-1: the awards are three rows and yours at most,
           so any spare height belongs to the boss render above. */}
       <div className="min-h-0 shrink-0">
-        <div className="mb-0.5 text-ui text-text-dim">Top contributors:</div>
-        {(config.topDealers ?? []).length === 0 ? (
+        <div className="mb-0.5 text-ui text-text-dim">Awards:</div>
+        {!config.awards?.length ? (
           <div className="text-[10px] text-text-dim">
             Nobody has hurt it yet.
           </div>
         ) : (
-          <div className="flex flex-col gap-0.5">
-            {config.topDealers.map((d) => (
+          <>
+            {/* Each award's leader, in gold while it would go up on the
+                statue, and its share of that role's work. */}
+            <div className="grid grid-cols-[auto_1fr_auto] items-baseline gap-x-1.5 gap-y-0.5 text-ui">
+              {config.awards.map((a) => (
+                <div key={a.role} className="contents">
+                  <span className="text-text-dim">{AWARD_NAMES[a.role]}</span>
+                  <span
+                    className={cn(
+                      "min-w-0 truncate",
+                      !escaped && "text-[#ffd84a]",
+                    )}
+                    title={
+                      escaped
+                        ? undefined
+                        : dead
+                          ? `${AWARD_NAMES[a.role]}: up on the statue in town`
+                          : `Leading ${AWARD_NAMES[a.role]}: up on the statue in town if the boss falls`
+                    }
+                  >
+                    {a.name}
+                  </span>
+                  <span className="text-right text-text-dim tabular-nums">
+                    {Math.round(a.share * 100)}%
+                  </span>
+                </div>
+              ))}
+            </div>
+            {/* "You" is the line that makes the board feel like it is
+                about them. */}
+            {config.yourAward ? (
               <div
-                key={`${d.rank}-${d.name}`}
-                className="flex items-baseline justify-between text-ui"
+                className="mt-0.5 border-t border-white/15 pt-0.5 text-ui text-cyan"
+                title={`${ordinal(config.yourAward.rank)} of ${config.yourAward.of}`}
               >
-                <span
-                  className={cn(d.rank === 1 && "text-gold")}
-                  title={
-                    d.rank === 1
-                      ? "Top contributor: their statue goes up in town"
-                      : undefined
-                  }
-                >
-                  {d.rank}. {d.name}
-                </span>
-                <span className="text-text-dim">
-                  {d.damage.toLocaleString()}
-                  <Heal amount={d.heal} />
-                </span>
-              </div>
-            ))}
-            {/* The player is usually not in the top N, and "you" is the line
-                that makes the board feel like it is about them. */}
-            {config.yourRank !== null &&
-            !config.topDealers.some((d) => d.rank === config.yourRank) ? (
-              <div className="mt-0.5 flex items-baseline justify-between border-t border-white/15 pt-0.5 text-ui text-cyan">
-                <span>{config.yourRank ? `${config.yourRank}. ` : ""}you</span>
-                <span>
-                  {config.yourDamage.toLocaleString()}
-                  <Heal amount={config.yourHeal} />
-                </span>
+                You: {ordinal(config.yourAward.rank)} for{" "}
+                {AWARD_NAMES[config.yourAward.role]}
               </div>
             ) : null}
-          </div>
+          </>
         )}
       </div>
 
-      {config.yourRank === null && !dead && !escaped ? (
+      {!config.yourAward && !dead && !escaped ? (
         <div className="text-center text-[10px] text-text-dim">
           Fight it in its lair. Look for the glowing door in town.
         </div>
@@ -350,13 +356,16 @@ export function makeDebugBoss(): GameEvent {
     maxHp: 100_000,
     killed: false,
     escaped: false,
-    topDealers: [
-      { name: "herzie1", damage: 412, rank: 1 },
-      { name: "herzie2", damage: 288, rank: 2 },
-      { name: "herzie3", damage: 190, rank: 3 },
+    awards: [
+      { role: "dps", name: "herzie1", share: 0.34 },
+      { role: "tank", name: "herzie2", share: 0.71 },
+      { role: "support", name: "herzie3", share: 0.52 },
     ],
-    yourDamage: 64,
-    yourRank: 7,
+    yourAward: { role: "support", rank: 2, of: 4 },
+    // For apps from before awards.
+    topDealers: [],
+    yourDamage: 0,
+    yourRank: null,
   };
 
   return {
@@ -375,7 +384,8 @@ export function makeDebugBoss(): GameEvent {
 /**
  * The "?" that sits in the boss's header: what the raid is, and what it
  * pays — the same reward for everyone still in the fight when it falls
- * (the top contributor gets their statue in town, not more loot).
+ * (each award's winner goes up on the statue in town, and wins its title
+ * the first time, not more loot).
  */
 export function BossFightHelp({ event }: { event: GameEvent }) {
   const config = event.config as unknown as BossFightView;
@@ -408,22 +418,12 @@ export function BossFightHelp({ event }: { event: GameEvent }) {
           bring it down together. Knocked out, you wait for a Bard to play you
           back up, or leave without a reward. Percussionists take turns holding
           it with Taunt. It hates music: keep some playing for a class bonus.
-          Everyone still in when it falls gets the reward; the top contributor
-          gets a statue in town.
+          Everyone still in when it falls gets the reward. The best Big Hitter,
+          Soundproof and Lifesaver go up on the statue in town; each award's
+          first win earns its title.
         </>
       }
       rewards={rewards}
     />
-  );
-}
-
-/** What a herzie healed or blocked, after its damage — when there's any. */
-function Heal({ amount }: { amount?: number }) {
-  if (!amount) return null;
-  return (
-    <span className="text-green" title="Healed + blocked">
-      {" "}
-      +{amount.toLocaleString()}
-    </span>
   );
 }

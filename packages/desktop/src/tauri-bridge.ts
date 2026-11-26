@@ -1,5 +1,6 @@
 import type {
   ActiveMultiplier,
+  ClassRole,
   CrystalPayoutItem,
   CrystalState,
   Equipped,
@@ -637,8 +638,13 @@ export const herzies = {
       url: string;
       exp: number;
       vitals?: Vitals;
-      /** Who the Town's statue shows (older servers omit it). */
-      champion?: { name: string; look: TownLook } | null;
+      /** Who the Town's statue shows: each award's winner at the last
+       * boss fight that had one (null: nobody's won it yet; older servers
+       * omit it). */
+      champions?: Record<
+        ClassRole,
+        { name: string; look: TownLook } | null
+      > | null;
       /** For a room of your own (the Tower): which is yours. */
       instance?: string;
     }>("fetch_town_ticket", { map }),

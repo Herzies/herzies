@@ -13,7 +13,7 @@ import { notify } from "../../../lib/notices";
 import { herzies, onWindowHidden } from "../../../tauri-bridge";
 import { turnedAway } from "../airship/boarding";
 import { noteServerTime } from "../airship/skyClock";
-import { setChampion } from "../champion";
+import { setChampions } from "../champion";
 import { MOB_DELAY_MS, setDrawDelaySource } from "../combat/drawDelay";
 import { bossFight, handleBossMessage } from "../combat/fight";
 import { combat } from "../combat/state";
@@ -45,7 +45,7 @@ let ticketSource: (map: TownMapId) => Promise<TownTicket> = async (map) => {
   // Every ticket carries the herzie's health as of now.
   if (t.vitals && !bossFight.on) setVitals(t.vitals);
   // And who the statue shows.
-  setChampion(t.champion);
+  setChampions(t.champions);
   return t;
 };
 

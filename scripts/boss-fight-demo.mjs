@@ -269,20 +269,20 @@ async function main() {
   const paid = await rpc("settle_boss_fight", { p_event_id: eventId });
   console.log(C.dim(`  paid ${paid} herzies\n`));
 
-  const board = await rpc("boss_leaderboard", {
-    p_event_id: eventId,
-    p_limit: 5,
-  });
-  console.log(C.bold("  Top damage dealers:"));
-  for (const row of board) {
+  // Big Hitter's ranking (00168 boss_awards): every herzie here only deals
+  // damage.
+  const awards = await rpc("boss_awards", { p_event: eventId });
+  console.log(C.bold("  Big Hitter:"));
+  for (const row of awards.filter((a) => a.role === "dps").slice(0, 5)) {
     const inv = (
       await rest(`herzies?user_id=eq.${row.user_id}&select=inventory_v2`)
     )[0].inventory_v2;
     const count = Object.values(inv).reduce((a, b) => a + b, 0);
-    const tier = row.rank <= 3 ? C.yellow("  + gold variant") : "";
+    const name = players.find((p) => p.id === row.user_id)?.name ?? "?";
+    const won = row.won ? C.yellow("  won the award") : "";
     console.log(
-      `    ${row.rank}  ${row.name.padEnd(9)} ${String(Math.round(row.damage)).padStart(4)}` +
-        `   ${C.dim(`${count}x item`)}${tier}`,
+      `    ${row.rank}  ${name.padEnd(9)} ${String(Math.round(row.points)).padStart(4)}` +
+        `   ${C.dim(`${count}x item`)}${won}`,
     );
   }
 
