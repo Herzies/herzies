@@ -49,7 +49,9 @@ import {
   EQUIPPED_SLOTS,
   type Equipped,
   type GroundSide,
+  getItemSet,
   groundSlot,
+  isSetFullyEquipped,
 } from "./items.js";
 import { settleThread, type ThreadRig } from "./thread-physics.js";
 import type { TieRig } from "./tie-physics.js";
@@ -290,6 +292,9 @@ export interface Sphere {
    * pipe's bowl (its wisps and puffs) or the stem at the mouth (what's
    * blown out). See gl/pipeSmoke.ts. */
   smoke?: "bowl" | "mouth";
+  /** Where the Streetsmart set's bubbles come from: the tip of its vape.
+   * See gl/setShimmer.ts. */
+  bubbles?: true;
   /** Part of a prop the 3D renderer draws as a model of its own (see
    * gl/props.ts) rather than as these spheres, which only the ray caster
    * draws. Every sphere of the prop shares the one object. */
@@ -2340,13 +2345,18 @@ function buildFedoraSpheres(spheres: Sphere[]): Sphere[] {
   return result;
 }
 
-/** Hipster Moustache (the Streetsmart set): a waxed brown handlebar under
- * the eyes, fullest at the middle, thinning out to either side and curling
- * up at the tips. Laid on the head's front, measured off its eyes as the
+/** Hipster Moustache (the Streetsmart set): a waxed brown handlebar on the
+ * upper lip, under the eyes: fullest either side of a clear parting, each
+ * half running out a little down and thinning, then curling up at its tip
+ * in a neat hook. Laid on the head's front, measured off its eyes as the
  * Sailor's walrus is. The 3D view draws it as one model (gl/props.ts:
  * waxed, so smooth along its lower edge); the ray caster gets capsules
- * along it. */
-function buildHipsterMoustacheSpheres(spheres: Sphere[]): Sphere[] {
+ * along it. With the whole set on, a vape is clenched at one corner of the
+ * mouth under it (buildStreetsmartVapeSpheres). */
+function buildHipsterMoustacheSpheres(
+  spheres: Sphere[],
+  vape: boolean,
+): Sphere[] {
   const head = largestPart(spheres, "head");
   const eyes = spheres.filter((s) => s.part === "eye");
   if (!head || eyes.length < 2) return [];
@@ -2355,30 +2365,54 @@ function buildHipsterMoustacheSpheres(spheres: Sphere[]): Sphere[] {
   const er = Math.max(...eyes.map((e) => e.radius));
   const eyeBottom = Math.max(...eyes.map((e) => e.center[1] + e.radius));
   const xs = eyes.map((e) => e.center[0]);
-  // Half its span: a little wider than the eyes, but kept on the face.
-  const span = Math.min(
-    (Math.max(...xs) - Math.min(...xs)) * 0.62 + er * 0.5,
-    hr * 0.62,
-  );
-  // Under the eyes, with room to breathe.
-  const y0 = eyeBottom + er * 0.85;
-  // `u` −1 (one tip) through 0 (the middle) to 1: out from the middle,
-  // sagging a touch, then sweeping up and in at either end.
-  const SEGMENTS = 20;
+  const spread = (Math.max(...xs) - Math.min(...xs)) / 2;
+  /** The point on the head's front over (x, y), moved `out` along its
+   * normal (as the Sailor's walrus is laid on). */
+  const onFace = (x: number, y: number, out: number): V3 => {
+    const dx = x - hx;
+    const dy = y - hy;
+    const dz = -Math.sqrt(Math.max(0, hr * hr - dx * dx - dy * dy));
+    const k = (hr + out) / hr;
+    return [hx + dx * k, hy + dy * k, hz + dz * k];
+  };
+  // Each half: a bar out from the parting to under the eye, then a curl of
+  // `curlR` round and up, ending pointing back in. Kept on the face.
+  const curlR = er * 0.38;
+  const bar = Math.min(spread * 0.95 + er * 0.1, hr * 0.62 - curlR);
+  const CURL = Math.PI * 0.95;
+  const curlLength = curlR * CURL;
+  const whole = bar + curlLength;
+  // On the upper lip: a little under the eyes, the bar sloping down as it
+  // goes out.
+  const y0 = eyeBottom + er * 0.7;
+  const drop = er * 0.3;
+  /** Along one half, `s` 0 (the parting) to 1 (the tip): where, as an
+   * offset from the parting (x out to the side). */
+  const halfAt = (s: number): [number, number] => {
+    const d = s * whole;
+    if (d <= bar) {
+      const a = d / bar;
+      return [a * bar, drop * a * a];
+    }
+    const th = ((d - bar) / curlLength) * CURL;
+    return [bar + curlR * Math.sin(th), drop - curlR + curlR * Math.cos(th)];
+  };
+  // Fullest just out from the parting, thinning steadily to a fine tip.
+  const thick = (s: number) =>
+    er *
+    (0.08 + 0.58 * (1 - s) ** 1.5) *
+    (1 - 0.25 * Math.exp(-((s / 0.07) ** 2)));
+  const HALF = 14;
   const along: { at: V3; r: number }[] = [];
-  for (let i = 0; i <= SEGMENTS; i++) {
-    const u = (i / SEGMENTS) * 2 - 1;
-    const t = Math.abs(u);
-    const curl = Math.max(0, (t - 0.6) / 0.4);
-    const x = span * (u - Math.sign(u) * 0.12 * curl ** 3);
-    const y =
-      y0 + er * 0.25 * Math.sin(Math.PI * t * 0.8) - er * 1.05 * curl ** 2;
-    const r = er * (0.6 - 0.44 * t ** 0.7);
-    along.push({ at: [hx + x, y, hz + eyeZ(hr, x, y - hy, r * 1.2)], r });
+  for (let i = -HALF; i <= HALF; i++) {
+    const s = Math.abs(i) / HALF;
+    const [x, dy] = halfAt(s);
+    const r = thick(s);
+    along.push({ at: onFace(hx + Math.sign(i) * x, y0 + dy, r * 0.55), r });
   }
-  const BROWN = "#2E1C12";
-  const TIPS = "#3D2618";
-  const middle = along[SEGMENTS / 2].at;
+  const BROWN = "#3A2416";
+  const TIPS = "#4A3020";
+  const middle = along[HALF].at;
   const prop: MoustacheProp = {
     kind: "moustache",
     center: middle,
@@ -2390,15 +2424,59 @@ function buildHipsterMoustacheSpheres(spheres: Sphere[]): Sphere[] {
     waxed: true,
   };
   const result: Sphere[] = [];
-  for (let i = 0; i < SEGMENTS; i++) {
+  for (let i = 0; i < along.length - 1; i++) {
     const a = along[i];
     const b = along[i + 1];
-    const tip = i < 3 || i >= SEGMENTS - 3;
+    const tip = i < 3 || i >= along.length - 4;
     const s = capsuleBetween(a.at, b.at, (a.r + b.r) / 2, tip ? TIPS : BROWN);
     s.prop = prop;
     result.push(s);
   }
+  if (vape) {
+    // At the corner of the mouth on the herzie's right (the viewer's left),
+    // tucked under the moustache part way out.
+    const [cx, cdy] = halfAt(0.4);
+    const corner = onFace(hx - cx, y0 + cdy + thick(0.4) * 0.8, -er * 0.05);
+    result.push(...buildStreetsmartVapeSpheres(corner, er));
+  }
   return result;
+}
+
+/** The Streetsmart set's vape: a slim matte-brown pen clenched at `corner`
+ * (the corner of the mouth, under the moustache), poking out of the face,
+ * a little down and out to the side, with a cream mouthpiece and a brushed
+ * metal cap at its end, where the set's bubbles come from (Sphere.bubbles). */
+function buildStreetsmartVapeSpheres(corner: V3, er: number): Sphere[] {
+  const side = -1;
+  const way: V3 = [side * er * 1.15, er * 0.6, -er * 1.7];
+  const at = (k: number): V3 => [
+    corner[0] + way[0] * k,
+    corner[1] + way[1] * k,
+    corner[2] + way[2] * k,
+  ];
+  const length = Math.hypot(...way);
+  const capHalf = er * 0.1;
+  const mouthpiece = capsuleBetween(at(0), at(0.2), er * 0.14, "#E8D9C2");
+  const body = capsuleBetween(at(0.18), at(0.92), er * 0.2, "#3B2A22");
+  const end = at(1);
+  const cap: Sphere = {
+    center: end,
+    radius: er * 0.21,
+    zone: "wearable",
+    part: "head",
+    color: "#D9C7A8",
+    finish: "metal",
+    shape: {
+      kind: "cylinder",
+      axis: [
+        (way[0] / length) * capHalf,
+        (way[1] / length) * capHalf,
+        (way[2] / length) * capHalf,
+      ],
+    },
+    bubbles: true,
+  };
+  return [mouthpiece, body, cap];
 }
 
 /** Plutus' Crown: a gold band sat on top of the head round a domed red
@@ -4657,7 +4735,10 @@ function appendWearableSpheres(
     spheres.push(...buildSailorsPackSpheres(spheres));
   }
   if (equipped.face === "hipster-moustache") {
-    spheres.push(...buildHipsterMoustacheSpheres(spheres));
+    // Its set (Streetsmart) worn in full: with a vape under it.
+    const set = getItemSet("hipster-moustache");
+    const vape = !!set && isSetFullyEquipped(equipped, set);
+    spheres.push(...buildHipsterMoustacheSpheres(spheres, vape));
   }
   if (equipped.head === "headphones") {
     spheres.push(...buildHeadphoneSpheres(spheres));

@@ -3,21 +3,23 @@ import { GLASS_ORDER } from "./herzieMaterial.js";
 
 /*
  * A full set's shimmer (ItemSet.shimmer): sparkles shed from the herzie's
- * body in the set's two colours, or bubbles rising round it (`style`).
- * Made to sit in the background: noticed by whoever's looking, never in
- * the way.
+ * body in the set's two colours, or bubbles (`style`) trickling from a
+ * point on it (the Streetsmart vape's tip). Made to sit in the background:
+ * noticed by whoever's looking, never in the way.
  *
  * Same family as the Evasive Pair's sparkles (shoeSparkles.ts):
- * - Emitted on a shell round the body, and then they live in the world, not
- *   on the herzie. Each is born carrying a share of the herzie's own
- *   velocity, then slowed by the air, so a moving herzie leaves a glittering
- *   wake behind it and a still one has a gentle halo that drifts up.
+ * - Emitted on a shell round the body (or at the emitter), and then they
+ *   live in the world, not on the herzie. Each is born carrying a share of
+ *   the herzie's own velocity, then slowed by the air, so a moving herzie
+ *   leaves a glittering wake behind it and a still one has a gentle halo
+ *   that drifts up.
  * - Fade in and out smoothly and twinkle with a sine, never on/off, so
  *   nothing pops (a bubble's pop at the top is the one exception). Sizes
  *   are in the herzie's height; a sparkle that would be under two pixels
  *   stays two pixels and dims instead of flickering out.
- * - Drawn after the glass body, so the skin and the set's solid parts never
- *   hide it.
+ * - Sparkles are drawn after the glass body and over it, so the skin and
+ *   the set's solid parts never hide them; bubbles, from the face, go
+ *   behind the head when it's turned away.
  * - Runs on a wall clock when the herzie is paused, so previews still glitter.
  *
  * One pooled Points object per herzie; nothing is allocated per frame.
@@ -42,9 +44,9 @@ interface Motion {
   drag: number;
   /** Upward pull, heights/second². */
   lift: number;
-  /** Born between these heights (share of the herzie's). */
-  from: number;
-  to: number;
+  /** Born on a shell round the body between these heights (share of the
+   * herzie's); without one, at the emitter. */
+  shell?: { from: number; to: number };
   /** Seconds alive: `life` plus up to `lifeJitter`. */
   life: number;
   lifeJitter: number;
@@ -58,26 +60,24 @@ const SPARKLE: Motion = {
   inherit: 0.55,
   drag: 1.8,
   lift: 0.12,
-  from: 0.08,
-  to: 0.98,
+  shell: { from: 0.08, to: 0.98 },
   life: 1.3,
   lifeJitter: 1.1,
   size: 0.045,
 };
 
-/** Bubbles (the Streetsmart set's milk froth): fewer and bigger, born low
- * and wobbling slowly up past the crown, where they pop. */
+/** Bubbles (the Streetsmart set's milk froth, from its vape): a sparse
+ * trickle of small ones, a couple a second, wobbling up and off and
+ * popping soon after. */
 const BUBBLE: Motion = {
-  idleRate: 2.2,
-  speedRate: 3,
+  idleRate: 1.4,
+  speedRate: 0.5,
   inherit: 0.4,
-  drag: 1.2,
-  lift: 0.22,
-  from: 0.1,
-  to: 0.5,
-  life: 3.2,
-  lifeJitter: 1.6,
-  size: 0.085,
+  drag: 1.4,
+  lift: 0.12,
+  life: 1.1,
+  lifeJitter: 0.7,
+  size: 0.032,
 };
 
 export interface ShimmerColors {
@@ -121,11 +121,14 @@ export class SetShimmer {
   private wall = 0;
   private root: THREE.Object3D | null = null;
 
-  /** `height` and `width`: the herzie's, in root units. */
+  /** `height` and `width`: the herzie's, in root units. `emitter`: where
+   * they're born, instead of on a shell round the body (style "bubble"
+   * needs one). */
   constructor(
     colors: ShimmerColors,
     private readonly height: number,
     private readonly width: number,
+    private readonly emitter: THREE.Object3D | null = null,
   ) {
     this.bubbles = colors.style === "bubble";
     this.motion = this.bubbles ? BUBBLE : SPARKLE;
@@ -222,7 +225,7 @@ export class SetShimmer {
       `,
       transparent: true,
       depthWrite: false,
-      depthTest: false,
+      depthTest: this.bubbles,
     });
 
     this.points = new THREE.Points(this.geometry, this.material);
@@ -308,13 +311,17 @@ export class SetShimmer {
 
   private emit(root: THREE.Object3D, unit: number) {
     const m = this.motion;
-    // A point on a shell round the body, between the style's heights.
     const a = Math.random() * Math.PI * 2;
-    const h = m.from + Math.random() * (m.to - m.from);
-    const bulge = Math.sin(Math.PI * Math.min(1, h * 1.05)) * 0.5 + 0.35;
-    const r = (this.width / 2) * bulge * (1.05 + Math.random() * 0.4);
-    scratchB.set(Math.cos(a) * r, h * this.height, Math.sin(a) * r);
-    scratchB.applyMatrix4(root.matrixWorld);
+    const shell = m.shell;
+    if (shell) {
+      // A point on a shell round the body, between the style's heights.
+      const h = shell.from + Math.random() * (shell.to - shell.from);
+      const bulge = Math.sin(Math.PI * Math.min(1, h * 1.05)) * 0.5 + 0.35;
+      const r = (this.width / 2) * bulge * (1.05 + Math.random() * 0.4);
+      scratchB.set(Math.cos(a) * r, h * this.height, Math.sin(a) * r);
+      scratchB.applyMatrix4(root.matrixWorld);
+    } else if (this.emitter) this.emitter.getWorldPosition(scratchB);
+    else return;
 
     // Born sharing the herzie's motion, with a lazy swirl and a lift.
     const swirl = unit * (this.bubbles ? 0.04 : 0.12);
@@ -329,7 +336,8 @@ export class SetShimmer {
       Math.sin(a) * swirl +
       (Math.random() - 0.5) * unit * 0.05;
     this.vel[j + 1] =
-      this.velocity.y * unit * m.inherit + unit * (0.1 + Math.random() * 0.18);
+      this.velocity.y * unit * m.inherit +
+      unit * (shell ? 0.1 + Math.random() * 0.18 : 0.05 + Math.random() * 0.1);
     this.vel[j + 2] =
       this.velocity.z * unit * m.inherit +
       Math.cos(a) * swirl +

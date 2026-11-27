@@ -1682,11 +1682,18 @@ export class HerzieModel {
       this.root.add(this.smoke.points);
     }
     if (glass) this.layerOverGlass(spheres);
-    // A full set's shimmer (ItemSet.shimmer), round the herzie itself.
+    // A full set's shimmer (ItemSet.shimmer), round the herzie itself; a
+    // bubbling one from its emitter (the Streetsmart vape's tip), and none
+    // without it.
     const shimmering = ITEM_SETS.find(
       (set) => set.shimmer && isSetFullyEquipped(look.equipped, set),
     );
-    if (shimmering?.shimmer && !look.params) {
+    const emitter = this.meshes.find((_, i) => spheres[i].bubbles) ?? null;
+    if (
+      shimmering?.shimmer &&
+      !look.params &&
+      (shimmering.shimmer.style !== "bubble" || emitter)
+    ) {
       let left = Number.POSITIVE_INFINITY;
       let right = Number.NEGATIVE_INFINITY;
       for (const sp of spheres) {
@@ -1698,6 +1705,7 @@ export class HerzieModel {
         shimmering.shimmer,
         this.height,
         (right - left) * MODEL_SCALE,
+        emitter,
       );
       this.root.add(this.shimmer.group);
     }

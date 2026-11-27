@@ -427,8 +427,12 @@ function moustache(prop: MoustacheProp, paint: Paint): THREE.Group {
     const down = along.clone().cross(out).normalize();
     if (down.y < 0) down.negate();
     const radius = radiusAt(t);
-    // The parting: a dip in its top, at the middle.
-    const parting = 1 - 0.2 * Math.exp(-(((t - 0.5) / 0.03) ** 2));
+    // The parting: a dip in its top, at the middle (a waxed one's combed
+    // apart clearly).
+    const parting =
+      1 -
+      (prop.waxed ? 0.45 : 0.2) *
+        Math.exp(-(((t - 0.5) / (prop.waxed ? 0.025 : 0.03)) ** 2));
     // Tufts along its lower edge.
     const tuft = 0.55 + 0.45 * Math.cos(t * Math.PI * 2 * 11);
     const ring: THREE.Vector3[] = [];
@@ -436,14 +440,18 @@ function moustache(prop: MoustacheProp, paint: Paint): THREE.Group {
       const a = (k / MOUSTACHE_SIDES) * Math.PI * 2;
       const c = Math.cos(a);
       const s = Math.sin(a);
-      // Strands: shallow grooves running its length.
+      // Strands: shallow grooves running its length. Waxed, it's smoothed
+      // flatter against the face.
       const rho =
-        radius * (1 + 0.05 * Math.cos(a * 10)) * (s < 0 ? parting : 1);
+        radius *
+        (1 + (prop.waxed ? 0.025 : 0.05) * Math.cos(a * 10)) *
+        (s < 0 ? parting : 1);
+      const flat = prop.waxed ? 0.8 : 1;
       const hang = s > 0 && !prop.waxed ? radius * 0.45 * s ** 3 * tuft : 0;
       ring.push(
         spine
           .clone()
-          .addScaledVector(out, rho * c)
+          .addScaledVector(out, rho * c * flat)
           .addScaledVector(down, rho * s + hang),
       );
     }

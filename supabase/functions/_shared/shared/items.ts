@@ -1191,7 +1191,7 @@ export const ITEM_SETS: ItemSet[] = [
   {
     id: "streetsmart",
     name: "Streetsmart",
-    effect: "+10 luck, and milky coffee bubbles",
+    effect: "+10 luck, and a vape puffing milky coffee bubbles",
     itemIds: [
       "fisherman-beanie",
       "hipster-moustache",
