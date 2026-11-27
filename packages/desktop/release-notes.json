@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-beta.77",
+    "highlights": [
+      "boss raids now hand out three awards instead of one ranking: Big Hitter, Soundproof and Lifesaver, each with its own title",
+      "the statue in town shows all three winners now, chained off like the legends they are",
+      "new Streetsmart set! six pieces, +10 luck, and the full set comes with a little vape puffing coffee bubbles",
+      "bug fixes, UI improvements++"
+    ]
+  },
+  {
     "version": "0.1.0-beta.76",
     "highlights": [
       "the tower now features roguelite mechanics!! yeehaa",
