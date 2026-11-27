@@ -1,6 +1,6 @@
 {
   "name": "herzies-desktop",
-  "version": "0.1.0-beta.76",
+  "version": "0.1.0-beta.77",
   "private": true,
   "description": "Herzies desktop app for macOS",
   "scripts": {
@@ -13,6 +13,7 @@
     "build:showcase": "vite build --config vite.showcase.config.ts",
     "sandbox": "vite dev --port 1420 --open /sandbox.html",
     "map-editor": "vite dev --port 1420 --open /map-editor.html",
+    "raid-results": "vite dev --port 1420 --open /raid-results-preview.html",
     "test": "vitest run"
   },
   "dependencies": {

@@ -1017,16 +1017,56 @@ describe("cloaks", () => {
     h.dispose();
     expect(disposed).toBe(true);
   });
+});
 
-  it("is greyed and petrified with the rest of it", () => {
-    const h = new HerzieModel(CLOAKED);
-    const material = cloakMesh(h)?.material as THREE.ShaderMaterial;
-    const before = (
-      material.uniforms.uLining.value as THREE.Color[]
-    )[1].clone();
+describe("turned to stone (a statue)", () => {
+  /** Every part drawn in the herzie's own shading. */
+  const shaded = (h: HerzieModel) => {
+    const out: THREE.ShaderMaterial[] = [];
+    h.root.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.ShaderMaterial | undefined;
+      if ((o as THREE.Mesh).isMesh && m?.uniforms?.uShades) out.push(m);
+    });
+    return out;
+  };
+
+  it("carves everything worn, whatever its finish", () => {
+    // Fabulous Fabian's set: marble pearls, a velvet cloak, glossy shoes.
+    const h = new HerzieModel({
+      seed: "statue-test",
+      stage: 3,
+      equipped: {
+        head: "fabulous-fabian",
+        face: "ff-shades",
+        body: "ff-pearls-marble",
+        back: "ff-cloak-black",
+        feet: "ff-sneakers-black",
+        color: "ff-pink",
+        spirit: "sleptwell",
+      },
+    });
     h.petrify();
-    const after = (material.uniforms.uLining.value as THREE.Color[])[1];
-    expect(after.equals(before)).toBe(false);
+    const materials = shaded(h);
+    expect(materials.length).toBeGreaterThan(0);
+    for (const m of materials) expect(m.defines).toHaveProperty("STONE");
+  });
+
+  it("loses the Evasive Pair's sparkles", () => {
+    const h = new HerzieModel({
+      seed: "statue-test",
+      stage: 3,
+      equipped: { feet: "eivinds-evasive-pair" },
+    });
+    const points = () => {
+      let n = 0;
+      h.root.traverse((o) => {
+        if ((o as THREE.Points).isPoints) n++;
+      });
+      return n;
+    };
+    expect(points()).toBeGreaterThan(0);
+    h.petrify();
+    expect(points()).toBe(0);
   });
 });
 

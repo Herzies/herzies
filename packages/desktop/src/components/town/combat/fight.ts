@@ -1,4 +1,5 @@
 import {
+  type ClassRole,
   getItemIcon,
   ITEMS,
   isSkillId,
@@ -127,8 +128,9 @@ export const bossFight = {
   /** In the cave: the raid (its times on this machine's clock), or null
    * (the Tower, or an older server without a lobby). */
   raid: null as RaidView | null,
-  /** Your contribution so far, and its rank of the roster. */
-  tally: null as { score: number; rank: number; of: number } | null,
+  /** Your place so far in your own role's award (see AwardMine), of how
+   * many are in its ranking. */
+  standing: null as { role: ClassRole; rank: number; of: number } | null,
   /** Where the boss has been, newest last (drawn a moment behind, like a
    * mob: see {@link bossNow}). */
   bossPath: [] as { at: number; x: number; z: number; yaw: number }[],
@@ -448,7 +450,7 @@ export function resetBossFight(): void {
   bossFight.you = null;
   bossFight.tower = null;
   bossFight.raid = null;
-  bossFight.tally = null;
+  bossFight.standing = null;
   bossFight.bossPath = [];
   bossFight.say = null;
   towerMobs.clear();
@@ -529,7 +531,7 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
           bossFight.on = false;
           bossFight.shapes = [];
           bossFight.raid = null;
-          bossFight.tally = null;
+          bossFight.standing = null;
           bossFight.say = null;
           bossFight.bossPath = [];
           towerMobs.clear();
@@ -693,7 +695,7 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       return;
     case "results":
       setBossResults(
-        { outcome: m.outcome, top: m.top, you: m.you },
+        { outcome: m.outcome, awards: m.awards, mine: m.mine },
         bossFight.victory?.at ?? null,
         now,
       );
@@ -758,8 +760,8 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
         logActivity("The boss won: everyone in the raid was knocked out");
       emit();
       return;
-    case "tally":
-      bossFight.tally = { score: m.score, rank: m.rank, of: m.of };
+    case "standing":
+      bossFight.standing = { role: m.role, rank: m.rank, of: m.of };
       emitHp();
       return;
     case "bossAt":

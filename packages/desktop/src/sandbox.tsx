@@ -68,9 +68,8 @@ const WEARABLE_OPTIONS = [
   "fyllings-cape",
   "fyllings-monocle",
   "fyllings-black",
-  // The skipper's moustache and pipe, and his beanie (not an item yet).
+  // The skipper's moustache and pipe.
   "sailors-starter-pack",
-  "sailors-beanie",
   // The class sets, with their cloaks above.
   "troubadour-plume",
   "troubadour-ruff",
@@ -81,6 +80,13 @@ const WEARABLE_OPTIONS = [
   "drumhide-helm",
   "drumhide-gorget",
   "drumhide-boots",
+  // Streetsmart.
+  "fisherman-beanie",
+  "hipster-moustache",
+  "dollar-chain",
+  "camo-cloak",
+  "shiny-loafers",
+  "latte",
 ];
 
 const DEFAULT_USER = "sandbox-user";
@@ -121,7 +127,8 @@ function Sandbox() {
   const swings =
     wearables.includes("gold-chain") ||
     wearables.includes("pearl-necklace") ||
-    wearables.includes("ff-pearls-marble");
+    wearables.includes("ff-pearls-marble") ||
+    wearables.includes("dollar-chain");
   const [jsonOpen, setJsonOpen] = useState(false);
 
   const applySeed = useCallback((id: string) => {
@@ -498,7 +505,7 @@ function toEquipped(ids: string[]): Equipped {
       id === "troubadour-plume" ||
       id === "groove-cap" ||
       id === "drumhide-helm" ||
-      id === "sailors-beanie"
+      id === "fisherman-beanie"
     )
       out.head = id;
     else if (id === "clouds" || id === "stars" || id === "blood-moon")
@@ -511,20 +518,23 @@ function toEquipped(ids: string[]): Equipped {
       id === "fyllings-necktie" ||
       id === "troubadour-ruff" ||
       id === "spindle-chain" ||
-      id === "drumhide-gorget"
+      id === "drumhide-gorget" ||
+      id === "dollar-chain"
     )
       out.body = id;
     else if (
       id === "fangs" ||
       id === "ff-shades" ||
       id === "fyllings-monocle" ||
-      id === "sailors-starter-pack"
+      id === "sailors-starter-pack" ||
+      id === "hipster-moustache"
     )
       out.face = id;
     else if (
       id === "pumpkin-spice" ||
       id === "ff-pink" ||
-      id === "fyllings-black"
+      id === "fyllings-black" ||
+      id === "latte"
     )
       out.color = id;
     else if (id === "ghost" || id === "spirit-orb" || id === "sleptwell")
@@ -545,7 +555,8 @@ function toEquipped(ids: string[]): Equipped {
       id === "fyllings-loafers" ||
       id === "troubadour-slippers" ||
       id === "groove-kicks" ||
-      id === "drumhide-boots"
+      id === "drumhide-boots" ||
+      id === "shiny-loafers"
     )
       out.feet = id;
     else if (

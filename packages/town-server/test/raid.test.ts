@@ -9,6 +9,7 @@ import {
   IN_TUNE,
 } from "@herzies/shared/boss-fight";
 import { bossLineMs } from "@herzies/shared/boss-lines";
+import type { Contribution } from "@herzies/shared/combat";
 import { MAX_DAMAGE_REDUCTION, SKILL_DEFS } from "@herzies/shared/skills";
 import type {
   BossClaim,
@@ -750,6 +751,37 @@ describe("minions", () => {
     expect(of(out, "victory")).toHaveLength(1);
     expect(of(out, "mobDown")).toHaveLength(3);
     expect(boss.minionsUp).toBe(0);
+  });
+});
+
+describe("standings", () => {
+  it("each fighter hears its place in its own role, and one who did nothing hears none", () => {
+    const { f } = locked([
+      { uid: "a", cls: "bard" },
+      { uid: "b", cls: "record_slinger" },
+      { uid: "c", cls: "percussionist" },
+      { uid: "d", cls: "bard" },
+    ]);
+    // The fight's own tally is private: set it straight rather than play
+    // the hits out.
+    const room = f as unknown as { dealt: Map<string, Contribution> };
+    // "a" outdoes "b" at damage but keeps the healing it alone did, so "b"
+    // takes Big Hitter from second place. "c" did no tanking: it's placed
+    // where it did most, the damage.
+    room.dealt.set("a", { damage: 500, healing: 100, blocked: 0 });
+    room.dealt.set("b", { damage: 400, healing: 0, blocked: 0 });
+    room.dealt.set("c", { damage: 100, healing: 0, blocked: 0 });
+    const out = f.step(STARTS + 2_000);
+    const by = Object.fromEntries(
+      out
+        .filter((o) => o.msg.t === "standing")
+        .map((o) => [o.to === "all" ? "all" : o.to.uid, o.msg]),
+    );
+    expect(by).toEqual({
+      a: { t: "standing", role: "support", rank: 1, of: 1 },
+      b: { t: "standing", role: "dps", rank: 2, of: 3 },
+      c: { t: "standing", role: "dps", rank: 3, of: 3 },
+    });
   });
 });
 

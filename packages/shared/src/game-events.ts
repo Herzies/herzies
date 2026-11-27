@@ -8,8 +8,10 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
+  BossAwardLeader,
   BossDamageDealer,
   BossFightConfig,
+  ClassRole,
   GameEvent,
   MerchantConfig,
   MerchantStockView,
@@ -120,7 +122,7 @@ export async function buildSongHuntConfig(
 /**
  * Project a boss_fight event for a client.
  *
- * Live HP and the leaderboard live in `boss_state` / `boss_damage`, both of
+ * Live HP and the awards live in `boss_state` / `boss_damage`, both of
  * which have SELECT revoked from anon and authenticated (00073, same posture
  * as the events lockdown in 00016). Everything a client sees about a boss
  * comes through here, on the service-role client.
@@ -130,7 +132,6 @@ export async function buildBossFightConfig(
   eventId: string,
   config: BossFightConfig,
   userId: string | null = null,
-  topCount: number = 3,
 ): Promise<Record<string, unknown>> {
   const { data: state } = await admin
     .from("boss_state")
@@ -138,48 +139,31 @@ export async function buildBossFightConfig(
     .eq("event_id", eventId)
     .maybeSingle();
 
-  const { data: board } = await admin.rpc("boss_leaderboard", {
-    p_event_id: eventId,
-    p_limit: topCount,
+  // Each award's leader as the fight stands, and the caller's own place
+  // (00168 boss_results_json): the line that makes the card feel personal.
+  const { data } = await admin.rpc("boss_results_json", {
+    p_event: eventId,
+    p_uids: userId ? [userId] : [],
   });
-
-  // Ranked by contribution: damage, plus healing and blocking (00111).
-  const topDealers: BossDamageDealer[] = (
-    (board ?? []) as {
-      name: string;
-      damage: number;
-      heal?: number;
-      rank: number;
-    }[]
-  ).map((r) => ({
-    name: r.name ?? "Unknown",
-    damage: Math.round(r.damage),
-    heal: Math.round(r.heal ?? 0),
-    rank: Number(r.rank),
-  }));
-
-  // The caller's own place is a separate read: they are very often not in
-  // the top N, and "you: 64" is the line that makes the board feel personal.
-  // boss_results_json ranks them as the board does.
-  let yourDamage = 0;
-  let yourHeal = 0;
-  let yourRank: number | null = null;
-  if (userId) {
-    const { data: table } = await admin.rpc("boss_results_json", {
-      p_event: eventId,
-      p_uids: [userId],
-    });
-    const mine = (
-      table as {
-        you?: Record<string, { rank: number; damage: number; heal: number }>;
-      } | null
-    )?.you?.[userId];
-    if (mine) {
-      yourDamage = Math.round(mine.damage);
-      yourHeal = Math.round(mine.heal ?? 0);
-      yourRank = Number(mine.rank);
-    }
-  }
+  const table = data as {
+    awards?: {
+      role: ClassRole;
+      winner: { name: string; share: number } | null;
+    }[];
+    you?: Record<
+      string,
+      { role: ClassRole; place: { rank: number }; of: number }
+    >;
+  } | null;
+  const awards: BossAwardLeader[] = (table?.awards ?? []).flatMap((a) =>
+    a.winner
+      ? [{ role: a.role, name: a.winner.name, share: a.winner.share }]
+      : [],
+  );
+  const mine = userId ? table?.you?.[userId] : undefined;
+  const yourAward = mine
+    ? { role: mine.role, rank: Number(mine.place.rank), of: Number(mine.of) }
+    : null;
 
   const killed = state?.killed ?? false;
 
@@ -196,10 +180,13 @@ export async function buildBossFightConfig(
     maxHp: state?.max_hp ?? config.maxHp ?? 0,
     killed,
     escaped: state?.escaped ?? false,
-    topDealers,
-    yourDamage,
-    yourHeal,
-    yourRank,
+    awards,
+    yourAward,
+    // For apps from before awards: their board says nobody's hurt it.
+    topDealers: [] as BossDamageDealer[],
+    yourDamage: 0,
+    yourHeal: 0,
+    yourRank: null,
   };
 }
 

@@ -875,21 +875,32 @@ Deno.serve(async (request) => {
     : await handlePlayer(request, body);
 });
 
-/** The end screen's top three come with their looks, as the database has
- * them: made into looks as others see them out walking (no ground
- * accessories), like the statue's in town-ticket. */
+/** Each award's winner comes with its look, as the database has it: made
+ * into a look as others see it out walking (no ground accessories), like
+ * the statue's in town-ticket. */
 function podiumLooks(table: unknown): unknown {
-  const t = table as { top?: Record<string, unknown>[] } | null;
-  if (!t?.top) return table;
+  const t = table as { awards?: { winner?: unknown }[] } | null;
+  if (!t?.awards) return table;
   return {
     ...t,
-    top: t.top.map(({ seed, stage, equipped, ...place }) => {
+    awards: t.awards.map((award) => {
+      if (!award.winner) return award;
+      const { seed, stage, equipped, ...place } = award.winner as Record<
+        string,
+        unknown
+      >;
       const { ground_left: _l, ground_right: _r, ...worn } = normalizeEquipped(
         equipped,
       );
-      return typeof seed === "string"
-        ? { ...place, look: { seed, stage: Number(stage) || 1, equipped: worn } }
-        : place;
+      return {
+        ...award,
+        winner: typeof seed === "string"
+          ? {
+            ...place,
+            look: { seed, stage: Number(stage) || 1, equipped: worn },
+          }
+          : place,
+      };
     }),
   };
 }

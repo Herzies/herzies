@@ -1071,10 +1071,17 @@ function InventoryViewImpl({
 
     const handlePointerUp = (e: PointerEvent) => {
       const state = dragRef.current;
+      // Not a press of ours: leave the hotbar alone. This listener is on the
+      // window for every pointerup, and the other drags to the hotbar
+      // (useDragToHotbar) listen on it too, registered after this one; were
+      // this to drop the hotbar back under the windows, React would commit it
+      // in the microtask between the two listeners, and theirs would hit-test
+      // the window over a covered slot instead of the slot.
+      if (!state) return;
       dragRef.current = null;
       setDragVisual(null);
       setHotbarDrag(null);
-      if (!state?.dragging) return;
+      if (!state.dragging) return;
       // Any drag that got this far ends in a click the item must not act on —
       // including one let go over the slot it started on, which is "picked it
       // up and put it back", not a request to equip. What keeps a click with a

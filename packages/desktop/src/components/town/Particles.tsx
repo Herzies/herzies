@@ -757,6 +757,7 @@ function SnowPrints({ map }: { map: TownMap }) {
         feet.z,
         seasonNow.look.snow,
         t,
+        rt.playerHerzie?.anim.walkPhase ?? 0,
       );
     }
     const mesh = ref.current;

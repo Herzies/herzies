@@ -99,7 +99,7 @@ import {
   townSave,
   useTownMap,
 } from "./runtime";
-import type { Champion } from "./Statues";
+import type { Champions } from "./Statues";
 import { Supersample } from "./Supersample";
 import { chestInReach, openChest, TowerChest } from "./TowerChest";
 import { Visitor, VisitorBody } from "./Visitor";
@@ -173,9 +173,9 @@ export type TownCanvasProps = {
   others?: TownMap[];
   /** Bump to put the player back at the map's spawn. */
   respawn?: number;
-  /** Who the statues show: the last boss fight's champion (a stand-in
-   * until there's one). */
-  champion?: Champion;
+  /** Who the statues show: each award's last winner (stand-ins until
+   * there are some). */
+  champions?: Champions;
   /** Show the world at this hour (default: the local clock). */
   hour?: Hour;
   /** Show the world at this time of year (default: the calendar). */
@@ -308,7 +308,7 @@ export default function TownCanvas(props: TownCanvasProps) {
           <World
             map={view}
             others={props.others}
-            champion={props.champion}
+            champions={props.champions}
             hour={props.hour}
             season={props.season}
             shadows={shadows}

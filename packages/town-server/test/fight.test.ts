@@ -1,11 +1,18 @@
-import type { ServerMessage, TownTicketPayload } from "@herzies/shared/town-net";
+import type {
+  AwardBoard,
+  AwardPlace,
+  ServerMessage,
+  TownTicketPayload,
+} from "@herzies/shared/town-net";
 import { armed } from "./arms";
 import { describe, expect, it } from "vitest";
 import {
   aimDirection,
   bossReaches,
+  type Contribution,
   DISC_RANGE,
   DISC_SPEED,
+  tauntPointsPerSecond,
   WAVE_HAND_HEIGHT,
   WAVE_SPEED,
 } from "@herzies/shared/combat";
@@ -15,6 +22,7 @@ import {
   FightRuntime,
   type Outbound,
   REPORT_EVERY_MS,
+  type ResultsTable,
   VICTORY_LINGER_MS,
 } from "../src/fight";
 
@@ -347,12 +355,20 @@ describe("the end screen", () => {
     yaw: Math.atan2(0, TUNING.boss.z - 8),
     pitch: Math.atan2(TUNING.boss.chest - 1.2, Math.abs(TUNING.boss.z - 8)),
   };
-  const place = (rank: number, name: string) => ({
+  const place = (rank: number, name: string): AwardPlace => ({
     rank,
     name,
+    share: 0.5,
     damage: 100,
-    heal: 0,
+    healed: 0,
+    blocked: 0,
+    tanked: 0,
   });
+  const empty: AwardBoard[] = [
+    { role: "dps", winner: null, top: [] },
+    { role: "tank", winner: null, top: [] },
+    { role: "support", winner: null, top: [] },
+  ];
 
   it("is asked for once the boss falls, never before", () => {
     const f = new FightRuntime(claim({ hp: 40 }), T0);
@@ -391,7 +407,7 @@ describe("the end screen", () => {
     expect(last?.results?.uids).toEqual(["a"]);
   });
 
-  it("goes to each herzie still here, with their own place, once", () => {
+  it("goes to each herzie still here, with the awards and their own result, once", () => {
     const f = new FightRuntime(claim({ hp: 40 }), T0);
     for (const [uid, id] of [["a", 1], ["b", 2], ["c", 3]] as const)
       f.join(uid, id, ticket(uid), { x: 0, z: 8 }, T0 - 5_000);
@@ -400,18 +416,26 @@ describe("the end screen", () => {
     f.step(T0 + 1_000);
     f.leave("c");
     const top = [place(1, "a"), place(2, "c")];
-    const out = f.results({ top, you: { a: top[0], c: top[1] } });
+    const awards: AwardBoard[] = [
+      { role: "dps", winner: { ...top[0], look: { seed: "s", stage: 2 } }, top },
+      ...empty.slice(1),
+    ];
+    const mine = { role: "dps" as const, won: true, place: top[0] };
+    const out = f.results({
+      awards,
+      you: { a: mine, c: { role: "dps", won: false, place: top[1] } },
+    });
     expect(out).toEqual([
       {
         to: { uid: "a" },
-        msg: { t: "results", outcome: "victory", top, you: top[0] },
+        msg: { t: "results", outcome: "victory", awards, mine },
       },
       {
         to: { uid: "b" },
-        msg: { t: "results", outcome: "victory", top, you: null },
+        msg: { t: "results", outcome: "victory", awards, mine: null },
       },
     ]);
-    expect(f.results({ top, you: {} })).toEqual([]);
+    expect(f.results({ awards, you: {} })).toEqual([]);
     // And it isn't asked for again.
     expect(f.report(T0 + 5_000, true)?.results).toBeUndefined();
   });
@@ -421,10 +445,10 @@ describe("the end screen", () => {
     f.join("a", 1, ticket("a"), { x: 0, z: 8 }, T0);
     run(f, T0, T0 + 11_000);
     expect(f.report(T0 + 11_000, true)?.results?.uids).toEqual(["a"]);
-    expect(f.results({ top: [], you: {} })).toEqual([
+    expect(f.results({ awards: empty, you: {} })).toEqual([
       {
         to: { uid: "a" },
-        msg: { t: "results", outcome: "defeat", top: [], you: null },
+        msg: { t: "results", outcome: "defeat", awards: empty, mine: null },
       },
     ]);
   });
@@ -432,7 +456,7 @@ describe("the end screen", () => {
   it("nothing to ask before it's over", () => {
     const f = new FightRuntime(claim(), T0);
     f.join("a", 1, ticket("a"), { x: 0, z: 8 }, T0);
-    expect(f.results({ top: [], you: {} })).toEqual([]);
+    expect(f.results({ awards: empty, you: {} })).toEqual([]);
   });
 
   it("the local-dev boss's comes from the room itself", () => {
@@ -446,12 +470,47 @@ describe("the end screen", () => {
     expect(res[0].msg).toMatchObject({
       t: "results",
       outcome: "victory",
-      top: [{ rank: 1, name: "a" }],
-      you: { rank: 1, name: "a" },
+      awards: [
+        { role: "dps", winner: { rank: 1, name: "a", share: 1 } },
+        { role: "tank", winner: null, top: [] },
+        { role: "support", winner: null, top: [] },
+      ],
+      mine: { role: "dps", won: true, place: { rank: 1, name: "a" } },
     });
-    expect(res[1].msg).toMatchObject({ you: null });
+    expect(res[1].msg).toMatchObject({ mine: null });
     expect(f.report(T0 + 2_000, true)?.results).toBeUndefined();
     expect(msgs(f.step(T0 + 2_000), "results")).toEqual([]);
+  });
+
+  it("the local-dev boss's gives each herzie one award at most, in its numbers", () => {
+    const f = new FightRuntime(claim({ event: "dev" }), T0);
+    f.join("a", 1, ticket("a"), { x: 0, z: 8 }, T0);
+    f.join("b", 2, ticket("b"), { x: 2, z: 8 }, T0);
+    f.join("c", 3, ticket("c", 200, { cls: "percussionist" }), { x: 4, z: 8 }, T0);
+    const perSecond = tauntPointsPerSecond(f.engine.maxHp, 3);
+    const dev = f as unknown as {
+      devDealt: Map<string, Contribution>;
+      devTable(): ResultsTable;
+    };
+    // "a" leads both damage and healing: it keeps the one it led by more.
+    dev.devDealt.set("a", { damage: 900.4, healing: 100, blocked: 0 });
+    dev.devDealt.set("b", { damage: 100, healing: 50, blocked: 0 });
+    dev.devDealt.set("c", { damage: 0, healing: 0, blocked: 3, taunt: 10 * perSecond });
+    const { awards, you } = dev.devTable();
+    expect(awards.map((a) => [a.role, a.winner?.name])).toEqual([
+      ["dps", "a"],
+      ["tank", "c"],
+      ["support", "b"],
+    ]);
+    expect(awards[0].winner).toMatchObject({ damage: 900, look: { seed: "s" } });
+    expect(awards[1].winner).toMatchObject({ blocked: 3, tanked: 10, share: 1 });
+    expect(awards[2].top.map((p) => [p.rank, p.name])).toEqual([
+      [1, "a"],
+      [2, "b"],
+    ]);
+    expect(you.a).toMatchObject({ role: "dps", won: true });
+    expect(you.b).toMatchObject({ role: "support", won: true, place: { rank: 2 } });
+    expect(you.c).toMatchObject({ role: "tank", won: true });
   });
 });
 

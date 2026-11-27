@@ -11,6 +11,13 @@ export function formatAmount(n: number): string {
     .replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
+/** A place as said aloud: 1st, 2nd, 3rd, 4th, 11th, 21st. */
+export function ordinal(n: number): string {
+  const tens = n % 100;
+  if (tens >= 11 && tens <= 13) return `${n}th`;
+  return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
+}
+
 /**
  * Formats a minor-unit amount in whatever currency Stripe reports, so nothing
  * client-side has to assume NOK — switching the store to USD or EUR is then a

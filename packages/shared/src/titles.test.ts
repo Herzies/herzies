@@ -11,34 +11,49 @@ import { GENRES } from "./types.js";
 
 describe("the titles catalog", () => {
   it("matches the titles table refresh_titles grants from", () => {
-    const sql = readFileSync(
-      new URL(
-        "../../../supabase/migrations/00152_titles_duels_loadouts.sql",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    const seed = sql.slice(
-      sql.indexOf("insert into public.titles"),
-      sql.indexOf("on conflict (id) do update"),
-    );
-    const rows = [
-      ...seed.matchAll(
+    // Each migration's seed in turn, a later row for an id replacing the
+    // earlier one (as its `on conflict` does).
+    type Row = {
+      id: string;
+      metric: string | null;
+      goal: number | null;
+      retired: boolean;
+    };
+    const table = new Map<string, Row>();
+    for (const file of [
+      "00152_titles_duels_loadouts.sql",
+      "00168_boss_awards.sql",
+    ]) {
+      const sql = readFileSync(
+        new URL(`../../../supabase/migrations/${file}`, import.meta.url),
+        "utf8",
+      );
+      const seed = sql.slice(
+        sql.indexOf("insert into public.titles"),
+        sql.indexOf("on conflict (id) do update"),
+      );
+      for (const [, id, metric, goal, retired] of seed.matchAll(
         /\('([a-z0-9-]+)', (?:'([a-zA-Z]+)'|null), (\d+|null), (true|false)\)/g,
-      ),
-    ].map(([, id, metric, goal, retired]) => ({
-      id,
-      metric: metric ?? null,
-      goal: goal === "null" ? null : Number(goal),
-      retired: retired === "true",
-    }));
-    expect(rows).toEqual(
-      TITLES.map((t: TitleDef) => ({
-        id: t.id,
-        metric: t.metric ?? null,
-        goal: t.goal ?? null,
-        retired: t.retired === true,
-      })),
+      )) {
+        table.set(id, {
+          id,
+          metric: metric ?? null,
+          goal: goal === "null" ? null : Number(goal),
+          retired: retired === "true",
+        });
+      }
+    }
+    expect(
+      [...table.values()].sort((a, b) => a.id.localeCompare(b.id)),
+    ).toEqual(
+      TITLES.map(
+        (t: TitleDef): Row => ({
+          id: t.id,
+          metric: t.metric ?? null,
+          goal: t.goal ?? null,
+          retired: t.retired === true,
+        }),
+      ).sort((a, b) => a.id.localeCompare(b.id)),
     );
   });
 

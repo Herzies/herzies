@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { hold, isCovering } from "@/components/page-loader/store";
 import { afterPaint } from "@/components/page-loader/useLoaderHold";
-import type { ShowcaseChampion } from "@/lib/town-champion";
+import type { ShowcaseChampions } from "@/lib/town-champion";
 
 /** Built by `pnpm showcase` (the desktop app's Town, see
  * packages/desktop/src/showcase). */
@@ -14,7 +14,8 @@ type ShowcaseModule = {
     el: HTMLElement,
     opts: {
       server?: string;
-      champion?: ShowcaseChampion;
+      /** The statue's herzies, by the award each won. */
+      champions?: ShowcaseChampions;
       onReady?: () => void;
     },
   ) => Promise<() => void>;
@@ -28,11 +29,12 @@ type ShowcaseModule = {
  */
 export function TownBackdrop({
   server,
-  champion,
+  champions,
 }: {
   /** The Town server to watch (wss://…). */
   server: string;
-  champion: ShowcaseChampion | null;
+  /** The statue's herzies, by the award each won (stand-ins for the rest). */
+  champions: ShowcaseChampions;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
@@ -53,7 +55,7 @@ export function TownBackdrop({
       .then((m: ShowcaseModule) =>
         m.mountTownShowcase(el, {
           server,
-          champion: champion ?? undefined,
+          champions,
           onReady: () => {
             if (cancelled) return;
             setInstant(isCovering());
@@ -76,7 +78,7 @@ export function TownBackdrop({
       release();
       unmount?.();
     };
-  }, [server, champion]);
+  }, [server, champions]);
 
   // iOS Safari tints its bars from fixed elements at the screen's edges
   // (it ignores theme-color): the backdrop itself has no colour of its own

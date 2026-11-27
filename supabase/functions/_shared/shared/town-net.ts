@@ -16,6 +16,7 @@
  * Kept free of React and the DOM: this file is bundled into the Worker and
  * vendored into the Deno edge functions.
  */
+import type { ClassRole } from "./classes.ts";
 import type { CreatureParams } from "./creature-params.ts";
 import type { Equipped } from "./items.ts";
 import type { TowerBoon } from "./tower.ts";
@@ -30,10 +31,10 @@ import type {
 /** Bumped on any incompatible change; the server turns away other versions
  * with {@link TOWN_CLOSE.outdated} so old desktop betas say "update" instead of
  * misreading frames. */
-export const TOWN_PROTOCOL = 6;
-// 6: the sky ship to the Wilds (the `airship` map, a room for its deck) and
-// free-for-all PvP on the Wilds. An app from before can't ride a ship or
-// fight there.
+export const TOWN_PROTOCOL = 7;
+// 7: a boss fight hands out awards (Big Hitter, Soundproof, Lifesaver)
+// instead of one ranking: `results` carries them, and `standing` (your
+// place in your own role) replaces `tally`.
 
 /** Server snapshot rate. */
 export const TOWN_TICK_HZ = 15;
@@ -946,16 +947,40 @@ export type TowerFloor = {
 /** One piece of boss loot: a pending drop's id and its item id. */
 export type LootDrop = { id: string; item: string };
 
-/** A place on a boss fight's table: its rank by contribution (1 is the
- * top; see contributionOf), the herzie's name, the damage they dealt and the
- * HP they healed or blocked over the whole fight, and — for the top three,
- * drawn on the end screen — their look. */
-export type BossPlace = {
+/** What a herzie did over a boss fight, as the end screen shows it. */
+export type AwardStats = {
+  /** Damage to the boss and its minions. */
+  damage: number;
+  healed: number;
+  blocked: number;
+  /** Seconds it held the boss with a Taunt. */
+  tanked: number;
+};
+
+/** A place in one award's ranking (rankAwards): its rank, the herzie's
+ * name, its share of the role's points, and what it did. */
+export type AwardPlace = {
   rank: number;
   name: string;
-  damage: number;
-  heal: number;
-  look?: TownLook;
+  /** 0–1. */
+  share: number;
+} & AwardStats;
+
+/** One award at a fight's end: who won it (pickAwardWinners) with their
+ * look, drawn on its plinth — null when nobody (else) did any of that
+ * role — and the role's best three. */
+export type AwardBoard = {
+  role: ClassRole;
+  winner: (AwardPlace & { look?: TownLook }) | null;
+  top: AwardPlace[];
+};
+
+/** A herzie's own result: the award it won; else its place in its class's
+ * role, or, if it did none of that, in the role it did most of. */
+export type AwardMine = {
+  role: ClassRole;
+  place: AwardPlace;
+  won: boolean;
 };
 
 export type ServerMessage =
@@ -1015,14 +1040,14 @@ export type ServerMessage =
        * out of the boss. */
       at?: { x: number; z: number };
     }
-  /** The fight is over: how it went, its ten top damage dealers, and your
-   * own place (null if you landed nothing). Sent once, to each herzie still
-   * in the cave. */
+  /** The fight is over: how it went, its three awards (in AWARD_ROLES
+   * order), and your own result (null if you did nothing). Sent once, to
+   * each herzie still in the cave. */
   | {
       t: "results";
       outcome: "victory" | "defeat";
-      top: BossPlace[];
-      you: BossPlace | null;
+      awards: AwardBoard[];
+      mine: AwardMine | null;
     }
   /** The room closes at `closesAt` (server ms): the boss fell, got away,
    * or beat everyone (a wipe). */
@@ -1031,11 +1056,9 @@ export type ServerMessage =
       why: "victory" | "escaped" | "sealed" | "wiped";
       closesAt: number;
     }
-  /** Where the boss stands and faces, while it walks (every tick it
-   * moves). */
-  /** Your own contribution to the fight so far, and where it ranks of
-   * `of` (the roster), every couple of seconds. */
-  | { t: "tally"; score: number; rank: number; of: number }
+  /** Your own place so far in your own role (see AwardMine), of `of`
+   * herzies in its ranking, every couple of seconds. */
+  | { t: "standing"; role: ClassRole; rank: number; of: number }
   /** Where the boss stands, at server time `at`. */
   | {
       t: "bossAt";

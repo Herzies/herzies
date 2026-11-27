@@ -1,9 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Hero } from "@/components/landing/Hero";
 import { TownBackdrop } from "@/components/landing/TownBackdrop";
-import { showcaseChampion } from "@/lib/town-champion";
+import { showcaseChampions } from "@/lib/town-champion";
 
-/** The statue's champion is looked up at most this often (seconds): the
+/** The statue's champions are looked up at most this often (seconds): the
  * page is static between. */
 export const revalidate = 600;
 
@@ -46,7 +46,7 @@ const jsonLd = {
 };
 
 export default async function Home() {
-  const champion = await showcaseChampion();
+  const champions = await showcaseChampions();
   return (
     <>
       <script
@@ -54,7 +54,7 @@ export default async function Home() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
 
-      <TownBackdrop server={TOWN_SERVER} champion={champion} />
+      <TownBackdrop server={TOWN_SERVER} champions={champions} />
       <Hero />
     </>
   );

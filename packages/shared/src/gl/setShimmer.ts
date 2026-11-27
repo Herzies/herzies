@@ -3,44 +3,91 @@ import { GLASS_ORDER } from "./herzieMaterial.js";
 
 /*
  * A full set's shimmer (ItemSet.shimmer): sparkles shed from the herzie's
- * body in the set's two colours. Made to sit in the background: noticed by
- * whoever's looking, never in the way.
+ * body in the set's two colours, or bubbles (`style`) trickling from a
+ * point on it (the Streetsmart vape's tip). Made to sit in the background:
+ * noticed by whoever's looking, never in the way.
  *
  * Same family as the Evasive Pair's sparkles (shoeSparkles.ts):
- * - Emitted on a shell round the body, and then they live in the world, not
- *   on the herzie. Each is born carrying a share of the herzie's own
- *   velocity, then slowed by the air, so a moving herzie leaves a glittering
- *   wake behind it and a still one has a gentle halo that drifts up.
+ * - Emitted on a shell round the body (or at the emitter), and then they
+ *   live in the world, not on the herzie. Each is born carrying a share of
+ *   the herzie's own velocity, then slowed by the air, so a moving herzie
+ *   leaves a glittering wake behind it and a still one has a gentle halo
+ *   that drifts up.
  * - Fade in and out smoothly and twinkle with a sine, never on/off, so
- *   nothing pops. Sizes are in the herzie's height; a sparkle that would be
- *   under two pixels stays two pixels and dims instead of flickering out.
- * - Drawn after the glass body, so the skin and the set's solid parts never
- *   hide it.
+ *   nothing pops (a bubble's pop at the top is the one exception). Sizes
+ *   are in the herzie's height; a sparkle that would be under two pixels
+ *   stays two pixels and dims instead of flickering out.
+ * - Sparkles are drawn after the glass body and over it, so the skin and
+ *   the set's solid parts never hide them; bubbles, from the face, go
+ *   behind the head when it's turned away.
  * - Runs on a wall clock when the herzie is paused, so previews still glitter.
  *
  * One pooled Points object per herzie; nothing is allocated per frame.
  */
 
-/** Sparkles alive at once, at most. */
+/** Particles alive at once, at most. */
 const MAX = 80;
-/** Sparkles a second standing still. */
-const IDLE_RATE = 14;
-/** Extra sparkles a second per height/second of speed. */
-const SPEED_RATE = 18;
-/** The share of the herzie's velocity a new sparkle starts with. */
-const INHERIT = 0.55;
-/** Air drag: higher trails off sooner. */
-const DRAG = 1.8;
 /** A jump in one frame further than this (heights) is a teleport. */
 const TELEPORT = 3;
 /** Draw order: after the glass skin and the solid set parts. */
 const ORDER = GLASS_ORDER + 1;
+
+/** How a style's particles are born and move. */
+interface Motion {
+  /** A second standing still. */
+  idleRate: number;
+  /** Extra a second per height/second of speed. */
+  speedRate: number;
+  /** The share of the herzie's velocity a new one starts with. */
+  inherit: number;
+  /** Air drag: higher trails off sooner. */
+  drag: number;
+  /** Upward pull, heights/second². */
+  lift: number;
+  /** Born on a shell round the body between these heights (share of the
+   * herzie's); without one, at the emitter. */
+  shell?: { from: number; to: number };
+  /** Seconds alive: `life` plus up to `lifeJitter`. */
+  life: number;
+  lifeJitter: number;
+  /** Size, in heights, before jitter. */
+  size: number;
+}
+
+const SPARKLE: Motion = {
+  idleRate: 14,
+  speedRate: 18,
+  inherit: 0.55,
+  drag: 1.8,
+  lift: 0.12,
+  shell: { from: 0.08, to: 0.98 },
+  life: 1.3,
+  lifeJitter: 1.1,
+  size: 0.045,
+};
+
+/** Bubbles (the Streetsmart set's milk froth, from its vape): a sparse
+ * trickle of small ones, a couple a second, wobbling up and off and
+ * popping soon after. */
+const BUBBLE: Motion = {
+  idleRate: 1.4,
+  speedRate: 0.5,
+  inherit: 0.4,
+  drag: 1.4,
+  lift: 0.12,
+  life: 1.1,
+  lifeJitter: 0.7,
+  size: 0.032,
+};
 
 export interface ShimmerColors {
   /** Most sparkles (white, for FF). */
   core: string;
   /** The rest of the sparkles (pink, for FF). */
   edge: string;
+  /** Sparkles (the default) or bubbles: a ring with a glint, popping at
+   * the top. */
+  style?: "sparkle" | "bubble";
 }
 
 export class SetShimmer {
@@ -50,6 +97,8 @@ export class SetShimmer {
   private readonly geometry = new THREE.BufferGeometry();
   private readonly material: THREE.ShaderMaterial;
   private readonly uOpacity = { value: 1 };
+  private readonly bubbles: boolean;
+  private readonly motion: Motion;
 
   private readonly pos = new Float32Array(MAX * 3);
   private readonly vel = new Float32Array(MAX * 3);
@@ -72,12 +121,17 @@ export class SetShimmer {
   private wall = 0;
   private root: THREE.Object3D | null = null;
 
-  /** `height` and `width`: the herzie's, in root units. */
+  /** `height` and `width`: the herzie's, in root units. `emitter`: where
+   * they're born, instead of on a shell round the body (style "bubble"
+   * needs one). */
   constructor(
     colors: ShimmerColors,
     private readonly height: number,
     private readonly width: number,
+    private readonly emitter: THREE.Object3D | null = null,
   ) {
+    this.bubbles = colors.style === "bubble";
+    this.motion = this.bubbles ? BUBBLE : SPARKLE;
     this.geometry.setAttribute(
       "position",
       new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage),
@@ -96,6 +150,7 @@ export class SetShimmer {
     this.geometry.setDrawRange(0, MAX);
 
     this.material = new THREE.ShaderMaterial({
+      defines: this.bubbles ? { BUBBLE: "" } : {},
       uniforms: {
         uPixels: { value: 600 },
         uOpacity: this.uOpacity,
@@ -117,9 +172,16 @@ export class SetShimmer {
           bool ortho = projectionMatrix[3][3] == 1.0;
           float px = aSize * uPixels * projectionMatrix[1][1]
             / (ortho ? 1.0 : -mv.z);
+          #ifdef BUBBLE
+          // A ring needs a few pixels to read as one: never smaller than
+          // four, whole pixels so its edge stays crisp.
+          vAlpha = aAlpha * clamp(px / 4.0, 0.0, 1.0);
+          gl_PointSize = floor(max(px, 4.0) + 0.5);
+          #else
           // Too small to draw: keep two pixels, dimmer, rather than flicker.
           vAlpha = aAlpha * clamp(px / 2.0, 0.0, 1.0);
           gl_PointSize = max(px, 2.0);
+          #endif
           vTint = aTint;
           vKind = aKind;
         }
@@ -134,6 +196,17 @@ export class SetShimmer {
         void main() {
           if (vAlpha <= 0.003) discard;
           vec2 p = gl_PointCoord * 2.0 - 1.0;
+          #ifdef BUBBLE
+          // A crisp ring, a glint up on one side, the faintest fill.
+          float d = length(p);
+          if (d > 1.0) discard;
+          float ring = step(0.68, d);
+          float glint = step(length(p - vec2(-0.34, -0.34)), 0.24);
+          vec3 rim = mix(uCore, uEdge, vTint);
+          vec3 col = glint > 0.5 ? vec3(1.0) : ring > 0.5 ? rim : uCore;
+          float a = ring * 0.8 + glint * 0.95 + 0.04;
+          gl_FragColor = vec4(col, clamp(a * vAlpha * uOpacity, 0.0, 1.0));
+          #else
           float d2 = dot(p, p);
           float glow = exp(-d2 * 5.0);
           float core = exp(-d2 * 28.0);
@@ -146,12 +219,13 @@ export class SetShimmer {
           vec3 body = mix(mix(uCore, vec3(1.0), 0.4), uEdge, vTint);
           vec3 col = mix(body, vec3(1.0), clamp(core * 0.7, 0.0, 1.0));
           gl_FragColor = vec4(col, clamp(shape * vAlpha * uOpacity, 0.0, 1.0));
+          #endif
           #include <colorspace_fragment>
         }
       `,
       transparent: true,
       depthWrite: false,
-      depthTest: false,
+      depthTest: this.bubbles,
     });
 
     this.points = new THREE.Points(this.geometry, this.material);
@@ -173,17 +247,20 @@ export class SetShimmer {
   }
 
   /** Carries the clock-free state of a model it replaces, so a rebuild
-   * (equipping something) doesn't blink the sparkles out. */
+   * (equipping something) doesn't blink the sparkles out. Sparkles don't
+   * carry over into bubbles, or back. */
   carryOver(from: SetShimmer): void {
-    this.pos.set(from.pos);
-    this.vel.set(from.vel);
-    this.age.set(from.age);
-    this.life.set(from.life);
-    this.size.set(from.size);
-    this.seed.set(from.seed);
-    this.kindOf.set(from.kindOf);
-    this.aTint.set(from.aTint);
-    this.next = from.next;
+    if (from.bubbles === this.bubbles) {
+      this.pos.set(from.pos);
+      this.vel.set(from.vel);
+      this.age.set(from.age);
+      this.life.set(from.life);
+      this.size.set(from.size);
+      this.seed.set(from.seed);
+      this.kindOf.set(from.kindOf);
+      this.aTint.set(from.aTint);
+      this.next = from.next;
+    }
     this.time = from.time;
     this.uOpacity.value = from.uOpacity.value;
     this.lastRoot.copy(from.lastRoot);
@@ -223,7 +300,8 @@ export class SetShimmer {
 
     // Emit: a steady halo, more when it's moving.
     const speed = this.velocity.length();
-    this.owed += (IDLE_RATE + SPEED_RATE * Math.min(speed, 4)) * dt;
+    const m = this.motion;
+    this.owed += (m.idleRate + m.speedRate * Math.min(speed, 4)) * dt;
     let n = Math.min(Math.floor(this.owed), 6);
     this.owed -= Math.floor(this.owed);
     while (n-- > 0) this.emit(root, unit);
@@ -232,16 +310,21 @@ export class SetShimmer {
   }
 
   private emit(root: THREE.Object3D, unit: number) {
-    // A point on a shell round the body, anywhere from foot to crown.
+    const m = this.motion;
     const a = Math.random() * Math.PI * 2;
-    const h = 0.08 + Math.random() * 0.9;
-    const bulge = Math.sin(Math.PI * Math.min(1, h * 1.05)) * 0.5 + 0.35;
-    const r = (this.width / 2) * bulge * (1.05 + Math.random() * 0.4);
-    scratchB.set(Math.cos(a) * r, h * this.height, Math.sin(a) * r);
-    scratchB.applyMatrix4(root.matrixWorld);
+    const shell = m.shell;
+    if (shell) {
+      // A point on a shell round the body, between the style's heights.
+      const h = shell.from + Math.random() * (shell.to - shell.from);
+      const bulge = Math.sin(Math.PI * Math.min(1, h * 1.05)) * 0.5 + 0.35;
+      const r = (this.width / 2) * bulge * (1.05 + Math.random() * 0.4);
+      scratchB.set(Math.cos(a) * r, h * this.height, Math.sin(a) * r);
+      scratchB.applyMatrix4(root.matrixWorld);
+    } else if (this.emitter) this.emitter.getWorldPosition(scratchB);
+    else return;
 
     // Born sharing the herzie's motion, with a lazy swirl and a lift.
-    const swirl = unit * 0.12;
+    const swirl = unit * (this.bubbles ? 0.04 : 0.12);
     const i = this.next;
     this.next = (this.next + 1) % MAX;
     const j = i * 3;
@@ -249,27 +332,30 @@ export class SetShimmer {
     this.pos[j + 1] = scratchB.y;
     this.pos[j + 2] = scratchB.z;
     this.vel[j] =
-      this.velocity.x * unit * INHERIT -
+      this.velocity.x * unit * m.inherit -
       Math.sin(a) * swirl +
       (Math.random() - 0.5) * unit * 0.05;
     this.vel[j + 1] =
-      this.velocity.y * unit * INHERIT + unit * (0.1 + Math.random() * 0.18);
+      this.velocity.y * unit * m.inherit +
+      unit * (shell ? 0.1 + Math.random() * 0.18 : 0.05 + Math.random() * 0.1);
     this.vel[j + 2] =
-      this.velocity.z * unit * INHERIT +
+      this.velocity.z * unit * m.inherit +
       Math.cos(a) * swirl +
       (Math.random() - 0.5) * unit * 0.05;
-    const glint = Math.random() < 0.2;
+    const glint = !this.bubbles && Math.random() < 0.2;
     this.age[i] = 0;
-    this.life[i] = 1.3 + Math.random() * 1.1;
-    this.size[i] = unit * (glint ? 0.07 : 0.045) * (0.7 + Math.random() * 0.6);
+    this.life[i] = m.life + Math.random() * m.lifeJitter;
+    this.size[i] =
+      unit * m.size * (glint ? 1.55 : 1) * (0.7 + Math.random() * 0.6);
     this.kindOf[i] = glint ? 1 : 0;
-    this.aTint[i] = Math.random() < 0.4 ? 1 : 0;
+    this.aTint[i] = Math.random() < (this.bubbles ? 0.45 : 0.4) ? 1 : 0;
     this.seed[i] = Math.random() * 100;
   }
 
   private step(dt: number, unit: number) {
     let alive = 0;
-    const k = Math.exp(-DRAG * dt);
+    const m = this.motion;
+    const k = Math.exp(-m.drag * dt);
     for (let i = 0; i < MAX; i++) {
       if (this.life[i] <= 0) {
         this.aAlpha[i] = 0;
@@ -287,20 +373,33 @@ export class SetShimmer {
       alive++;
       const j = i * 3;
       this.vel[j] *= k;
-      this.vel[j + 1] = this.vel[j + 1] * k + unit * 0.12 * dt;
+      this.vel[j + 1] = this.vel[j + 1] * k + unit * m.lift * dt;
       this.vel[j + 2] *= k;
-      const sway = Math.sin(this.time * 3 + this.seed[i]) * unit * 0.03 * dt;
+      const sway =
+        Math.sin(this.time * (this.bubbles ? 2 : 3) + this.seed[i]) *
+        unit *
+        (this.bubbles ? 0.05 : 0.03) *
+        dt;
       this.pos[j] += this.vel[j] * dt + sway;
       this.pos[j + 1] += this.vel[j + 1] * dt;
       this.pos[j + 2] += this.vel[j + 2] * dt - sway;
 
-      // Smooth in over the first fifth, out over the rest; a soft twinkle.
-      const inn = Math.min(1, t / 0.2);
-      const fadeIn = inn * inn * (3 - 2 * inn);
-      const out = 1 - t;
-      const twinkle = 0.7 + 0.3 * Math.sin(this.time * 9 + this.seed[i] * 7.3);
-      this.aSize[i] = this.size[i] * fadeIn * (1 - 0.5 * t * t);
-      this.aAlpha[i] = fadeIn * out * out * twinkle;
+      if (this.bubbles) {
+        // In over the first tenth; at the top a quick swell, then it pops.
+        const inn = Math.min(1, t / 0.1);
+        const swell = Math.max(0, (t - 0.9) / 0.1);
+        this.aSize[i] = this.size[i] * (0.6 + 0.4 * inn) * (1 + 0.25 * swell);
+        this.aAlpha[i] = inn * inn * (3 - 2 * inn);
+      } else {
+        // Smooth in over the first fifth, out over the rest; a soft twinkle.
+        const inn = Math.min(1, t / 0.2);
+        const fadeIn = inn * inn * (3 - 2 * inn);
+        const out = 1 - t;
+        const twinkle =
+          0.7 + 0.3 * Math.sin(this.time * 9 + this.seed[i] * 7.3);
+        this.aSize[i] = this.size[i] * fadeIn * (1 - 0.5 * t * t);
+        this.aAlpha[i] = fadeIn * out * out * twinkle;
+      }
       this.aKind[i] = this.kindOf[i];
     }
     this.points.visible = alive > 0;

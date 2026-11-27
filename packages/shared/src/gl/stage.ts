@@ -19,6 +19,10 @@ export type StageView = {
    * when it's inside that: what reaches out of the frame (smoke, wings)
    * isn't cut off at its edge. Framed just the same. Read every frame. */
   readonly bleed?: boolean;
+  /** Drawn over the views below this (default 0) where their boxes
+   * overlap; views on the same layer go in the order they were added.
+   * Read every frame. */
+  readonly layer?: number;
 };
 
 /** The longest frame step animations are allowed to take: coming back to a
@@ -45,7 +49,9 @@ type Entry = {
  * the three.js "multiple elements" pattern. A view follows its element as
  * the page scrolls or animates it, is clipped to any scrolling or
  * overflow-hidden box it's inside, and fades with its ancestors' opacity,
- * as the element itself would.
+ * as the element itself would. Boxes may overlap: each view is drawn over
+ * what's there (the canvas is cleared once a frame, not per view), by
+ * layer (StageView.layer).
  *
  * Drawn at a fraction of the screen's resolution (`pixelScale`) and scaled
  * up without smoothing: the chunky pixels herzies have everywhere.
@@ -168,6 +174,10 @@ export class HerzieStage {
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: false });
     renderer.setClearColor(0x000000, 0);
     renderer.setScissorTest(true);
+    // Each frame clears the whole canvas once (see frame): a view clearing
+    // its own box would cut a hole in one it overlaps. Depth still clears
+    // per view, so each is drawn whole over what's under it.
+    renderer.autoClearColor = false;
     // A view's own sun can cast shadows (see HerzieView), as in the Town.
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -252,6 +262,7 @@ export class HerzieStage {
       area: DOMRect;
       clip: [number, number, number, number];
       alpha: number;
+      layer: number;
     }[] = [];
     let layout = `${width}x${height}`;
     let idle = true;
@@ -309,8 +320,9 @@ export class HerzieStage {
         area,
         clip: [left, top, right, bottom],
         alpha,
+        layer: view.layer ?? 0,
       });
-      layout += `|${rect.left},${rect.top},${rect.width},${rect.height},${area.left},${area.top},${area.width},${area.height},${left},${top},${right},${bottom},${alpha}`;
+      layout += `|${rect.left},${rect.top},${rect.width},${rect.height},${area.left},${area.top},${area.width},${area.height},${left},${top},${right},${bottom},${alpha},${view.layer ?? 0}`;
       if (!view.idle()) idle = false;
     }
     // Nothing animating and nothing moved: what's on the canvas is still
@@ -332,6 +344,9 @@ export class HerzieStage {
     renderer.setScissorTest(false);
     renderer.clear();
     renderer.setScissorTest(true);
+    // Lower layers first, so higher ones land over them (a stable sort:
+    // the same layer keeps the order views were added in).
+    drawn.sort((a, b) => a.layer - b.layer);
     for (const { view, rect, area, clip, alpha } of drawn) {
       view.update(dt, rect.width, rect.height, alpha);
       const [left, top, right, bottom] = clip;
@@ -349,7 +364,6 @@ export class HerzieStage {
       }
       // Bleeding: the camera sees as much more round its own frame as the
       // bleed box is bigger than its box, so it's framed just as it was.
-      // It's drawn over, not cleared under: a view it reaches over stays.
       const cam = view.camera as
         | THREE.PerspectiveCamera
         | THREE.OrthographicCamera;
@@ -366,9 +380,7 @@ export class HerzieStage {
         area.width * kx,
         area.height * ky,
       );
-      renderer.autoClearColor = false;
       renderer.render(view.scene, cam);
-      renderer.autoClearColor = true;
       if (own)
         cam.setViewOffset(
           own.fullWidth,

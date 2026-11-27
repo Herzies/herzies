@@ -355,12 +355,13 @@ const hotbarUnits: ItemUnit[] = hotbarParam
       equippedSlot: null,
     }))
   : [];
-// The end screen with a made-up table: `?results=victory|defeat`, and
-// `&rank=` for your place (past 10 shows under the "…"; 0 for none).
+// The end screen with made-up awards: `?results=victory|defeat`, and
+// `&rank=` for your place for Lifesaver (1 wins it, past 3 shows under the
+// best three in Details; 0 for none).
 const resultsParam = params.get("results");
 if (resultsParam === "victory" || resultsParam === "defeat") {
   setBossResults(
-    sampleBossResults(resultsParam, Number(params.get("rank") ?? 7)),
+    sampleBossResults(resultsParam, Number(params.get("rank") ?? 4)),
     null,
   );
 }

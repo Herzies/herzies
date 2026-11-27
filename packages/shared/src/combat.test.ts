@@ -7,11 +7,11 @@ import {
 } from "./classes.js";
 import {
   aimDirection,
+  awardPoints,
+  BLOCK_POINTS,
   BOSS_STAND,
   bossReaches,
   CAST_INTERVAL_MS,
-  CONTRIBUTION_SUPPORT_WEIGHT,
-  contributionOf,
   DISC_RANGE,
   DOME,
   discChain,
@@ -22,7 +22,9 @@ import {
   MELEE_REACH,
   meleeReaches,
   nextInChain,
+  pickAwardWinners,
   pushOutOfDomes,
+  rankAwards,
   stunMs,
   TAUNT_CONTRIBUTION_WEIGHT,
   TAUNT_FIGHT_SECONDS,
@@ -186,21 +188,61 @@ describe("casting at the boss", () => {
   });
 });
 
-describe("contribution", () => {
-  it("counts healing and blocking ten times over", () => {
-    expect(CONTRIBUTION_SUPPORT_WEIGHT).toBe(10);
-    expect(contributionOf({ damage: 300, healing: 80, blocked: 0 })).toBe(1100);
-    expect(contributionOf({ damage: 0, healing: 0, blocked: 50 })).toBe(500);
-    // A healer can outrank a bigger hitter.
+describe("awards", () => {
+  it("ranks each role on its own work", () => {
     expect(
-      contributionOf({ damage: 300, healing: 80, blocked: 0 }),
-    ).toBeGreaterThan(contributionOf({ damage: 1000, healing: 0, blocked: 0 }));
+      awardPoints({
+        damage: 300,
+        adds: 20,
+        healing: 80,
+        blocked: 5,
+        taunt: 40,
+      }),
+    ).toEqual({ dps: 320, tank: 5 * BLOCK_POINTS + 40, support: 80 });
+    const ranks = rankAwards([
+      ["a", { damage: 100, healing: 0, blocked: 0 }],
+      ["b", { damage: 300, healing: 50, blocked: 0 }],
+      ["c", { damage: 0, healing: 0, blocked: 0 }],
+    ]);
+    expect(ranks.dps.map((e) => [e.key, e.rank, e.share])).toEqual([
+      ["b", 1, 0.75],
+      ["a", 2, 0.25],
+    ]);
+    // Nobody with none of a role is in its ranking.
+    expect(ranks.tank).toEqual([]);
+    expect(ranks.support.map((e) => e.key)).toEqual(["b"]);
   });
 
-  it("counts a taunt's points as they are", () => {
-    expect(
-      contributionOf({ damage: 100, healing: 0, blocked: 0, taunt: 250 }),
-    ).toBe(350);
+  it("breaks a tie by key", () => {
+    const ranks = rankAwards([
+      ["b", { damage: 100, healing: 0, blocked: 0 }],
+      ["a", { damage: 100, healing: 0, blocked: 0 }],
+    ]);
+    expect(ranks.dps.map((e) => e.key)).toEqual(["a", "b"]);
+  });
+
+  it("gives a herzie one award, the one it led by more", () => {
+    // The tank out-hits everyone but is the only tank: it keeps
+    // Soundproof, and Big Hitter goes to the next best.
+    const won = pickAwardWinners(
+      rankAwards([
+        ["tank", { damage: 400, healing: 0, blocked: 10, taunt: 100 }],
+        ["slinger", { damage: 300, healing: 0, blocked: 0 }],
+        ["bard", { damage: 50, healing: 90, blocked: 0 }],
+      ]),
+    );
+    expect(won.tank?.key).toBe("tank");
+    expect(won.dps?.key).toBe("slinger");
+    expect(won.support?.key).toBe("bard");
+  });
+
+  it("leaves an award nobody (else) earned empty", () => {
+    const won = pickAwardWinners(
+      rankAwards([["solo", { damage: 100, healing: 10, blocked: 0 }]]),
+    );
+    expect(won.dps?.key).toBe("solo");
+    expect(won.support).toBe(null);
+    expect(won.tank).toBe(null);
   });
 
   it("pays a taunt second as a share of an average herzie's damage a second", () => {

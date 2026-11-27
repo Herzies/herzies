@@ -9,6 +9,7 @@
  * as before.
  */
 
+import type { ClassRole } from "./classes.ts";
 import { mitigate } from "./skills.ts";
 import { defReduction } from "./stats.ts";
 
@@ -365,28 +366,39 @@ export const BUMP_DAMAGE = 0.5;
 export const PUNCH_DAMAGE = 0.6;
 
 // ---------------------------------------------------------------------------
-// Contribution: how much a herzie did for a boss fight, which ranks its end
-// screen, rewards, statue and leaderboard. Damage counts as it is; healing
-// and what a Cymbrella blocked count this many times over, because a heal is
-// worth far more than a hit (a level-30 Bard restores a few dozen HP a
-// second, Drones and heal bolts together, while a Record Slinger deals some
-// 800). Holding the boss with a Taunt counts too, per
-// second held (see tauntPointsPerSecond). Mirrored by boss_contribution in
-// 00111 and 00142.
+// Awards: what a boss fight hands out instead of one ranking. Each role is
+// ranked on its own work and never weighed against another: damage (boss
+// and minions) for Big Hitter, holding the boss and blocking its hits for
+// Soundproof, healing for Lifesaver. A role's best wins its award, one
+// award a herzie (pickAwardWinners), and the winners go up on the Town's
+// statue. Mirrored by boss_award_points and boss_awards in 00168.
 
-/** How many points of damage one HP healed or blocked is worth. */
-export const CONTRIBUTION_SUPPORT_WEIGHT = 10;
+/** The roles awarded, in the order they stand on the end screen and the
+ * statue: Soundproof in the middle. */
+export const AWARD_ROLES: readonly ClassRole[] = ["dps", "tank", "support"];
+
+/** Each role's award: also the title its first win earns (titles.ts). */
+export const AWARD_NAMES: Record<ClassRole, string> = {
+  dps: "Big Hitter",
+  tank: "Soundproof",
+  support: "Lifesaver",
+};
+
+/** A tank's points for one HP its Cymbrella blocked, against a second's
+ * Taunt (tauntPointsPerSecond). */
+export const BLOCK_POINTS = 10;
 
 /** A second of holding the boss with a Taunt is worth this many times what
  * an average herzie deals in a second of a fight that runs to
- * {@link TAUNT_FIGHT_SECONDS}: a Percussionist who holds it most of the
- * fight (two trading it) ranks with the damage dealers, not below them. */
+ * {@link TAUNT_FIGHT_SECONDS}: so holding it most of the fight outweighs
+ * a few big blocks. */
 export const TAUNT_CONTRIBUTION_WEIGHT = 1.5;
 /** The fight length a taunt's worth is sized from (the raid's target). */
 export const TAUNT_FIGHT_SECONDS = 390;
 
 /** Points a second held with a Taunt is worth, for a boss of `maxHp` and a
- * roster of `roster`: from the boss's health, so a bigger boss pays more. */
+ * roster of `roster`: from the boss's health, so a bigger boss pays more.
+ * Mirrored by boss_taunt_points_per_second in 00168. */
 export function tauntPointsPerSecond(maxHp: number, roster: number): number {
   if (!(maxHp > 0)) return 0;
   return (
@@ -396,9 +408,20 @@ export function tauntPointsPerSecond(maxHp: number, roster: number): number {
   );
 }
 
+/** The seconds a herzie held the boss with its Taunt, from the points it
+ * earned for it (`Contribution.taunt`). */
+export function tankedSeconds(
+  taunt: number,
+  maxHp: number,
+  roster: number,
+): number {
+  const perSecond = tauntPointsPerSecond(maxHp, roster);
+  return perSecond > 0 ? taunt / perSecond : 0;
+}
+
 /** What a herzie did for a fight: damage dealt to the boss, HP healed, HP
  * blocked, damage dealt to its minions (`adds`: counted like boss damage
- * for the ranking, but never taken off the boss's health), and the points
+ * for Big Hitter, but never taken off the boss's health), and the points
  * holding the boss with a Taunt earned (`taunt`, already in points). */
 export type Contribution = {
   damage: number;
@@ -408,14 +431,79 @@ export type Contribution = {
   taunt?: number;
 };
 
-/** A herzie's contribution score. */
-export function contributionOf(c: Contribution): number {
-  return (
-    c.damage +
-    (c.adds ?? 0) +
-    (c.taunt ?? 0) +
-    CONTRIBUTION_SUPPORT_WEIGHT * (c.healing + c.blocked)
+/** A herzie's points in each role. */
+export function awardPoints(c: Contribution): Record<ClassRole, number> {
+  return {
+    dps: c.damage + (c.adds ?? 0),
+    tank: BLOCK_POINTS * c.blocked + (c.taunt ?? 0),
+    support: c.healing,
+  };
+}
+
+/** A herzie's place in one role's ranking. */
+export type AwardEntry<K> = {
+  /** Who: a user id, or whatever the caller keys herzies by. */
+  key: K;
+  points: number;
+  /** Its share of the role's points, 0–1. */
+  share: number;
+  /** 1 is the best. */
+  rank: number;
+};
+
+/** Each role ranked on its own points, best first; ties by key, the lower
+ * first. Those with none in a role are left out of it. */
+export function rankAwards<K extends string>(
+  rows: Iterable<readonly [K, Contribution]>,
+): Record<ClassRole, AwardEntry<K>[]> {
+  const points = [...rows].map(([key, c]) => [key, awardPoints(c)] as const);
+  const out = {} as Record<ClassRole, AwardEntry<K>[]>;
+  for (const role of AWARD_ROLES) {
+    const total = points.reduce((n, [, p]) => n + p[role], 0);
+    out[role] = points
+      .filter(([, p]) => p[role] > 0)
+      .sort(
+        ([a, pa], [b, pb]) =>
+          pb[role] - pa[role] || (a < b ? -1 : a > b ? 1 : 0),
+      )
+      .map(([key, p], i) => ({
+        key,
+        points: p[role],
+        share: p[role] / total,
+        rank: i + 1,
+      }));
+  }
+  return out;
+}
+
+/** Who wins each award: its role's best, but a herzie wins one award
+ * only. The surest claims go first (the biggest share of a role; then in
+ * AWARD_ROLES order, then by rank), so a herzie best at two keeps the one
+ * it led by more, and the other goes to that role's next best. A role with
+ * nobody left in it has no winner. */
+export function pickAwardWinners<K>(
+  ranks: Record<ClassRole, AwardEntry<K>[]>,
+): Record<ClassRole, AwardEntry<K> | null> {
+  const claims = AWARD_ROLES.flatMap((role, order) =>
+    ranks[role].map((entry) => ({ role, order, entry })),
+  ).sort(
+    (a, b) =>
+      b.entry.share - a.entry.share ||
+      a.order - b.order ||
+      a.entry.rank - b.entry.rank,
   );
+  const won: Record<ClassRole, AwardEntry<K> | null> = {
+    dps: null,
+    tank: null,
+    support: null,
+  };
+  const standing = new Set<K>();
+  for (const { role, entry } of claims) {
+    if (won[role] || standing.has(entry.key)) continue;
+    won[role] = entry;
+    standing.add(entry.key);
+  }
+  return won;
 }
 
 /** A melee hit as a share of a wave's, by blow (classes.ts MeleeBlow). */

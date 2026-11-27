@@ -8,9 +8,15 @@
  *
  * Requires: `npx supabase start`
  */
-import { BOSS_BONUS_DROPS, bossLootWeights } from "@herzies/shared";
+import {
+  BOSS_BONUS_DROPS,
+  type BossFightConfig,
+  type BossFightView,
+  bossLootWeights,
+} from "@herzies/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { POST as syncRoute } from "@/app/api/sync/route";
+import { buildBossFightConfig } from "@/lib/events";
 import {
   authenticatedRequest,
   cleanupTestData,
@@ -416,8 +422,8 @@ describe("escaping", () => {
   });
 });
 
-describe("leaderboard", () => {
-  it("ranks damage dealers by damage descending", async () => {
+describe("awards", () => {
+  it("ranks Big Hitter by damage descending", async () => {
     const boss = (await spawnBoss(1000))!;
     const players = await Promise.all(
       Array.from({ length: 4 }, () => makePlayer()),
@@ -427,14 +433,47 @@ describe("leaderboard", () => {
     await hit(boss, players[2].userId, 20);
     await hit(boss, players[3].userId, 1);
 
-    const { data } = await admin().rpc("boss_leaderboard", {
-      p_event_id: boss,
-      p_limit: 3,
-    });
-    const rows = data as { user_id: string; damage: number; rank: number }[];
-    expect(rows).toHaveLength(3);
-    expect(rows.map((r) => r.damage)).toEqual([50, 20, 5]);
-    expect(rows[0].user_id).toBe(players[1].userId);
+    const { data } = await admin().rpc("boss_awards", { p_event: boss });
+    const rows = data as {
+      user_id: string;
+      role: string;
+      points: number;
+      rank: number;
+      ranked: number;
+      won: boolean;
+    }[];
+    expect(rows.every((r) => r.role === "dps" && r.ranked === 4)).toBe(true);
+    expect(rows.map((r) => r.points)).toEqual([50, 20, 5, 1]);
+    expect(rows.map((r) => r.rank)).toEqual([1, 2, 3, 4]);
+    expect(rows.filter((r) => r.won).map((r) => r.user_id)).toEqual([
+      players[1].userId,
+    ]);
+  });
+
+  it("shows each award's leader on the boss's card, and the caller's place", async () => {
+    const boss = (await spawnBoss(1000))!;
+    const [a, b] = [await makePlayer(), await makePlayer()];
+    await hit(boss, a.userId, 30);
+    await hit(boss, b.userId, 10);
+    const { data: herzie } = await admin()
+      .from("herzies")
+      .select("name")
+      .eq("user_id", a.userId)
+      .single();
+
+    const view = (await buildBossFightConfig(
+      admin(),
+      boss,
+      {} as BossFightConfig,
+      b.userId,
+    )) as unknown as BossFightView;
+    expect(view.awards).toEqual([
+      { role: "dps", name: herzie?.name, share: 0.75 },
+    ]);
+    expect(view.yourAward).toEqual({ role: "dps", rank: 2, of: 2 });
+    // What an app from before awards reads.
+    expect(view.topDealers).toEqual([]);
+    expect(view.yourRank).toBeNull();
   });
 });
 

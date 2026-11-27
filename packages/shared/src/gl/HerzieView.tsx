@@ -144,6 +144,9 @@ export type HerzieViewProps = {
    * edges; see HerzieStage.setBleed), framed just the same: its pipe's
    * smoke or a dance isn't cut off at the box. Default false. */
   bleed?: boolean;
+  /** Drawn over herzies on lower layers of its stage where their boxes
+   * overlap (see StageView.layer). Default 0. */
+  layer?: number;
 };
 
 /**
@@ -183,6 +186,7 @@ export function HerzieView({
   distance = 1,
   tilt = DEFAULT_CAMERA_TILT_DEG,
   bleed = false,
+  layer = 0,
 }: HerzieViewProps) {
   const box = useRef<HTMLDivElement>(null);
   const width = Math.ceil(cols * size * 0.6);
@@ -231,6 +235,7 @@ export function HerzieView({
     distance,
     tilt,
     bleed,
+    layer,
   });
   live.current = {
     paused,
@@ -250,6 +255,7 @@ export function HerzieView({
     distance,
     tilt,
     bleed,
+    layer,
   };
 
   /** The turn, in the old renderer's units (added to DEFAULT_Y_ANGLE). */
@@ -292,6 +298,9 @@ export function HerzieView({
       camera: cam,
       get bleed() {
         return live.current.bleed;
+      },
+      get layer() {
+        return live.current.layer;
       },
       idle() {
         const l = live.current;

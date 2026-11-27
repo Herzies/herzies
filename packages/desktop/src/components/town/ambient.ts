@@ -60,6 +60,74 @@ export function gustAt(x: number, z: number, t: number): number {
   return 0.55 + 0.45 * Math.sin(along * 0.07 - t * 0.45);
 }
 
+/** How deep snow lies on what faces up, per unit of `uSnow`: past 1 the
+ * drifts close up into one cover... */
+export const SNOW_DEPTH = 1.15;
+/** ...and on trodden ground's paths (see `inSeason`): thinner, so the
+ * gravel shows through in patches. */
+export const SNOW_DEPTH_TRODDEN = 0.55;
+
+/** A lattice point's hash, 0–1: integer maths, so the GPU's (in
+ * SEASON_NOISE_GLSL) and this one agree to the bit, and the CPU knows
+ * where the snow's drawn (a `sin` hash doesn't survive float32). */
+function seasonLattice(i: number, j: number): number {
+  let h = Math.imul(i, 0x9e3779b1) ^ Math.imul(j, 0x85ebca77);
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x7feb352d);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x846ca68b);
+  h ^= h >>> 16;
+  return Math.fround(h >>> 0) / 4294967296;
+}
+
+/** Smooth value noise over the ground, 0–1, as `seasonNoise`. */
+function seasonNoise(x: number, z: number): number {
+  const i = Math.floor(x);
+  const j = Math.floor(z);
+  const fx = x - i;
+  const fz = z - j;
+  const ux = fx * fx * (3 - 2 * fx);
+  const uz = fz * fz * (3 - 2 * fz);
+  const a = seasonLattice(i, j);
+  const b = seasonLattice(i + 1, j);
+  const c = seasonLattice(i, j + 1);
+  const d = seasonLattice(i + 1, j + 1);
+  return (a + (b - a) * ux) * (1 - uz) + (c + (d - c) * ux) * uz;
+}
+
+/** The GLSL of the two above. */
+const SEASON_NOISE_GLSL = /* glsl */ `
+float seasonLattice( vec2 p ) {
+  uvec2 q = uvec2( ivec2( p ) );
+  uint h = ( q.x * 0x9E3779B1u ) ^ ( q.y * 0x85EBCA77u );
+  h ^= h >> 16;
+  h *= 0x7FEB352Du;
+  h ^= h >> 15;
+  h *= 0x846CA68Bu;
+  h ^= h >> 16;
+  return float( h ) * ( 1.0 / 4294967296.0 );
+}
+// Smooth value noise over the ground, 0–1: where snow drifts and thins.
+float seasonNoise( vec2 p ) {
+  vec2 i = floor( p );
+  vec2 f = p - i;
+  vec2 u = f * f * ( 3.0 - 2.0 * f );
+  float a = seasonLattice( i );
+  float b = seasonLattice( i + vec2( 1.0, 0.0 ) );
+  float c = seasonLattice( i + vec2( 0.0, 1.0 ) );
+  float d = seasonLattice( i + vec2( 1.0, 1.0 ) );
+  return mix( mix( a, b, u.x ), mix( c, d, u.x ), u.y );
+}`;
+
+/** Whether snow `depth` deep (uSnow times SNOW_DEPTH or the trodden
+ * mix) is drawn at (x, z) on flat ground, or that spot's bare between the
+ * drifts: the patches `inSeason` draws. */
+export function snowCovers(x: number, z: number, depth: number): boolean {
+  const drift =
+    seasonNoise(x * 0.8, z * 0.8) * 0.65 + seasonNoise(x * 2.6, z * 2.6) * 0.35;
+  return drift >= 1 - depth;
+}
+
 /** How a material moves in the wind. */
 export type Sway = {
   /** Sideways give per unit of height above `from`. */
@@ -324,17 +392,7 @@ varying float vSeasonLump;
 float seasonHash( vec3 p ) {
   return fract( sin( dot( p, vec3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 );
 }
-// Smooth value noise over the ground, 0–1: where snow drifts and thins.
-float seasonNoise( vec2 p ) {
-  vec2 i = floor( p );
-  vec2 f = fract( p );
-  vec2 u = f * f * ( 3.0 - 2.0 * f );
-  float a = seasonHash( vec3( i, 0.0 ) );
-  float b = seasonHash( vec3( i + vec2( 1.0, 0.0 ), 0.0 ) );
-  float c = seasonHash( vec3( i + vec2( 0.0, 1.0 ), 0.0 ) );
-  float d = seasonHash( vec3( i + vec2( 1.0, 1.0 ), 0.0 ) );
-  return mix( mix( a, b, u.x ), mix( c, d, u.x ), u.y );
-}`,
+${SEASON_NOISE_GLSL}`,
       )
       .replace(
         "#include <alphamap_fragment>",
@@ -378,7 +436,7 @@ ${
   vec2 xz = vSeasonWorld.xz;
   float drift = seasonNoise( xz * 0.8 ) * 0.65 + seasonNoise( xz * 2.6 ) * 0.35;
   float grain = seasonHash( floor( vSeasonWorld * 5.0 ) );
-  float depth = uSnow * lies * ${trodden ? "mix( 0.55, 1.15, green )" : "1.15"};
+  float depth = uSnow * lies * ${trodden ? `mix( ${SNOW_DEPTH_TRODDEN.toFixed(2)}, ${SNOW_DEPTH.toFixed(2)}, green )` : SNOW_DEPTH.toFixed(2)};
   float cover = step( 1.0 - depth, drift );
   diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.7, 0.75, 0.84 ) * ( 0.94 + grain * 0.06 ), cover );
   // Wet from the rain (see weather): what faces up goes darker and

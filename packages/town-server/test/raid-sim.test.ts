@@ -12,14 +12,18 @@
  * (discCycleMs), a Percussionist stops for its Rimshot's wind-up.
  */
 import { BOSS_WANDER, bossMaxHp } from "@herzies/shared/boss-fight";
+import type { ClassRole } from "@herzies/shared/classes";
 import {
+  type AwardEntry,
+  awardPoints,
   CAST_INTERVAL_MS,
   type Contribution,
-  contributionOf,
   DISC_RANGE,
   discCycleMs,
   HEAL_TARGET_HEIGHT,
   MELEE_REACH,
+  pickAwardWinners,
+  rankAwards,
   WAVE_HAND_HEIGHT,
 } from "@herzies/shared/combat";
 import { attackSpeed, RIMSHOT, SKILL_DEFS } from "@herzies/shared/skills";
@@ -161,8 +165,10 @@ type Result = {
   minions: number;
   /** Health each herzie lost (as shares of its own max, summed), by uid. */
   lost: Map<string, number>;
-  /** Each herzie's contribution score at the end, by uid. */
-  scores: Map<string, number>;
+  /** Each herzie's award points in each role at the end, by uid. */
+  points: Map<string, Record<ClassRole, number>>;
+  /** Who won each award (pickAwardWinners), by role. */
+  winners: Record<ClassRole, AwardEntry<string> | null>;
   /** Each herzie's damage (boss and minions) a second, by uid. */
   dps: Map<string, number>;
 };
@@ -385,9 +391,10 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
     }
   }
   const dealt = (f as unknown as { dealt: Map<string, Contribution> }).dealt;
-  const scores = new Map(
-    [...dealt].map(([uid, c]) => [uid, contributionOf(c)] as const),
+  const points = new Map(
+    [...dealt].map(([uid, c]) => [uid, awardPoints(c)] as const),
   );
+  const winners = pickAwardWinners(rankAwards(dealt));
   if (LOG)
     console.log(
     `SIM ${bots.map((b) => b.role[0]).join("")} seed=${seed} -> ${f.closeWhy} in ${min(t - STARTS)} min, maxHp=${f.engine.maxHp}, hp left=${Math.round(f.engine.hp)}, downs=${downs}, revives=${revives}, minions=${minionsDown}, hits=${hitsTaken}, shapes=${shapes}, charges=${lanes}, minHp=${Math.round(minHp * 100)}%`,
@@ -406,7 +413,8 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
     wander,
     minions: minionsDown,
     lost,
-    scores,
+    points,
+    winners,
   };
 }
 
@@ -489,12 +497,16 @@ describe("the raid, simulated", () => {
     expect(trio.every((r) => r.outcome === "victory")).toBe(true);
   });
 
-  it("the trio's Percussionist ranks with its Record Slinger, not far below", () => {
+  it("the trio's Percussionist wins Soundproof, as its Slinger and Bard win theirs", () => {
     for (const sd of [1, 2]) {
       const r = raid(party(TRIO), sd);
-      const tank = r.scores.get("percussionist-1") ?? 0;
-      const slinger = r.scores.get("record_slinger-2") ?? 0;
-      expect(tank, `seed ${sd}`).toBeGreaterThan(slinger * 0.75);
+      expect(r.winners.tank?.key, `seed ${sd}`).toBe("percussionist-1");
+      expect(r.winners.dps?.key, `seed ${sd}`).toBe("record_slinger-2");
+      expect(r.winners.support?.key, `seed ${sd}`).toBe("bard-0");
+      // Holding the boss is the tank's own work: the Slinger does little of it.
+      const tank = r.points.get("percussionist-1")?.tank ?? 0;
+      const slinger = r.points.get("record_slinger-2")?.tank ?? 0;
+      expect(tank, `seed ${sd}`).toBeGreaterThan(slinger * 2);
     }
   });
 

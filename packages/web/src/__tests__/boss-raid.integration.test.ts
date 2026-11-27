@@ -1,11 +1,12 @@
 /**
  * Integration tests for the cave raid (00122): the lobby and the lock, who's
  * in and who's out, revives, wipes, the payout to those still in, and the
- * statue.
+ * awards and the statue (00168).
  *
  * Requires: `npx supabase start`
  */
 import { bossMaxHp } from "@herzies/shared";
+import { tauntPointsPerSecond } from "@herzies/shared/combat";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupTestData,
@@ -21,6 +22,53 @@ async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
   if (error) throw new Error(`${fn}: ${error.message}`);
   return data as T;
 }
+
+/** What each herzie did, as the Town server reports it: one batch. */
+const report = (event: string, rows: Record<string, unknown>[]) =>
+  rpc("apply_boss_damage_batch", {
+    p_batch: `dmg:${crypto.randomUUID()}`,
+    p_event: event,
+    p_damage: rows,
+  });
+
+async function nameOf(uid: string) {
+  const { data } = await admin()
+    .from("herzies")
+    .select("name")
+    .eq("user_id", uid)
+    .single();
+  return data?.name as string;
+}
+
+type Champions = Record<
+  "dps" | "tank" | "support",
+  { event: string; name: string } | null
+>;
+
+/** The statue's herzies' names, by role. */
+async function statue(skip: string[] = []) {
+  const c = await rpc<Champions>("boss_champion_json", { p_skip: skip });
+  return {
+    dps: c.dps?.name ?? null,
+    tank: c.tank?.name ?? null,
+    support: c.support?.name ?? null,
+  };
+}
+
+type Place = {
+  rank: number;
+  name: string;
+  share: number;
+  damage: number;
+  healed: number;
+  blocked: number;
+  tanked: number;
+};
+
+type Results = {
+  awards: { role: string; winner: Place | null; top: Place[] }[];
+  you: Record<string, { role: string; won: boolean; place: Place; of: number }>;
+};
 
 /** A boss event starting `startsInMs` from now (negative: already started). */
 async function spawnBoss(startsInMs = 0, hp = 30_000) {
@@ -351,16 +399,12 @@ describe("the cave raid", () => {
       expect(count(c)).toBe(0);
     });
 
-    it("minion damage counts toward contribution, not against the boss", async () => {
+    it("minion damage counts toward Big Hitter, not against the boss", async () => {
       const event = await spawnBoss(0, 1_000);
       const a = await player();
       await lock(event, [a], 1_000);
       const before = (await state(event)).hp;
-      await rpc("apply_boss_damage_batch", {
-        p_batch: `dmg:${crypto.randomUUID()}`,
-        p_event: event,
-        p_damage: [{ uid: a, damage: 0, adds: 500 }],
-      });
+      await report(event, [{ uid: a, damage: 0, adds: 500 }]);
       expect((await state(event)).hp).toBe(before);
       const { data } = await admin()
         .from("boss_damage")
@@ -369,50 +413,172 @@ describe("the cave raid", () => {
         .eq("user_id", a)
         .single();
       expect(data?.adds).toBe(500);
+      const r = await rpc<Results>("boss_results_json", {
+        p_event: event,
+        p_uids: [a],
+      });
+      expect(r.awards[0].winner?.damage).toBe(500);
     });
 
-    it("the statue is the top contributor still in, of a boss that fell", async () => {
+    it("the statue is each award's winner still in, of a boss that fell", async () => {
       const event = await spawnBoss(0, 100);
-      const [a, b] = [await player(), await player()];
-      await lock(event, [a, b], 100);
-      // b out-hit a, then gave up: the statue is a's.
-      await rpc("apply_boss_damage_batch", {
-        p_batch: `dmg:${crypto.randomUUID()}`,
-        p_event: event,
-        p_damage: [{ uid: b, damage: 90 }],
-      });
+      const a = await player({ class: "record_slinger" });
+      const b = await player({ class: "record_slinger" });
+      const t = await player({ class: "percussionist" });
+      const s = await player({ class: "bard" });
+      await lock(event, [a, b, t, s], 100);
+      // b out-hit a, then gave up: Big Hitter is a's.
+      await report(event, [
+        { uid: b, damage: 90 },
+        { uid: t, damage: 0, blocked: 5, taunt: 40 },
+        { uid: s, damage: 0, healing: 30 },
+      ]);
       await rpc("mark_boss_out", { p_event: event, p_uids: [b] });
-      await rpc("apply_boss_damage_batch", {
-        p_batch: `dmg:${crypto.randomUUID()}`,
-        p_event: event,
-        p_damage: [{ uid: a, damage: 200 }],
+      await report(event, [{ uid: a, damage: 100_000 }]);
+      expect((await state(event)).killed).toBe(true);
+      const champions = await rpc<Champions>("boss_champion_json", {
+        p_skip: [],
       });
-      const champ = await rpc<{ event: string; name: string }>(
-        "boss_champion_json",
-        {
-          p_skip: [],
-        },
-      );
-      expect(champ.event).toBe(event);
-      const { data } = await admin()
-        .from("herzies")
-        .select("name")
-        .eq("user_id", a)
-        .single();
-      expect(champ.name).toBe(data?.name);
+      expect(champions.dps?.event).toBe(event);
+      expect(await statue()).toEqual({
+        dps: await nameOf(a),
+        tank: await nameOf(t),
+        support: await nameOf(s),
+      });
+    });
+
+    it("a role nobody won keeps the last fight's winner up", async () => {
+      const first = await spawnBoss(0, 100);
+      const a = await player({ class: "record_slinger" });
+      const t = await player({ class: "percussionist" });
+      await lock(first, [a, t], 100);
+      await report(first, [{ uid: t, damage: 0, taunt: 40 }]);
+      await report(first, [{ uid: a, damage: 100_000 }]);
+      // Over, so the next can be spawned.
+      await admin().from("events").update({ active: false }).eq("id", first);
+
+      const second = await spawnBoss(0, 100);
+      const a2 = await player({ class: "record_slinger" });
+      await lock(second, [a2], 100);
+      await report(second, [{ uid: a2, damage: 100_000 }]);
+      expect((await state(second)).killed).toBe(true);
+
+      expect(await statue()).toEqual({
+        dps: await nameOf(a2),
+        tank: await nameOf(t),
+        support: null,
+      });
+      // Who's skipped never goes up: their role falls back to an older fight.
+      expect((await statue([a2])).dps).toBe(await nameOf(a));
     });
 
     it("a wiped fight puts nobody on the statue", async () => {
       const event = await spawnBoss();
       const a = await player();
       await lock(event, [a]);
-      await rpc("apply_boss_damage_batch", {
-        p_batch: `dmg:${crypto.randomUUID()}`,
-        p_event: event,
-        p_damage: [{ uid: a, damage: 10 }],
-      });
+      await report(event, [{ uid: a, damage: 10 }]);
       await rpc("wipe_boss_fight", { p_event: event });
-      expect(await rpc("boss_champion_json", { p_skip: [] })).toBeNull();
+      expect(await statue()).toEqual({ dps: null, tank: null, support: null });
+    });
+
+    it("an award's first win grants its title, and Showstopper", async () => {
+      const event = await spawnBoss(0, 100);
+      const a = await player({ class: "record_slinger" });
+      const b = await player({ class: "record_slinger" });
+      const t = await player({ class: "percussionist" });
+      const s = await player({ class: "bard" });
+      await lock(event, [a, b, t, s], 100);
+      await report(event, [
+        { uid: b, damage: 10 },
+        { uid: t, damage: 0, blocked: 5 },
+        { uid: s, damage: 0, healing: 30 },
+      ]);
+      await report(event, [{ uid: a, damage: 100_000 }]);
+      await rpc("settle_boss_fight", { p_event_id: event });
+      const { data } = await admin()
+        .from("herzie_titles")
+        .select("user_id, title_id")
+        .in("user_id", [a, b, t, s])
+        .like("title_id", "boss-%");
+      const titles = (uid: string) =>
+        (data ?? [])
+          .filter((r) => r.user_id === uid)
+          .map((r) => r.title_id)
+          .sort();
+      expect(titles(a)).toEqual(["boss-big-hitter", "boss-top"]);
+      expect(titles(t)).toEqual(["boss-soundproof", "boss-top"]);
+      expect(titles(s)).toEqual(["boss-lifesaver", "boss-top"]);
+      expect(titles(b)).toEqual([]);
+      const metrics = await rpc<Record<string, number>>("title_metrics", {
+        p_user: a,
+      });
+      expect(metrics).toMatchObject({
+        bossTops: 1,
+        bossBigHitter: 1,
+        bossSoundproof: 0,
+        bossLifesaver: 0,
+      });
+    });
+  });
+
+  describe("the end screen (00168)", () => {
+    it("a herzie wins one award: the one it leads by more", async () => {
+      const event = await spawnBoss();
+      const x = await player({ class: "record_slinger" });
+      const y = await player({ class: "record_slinger" });
+      const z = await player({ class: "bard" });
+      await lock(event, [x, y, z]);
+      // x leads Big Hitter with 75% and ties z on Lifesaver at 50%.
+      await report(event, [
+        { uid: x, damage: 300, healing: 50 },
+        { uid: y, damage: 100 },
+        { uid: z, damage: 0, healing: 50 },
+      ]);
+      const r = await rpc<Results>("boss_results_json", {
+        p_event: event,
+        p_uids: [x, y, z],
+      });
+      expect(r.awards.map((a) => a.role)).toEqual(["dps", "tank", "support"]);
+      expect(r.awards[0].winner?.name).toBe(await nameOf(x));
+      expect(r.awards[0].winner?.share).toBe(0.75);
+      expect(r.awards[1]).toEqual({ role: "tank", winner: null, top: [] });
+      expect(r.awards[2].winner?.name).toBe(await nameOf(z));
+      expect(r.awards[2].top).toHaveLength(2);
+      expect(r.you[x]).toMatchObject({ role: "dps", won: true, of: 2 });
+      expect(r.you[y]).toMatchObject({
+        role: "dps",
+        won: false,
+        of: 2,
+        place: { rank: 2, damage: 100 },
+      });
+      expect(r.you[z]).toMatchObject({ role: "support", won: true, of: 2 });
+    });
+
+    it("counts a tank's held seconds and blocks, in whole numbers", async () => {
+      const event = await spawnBoss();
+      const t = await player({ class: "percussionist" });
+      const d = await player({ class: "record_slinger" });
+      await lock(event, [t, d]);
+      const perSecond = tauntPointsPerSecond((await state(event)).max_hp, 2);
+      await report(event, [
+        { uid: t, damage: 0, blocked: 2.4, taunt: 3 * perSecond },
+        { uid: d, damage: 12.6 },
+      ]);
+      const r = await rpc<Results>("boss_results_json", {
+        p_event: event,
+        p_uids: [t],
+      });
+      expect(r.awards[1].winner).toMatchObject({
+        rank: 1,
+        share: 1,
+        damage: 0,
+        healed: 0,
+        blocked: 2,
+        tanked: 3,
+      });
+      expect(r.awards[0].top[0].damage).toBe(13);
+      expect(r.you[t]).toMatchObject({ role: "tank", won: true, of: 1 });
+      expect(Object.keys(r.you)).toEqual([t]);
     });
   });
 
@@ -579,21 +745,19 @@ describe("the cave raid: production pass", () => {
     const a = await player();
     const b = await player({ hp: 0, down: true });
     await lock(event, [a, b]);
-    await rpc("apply_boss_damage_batch", {
-      p_batch: `dmg:${crypto.randomUUID()}`,
-      p_event: event,
-      p_damage: [
-        { uid: a, damage: 10 },
-        { uid: b, damage: 500 },
-      ],
-    });
+    await report(event, [
+      { uid: a, damage: 10 },
+      { uid: b, damage: 500 },
+    ]);
     await rpc("mark_boss_out", { p_event: event, p_uids: [b] });
-    const r = await rpc<{ top: { name: string; rank: number }[] }>(
-      "boss_results_json",
-      { p_event: event, p_uids: [a, b] },
-    );
-    expect(r.top).toHaveLength(1);
-    expect(r.top[0].rank).toBe(1);
+    const r = await rpc<Results>("boss_results_json", {
+      p_event: event,
+      p_uids: [a, b],
+    });
+    expect(r.awards[0].top).toHaveLength(1);
+    expect(r.awards[0].top[0].rank).toBe(1);
+    expect(r.awards[0].winner?.name).toBe(await nameOf(a));
+    expect(Object.keys(r.you)).toEqual([a]);
   });
 
   it("the lock caps the roster at forty", async () => {

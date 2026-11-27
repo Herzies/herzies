@@ -25,8 +25,16 @@
 >   paid. Someone who dropped counts as standing for 15 s (60 s after a room
 >   restart), never through the hard enrage.
 > - *Over:* a kill pays everyone still in (standing or down) alike: the reward
->   plus ten loot rolls. The statue goes to the top contributor of a fight that
->   was won, among those still in. An escape or a wipe pays nothing.
+>   plus ten loot rolls. An escape or a wipe pays nothing.
+> - *Awards* (migration 00168, `combat.ts` awardPoints/rankAwards/
+>   pickAwardWinners): no single ranking. Each role is ranked on its own
+>   work, never against another: **Big Hitter** (boss and minion damage),
+>   **Soundproof** (Taunt time, in points, plus 10× what a Cymbrella blocked),
+>   **Lifesaver** (healing). Its best wins each, one award a herzie (the one it
+>   led by the biggest share). The end screen reveals the three and your own
+>   result; the statue shows the three winners of the last fight that was won
+>   (a role nobody played keeps its last winner). Each award's first win
+>   earns its title; any award earns Showstopper.
 >
 > **The boss.**
 > - It walks (1.5 m/s) toward its focus inside a 4.5 m circle around (0, −2),
@@ -47,8 +55,8 @@
 >   Spread out.
 > - Slam counts use weighted rounding: no breakpoints.
 > - At 50% and 25% health it calls Thornlings (the Tower's mobs, `MobPack`), about
->   one per two herzies, at 75% of the raid's level. Damage to them counts toward
->   contribution (`boss_damage.adds`) and never touches the boss's health. While
+>   one per two herzies, at 75% of the raid's level. Damage to them counts for
+>   Big Hitter (`boss_damage.adds`) and never touches the boss's health. While
 >   they're up, it swings a little less. They keep its rules: no tell under 1 s,
 >   at most two of their shapes on the floor, and a taunt pulls them too.
 > - Soft enrage at 10 min: pace and damage +10% every 30 s. Hard enrage at
@@ -76,7 +84,7 @@
 > minions (a call and a puff each), the enrage (it glows red), a wipe. Its body
 > rears as its own attack fills. Hits flash it; a crit holds the world still
 > for 60 ms. The HP bar has a delayed white chip, phase and minion marks, and
-> the phase. You see your own contribution and rank (`tally`, every 2 s), your
+> the phase. You see your own place in your own role (`standing`, every 2 s), your
 > Rattled stacks, and a Bard bringing you back. Camera shake is off under
 > reduced motion.
 >
