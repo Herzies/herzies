@@ -6,6 +6,7 @@ import { useFrame } from "@react-three/fiber";
 import { CuboidCollider } from "@react-three/rapier";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { ambient } from "./ambient";
 import type { Champion, Champions } from "./champion";
 import { homeMode } from "./homeMode";
@@ -17,11 +18,13 @@ export type { Champion, Champions } from "./champion";
 
 const PLINTH_HEIGHT = 0.7;
 const STATUE_SCALE = 1.4;
-/** From one winner to the next along the plinth. */
-const SPACING = 1.5;
-/** The plinth: room for three, side by side; its cap a little bigger. */
-const PLINTH_WIDTH = 2 * SPACING + 1.15;
-const PLINTH_DEPTH = 1.15;
+/** From the middle of the plinth to each winner: three at the corners of
+ * a triangle, a good stride apart. */
+const RING = 1.3;
+/** The plinth: a square with room for the triangle; its cap a little
+ * bigger. */
+const PLINTH_WIDTH = 3.5;
+const PLINTH_DEPTH = PLINTH_WIDTH;
 const CAP_WIDTH = PLINTH_WIDTH + 0.15;
 const CAP_DEPTH = PLINTH_DEPTH + 0.15;
 const plinthGeometry = new THREE.BoxGeometry(
@@ -39,6 +42,81 @@ const capMaterial = new THREE.MeshLambertMaterial({
   color: "#a9a49b",
   flatShading: true,
 });
+
+/** The chain fence round the plinth: this far out from its middle, a
+ * little way out from the cap. */
+const FENCE_HALF = CAP_WIDTH / 2 + 0.55;
+const POST_HEIGHT = 0.75;
+/** Where the chain hangs from a post, and how far it sags mid-span. */
+const CHAIN_Y = 0.62;
+const CHAIN_SAG = 0.14;
+/** One link's length along the chain. */
+const LINK_LENGTH = 0.1;
+const fenceMaterial = new THREE.MeshLambertMaterial({
+  color: "#34343a",
+  flatShading: true,
+});
+
+/** The fence, in the statue's own space: iron posts at the corners and the
+ * middle of each side, each on a little foot with a ball on top, and a
+ * chain sagging from one to the next, its links turned alternately flat
+ * and upright. One geometry, one draw. */
+function fenceGeometry(): THREE.BufferGeometry {
+  const f = FENCE_HALF;
+  const posts: [number, number][] = [
+    [-f, -f],
+    [0, -f],
+    [f, -f],
+    [f, 0],
+    [f, f],
+    [0, f],
+    [-f, f],
+    [-f, 0],
+  ];
+  const parts: THREE.BufferGeometry[] = [];
+  for (const [x, z] of posts) {
+    parts.push(
+      new THREE.CylinderGeometry(0.11, 0.13, 0.06, 6).translate(x, 0.03, z),
+      new THREE.CylinderGeometry(0.04, 0.05, POST_HEIGHT, 6).translate(
+        x,
+        POST_HEIGHT / 2,
+        z,
+      ),
+      new THREE.SphereGeometry(0.065, 8, 6).translate(x, POST_HEIGHT + 0.03, z),
+    );
+  }
+  const link = new THREE.TorusGeometry(0.032, 0.01, 4, 8).scale(1.4, 1, 1);
+  const up = new THREE.Vector3(0, 1, 0);
+  const along = new THREE.Vector3();
+  const across = new THREE.Vector3();
+  const out = new THREE.Vector3();
+  const m = new THREE.Matrix4();
+  posts.forEach(([ax, az], i) => {
+    const [bx, bz] = posts[(i + 1) % posts.length];
+    const n = Math.round(Math.hypot(bx - ax, bz - az) / LINK_LENGTH);
+    for (let k = 0; k < n; k++) {
+      const t = (k + 0.5) / n;
+      // A parabola: near enough a hanging chain at this sag.
+      along.set(bx - ax, -4 * CHAIN_SAG * (1 - 2 * t), bz - az).normalize();
+      out.crossVectors(along, up).normalize();
+      // Every other link turned a quarter round the chain.
+      if (k % 2) across.copy(out);
+      else across.crossVectors(out, along);
+      m.makeBasis(along, across, out.crossVectors(along, across));
+      m.setPosition(
+        ax + (bx - ax) * t,
+        CHAIN_Y - 4 * CHAIN_SAG * t * (1 - t),
+        az + (bz - az) * t,
+      );
+      parts.push(link.clone().applyMatrix4(m));
+    }
+  });
+  link.dispose();
+  const merged = mergeGeometries(parts) as THREE.BufferGeometry;
+  for (const p of parts) p.dispose();
+  return merged;
+}
+const fence = fenceGeometry();
 
 /** Every statue: [x, z, heading, the ground it stands on]. */
 export function statueSpots(map: TownMap): [number, number, number, number][] {
@@ -59,10 +137,11 @@ export function statueSpots(map: TownMap): [number, number, number, number][] {
   return spots;
 }
 
-/** One statue: the three award winners in stone on one wide plinth,
- * facing the middle of town (or the way it was turned) — Big Hitter on
- * the left as you face it, Soundproof in the middle, Lifesaver on the
- * right — each with a plaque. A role with nobody leaves its place empty. */
+/** One statue: the three award winners in stone on one square plinth,
+ * back to back in a triangle, each facing its own way, roped off with a
+ * chain. Soundproof faces the middle of town (or the way it was turned);
+ * Big Hitter stands back on the left as you face it, Lifesaver back on the
+ * right; each with a plaque. A role with nobody leaves its place empty. */
 function Statue({
   at: [x, z, heading, y],
   champions,
@@ -87,21 +166,23 @@ function Statue({
           castShadow
           receiveShadow
         />
+        <mesh geometry={fence} material={fenceMaterial} castShadow />
       </group>
       {AWARD_ROLES.map((role, i) => {
         const champion = champions[role];
-        // Along the plinth, to the right as you face it (its heading
-        // turned a quarter).
-        const along = (i - 1) * SPACING;
+        // A third of a turn apart, each facing out from the middle: Big
+        // Hitter a third to the left, Soundproof straight on, Lifesaver a
+        // third to the right.
+        const facing = heading + ((i - 1) * 2 * Math.PI) / 3;
         return champion ? (
           <Winner
             key={role}
             role={role}
             champion={champion}
             at={[
-              x + along * Math.cos(heading),
-              z - along * Math.sin(heading),
-              heading,
+              x + RING * Math.sin(facing),
+              z + RING * Math.cos(facing),
+              facing,
               y,
             ]}
           />
@@ -194,7 +275,7 @@ export function Statues({
   );
 }
 
-/** A statue is solid: plinth and all. */
+/** A statue is solid out to its fence. */
 export function StatueColliders({ map }: { map: TownMap }) {
   const spots = useMemo(() => statueSpots(map), [map]);
   return (
@@ -202,7 +283,7 @@ export function StatueColliders({ map }: { map: TownMap }) {
       {spots.map(([x, z, heading, y]) => (
         <CuboidCollider
           key={`s${x},${z}`}
-          args={[CAP_WIDTH / 2, 1, CAP_DEPTH / 2]}
+          args={[FENCE_HALF, 1, FENCE_HALF]}
           position={[x, y + 1, z]}
           rotation={[0, heading, 0]}
         />
